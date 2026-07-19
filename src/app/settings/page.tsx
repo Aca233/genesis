@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type SlotForm = {
   provider: "openai-compatible" | "anthropic" | "gemini";
@@ -142,6 +143,7 @@ function SlotEditor({
 }
 
 export default function SettingsPage() {
+  const router = useRouter();
   const [narrative, setNarrative] = useState<SlotForm>(EMPTY_SLOT);
   const [backstage, setBackstage] = useState<SlotForm | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -240,6 +242,15 @@ export default function SettingsPage() {
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-6 py-12">
       <header className="mb-8">
+        <button
+          onClick={() => {
+            if (window.history.length > 1) router.back();
+            else router.push("/");
+          }}
+          className="mb-4 text-sm text-ink-faint transition hover:text-gilt"
+        >
+          ← 归返
+        </button>
         <h1
           className="text-3xl text-ink"
           style={{ fontFamily: "var(--font-display)" }}

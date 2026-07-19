@@ -81,10 +81,10 @@ export function StoryStream({
   }, [messages, streamingText, rerollingText, scrollToBottom]);
 
   return (
-    <div className="pb-4 pt-10">
+    <div className="pb-4 pt-2">
       {/* 前章残页（淡墨） */}
       {prevTail.length > 0 && (
-        <section className="mb-10">
+        <section className="mb-6">
           <p className="mb-2 text-center text-xs tracking-widest text-ink-faint/70">
             ── 前章残页 ──
           </p>
@@ -95,14 +95,14 @@ export function StoryStream({
       )}
 
       {/* 章头 */}
-      <header className="mb-10 text-center">
+      <header className="mb-6 text-center">
         <h2
           className="text-2xl text-ink"
           style={{ fontFamily: "var(--font-display)" }}
         >
           第{cnNum(chapterIndex)}章{chapterTitle ? ` · ${chapterTitle}` : ""}
         </h2>
-        <p className="mt-3 select-none text-sm tracking-[0.4em] text-gilt/60">
+        <p className="mt-2 select-none text-sm tracking-[0.4em] text-gilt/60">
           ──── ◆ ────
         </p>
       </header>

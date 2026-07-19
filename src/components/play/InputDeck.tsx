@@ -66,7 +66,7 @@ export function InputDeck({
   }
 
   return (
-    <div className="sticky bottom-0 z-30 mx-auto w-full max-w-2xl px-4 pb-4">
+    <div className="sticky bottom-0 z-30 mx-auto w-full max-w-3xl px-4 pb-3 xl:max-w-4xl">
       {/* 翻章提示（淡金细线，仅样式） */}
       {chapterBreakHint && !busy && (
         <div className="mb-1 border-t border-gilt/40 pt-1 text-center text-xs text-gilt/70">

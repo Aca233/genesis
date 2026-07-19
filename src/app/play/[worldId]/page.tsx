@@ -259,8 +259,8 @@ export default function PlayPage({
 
   return (
     <main className="relative flex min-h-screen flex-col">
-      {/* 世界名（页眉淡墨） */}
-      <header className="pointer-events-none sticky top-0 z-20 bg-gradient-to-b from-[var(--paper)] via-[var(--paper)]/80 to-transparent px-6 pb-4 pt-3 text-center">
+      {/* 世界名（页眉淡墨，紧凑） */}
+      <header className="pointer-events-none sticky top-0 z-20 bg-gradient-to-b from-[var(--paper)] via-[var(--paper)]/80 to-transparent px-6 pb-2 pt-2 text-center">
         <span
           className="pointer-events-auto text-sm tracking-widest text-ink-faint"
           style={{ fontFamily: "var(--font-display)" }}
@@ -269,8 +269,8 @@ export default function PlayPage({
         </span>
       </header>
 
-      {/* 书页正文（中央限宽） */}
-      <div className="mx-auto w-full max-w-2xl flex-1 px-6 max-sm:pb-16">
+      {/* 书页正文（中央限宽，大屏加宽） */}
+      <div className="mx-auto w-full max-w-3xl flex-1 px-6 max-sm:pb-16 xl:max-w-4xl">
         <StoryStream
           chapterIndex={state.currentChapter.index}
           chapterTitle={state.currentChapter.title}

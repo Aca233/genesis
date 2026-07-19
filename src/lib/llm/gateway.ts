@@ -82,7 +82,25 @@ async function logCall(
   }
 }
 
-/** 非流式补全（世界生成/诸神回合/抽取/压缩） */
+/** 以流式请求聚合出全文（多数中转站只稳定支持流式，故这是默认路径） */
+async function collectStream(
+  adapter: (typeof adapters)[keyof typeof adapters],
+  slot: ModelSlot,
+  req: CompletionRequest,
+  apiKey: string,
+): Promise<string> {
+  let text = "";
+  for await (const chunk of adapter.stream(slot, req, apiKey)) {
+    if (chunk.type === "text") text += chunk.text;
+  }
+  if (!text.trim()) throw new Error("流式响应为空");
+  return text;
+}
+
+/**
+ * 非流式任务补全（世界生成/诸神回合/抽取/压缩/连接测试）。
+ * 底层优先走流式聚合（中转站兼容性最好），流式彻底失败后回落一次非流式。
+ */
 export async function complete(
   slotName: SlotName,
   req: CompletionRequest,
@@ -94,7 +112,7 @@ export async function complete(
   let lastError: unknown;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const text = await adapter.complete(slot, req, apiKey);
+      const text = await collectStream(adapter, slot, req, apiKey);
       await logCall(req.task, used, startedAt, true);
       return text;
     } catch (err) {
@@ -103,9 +121,18 @@ export async function complete(
       await backoff(attempt);
     }
   }
-  const message = lastError instanceof Error ? lastError.message : String(lastError);
-  await logCall(req.task, used, startedAt, false, message);
-  throw lastError;
+
+  // 流式失败 → 回落非流式再试一次（个别网关只支持非流式）
+  try {
+    const text = await adapter.complete(slot, req, apiKey);
+    await logCall(req.task, used, startedAt, true);
+    return text;
+  } catch (fallbackErr) {
+    const message =
+      lastError instanceof Error ? lastError.message : String(lastError ?? fallbackErr);
+    await logCall(req.task, used, startedAt, false, message);
+    throw lastError ?? fallbackErr;
+  }
 }
 
 /** 流式补全（正文叙事）。流中途出错不重试（避免正文重复），直接抛出。 */
@@ -127,25 +154,28 @@ export async function* stream(
   }
 }
 
-/** 「试炼一问」连接测试：直接用传入槽位（未落库前验证），不走重试 */
+/** 「试炼一问」连接测试：直接用传入槽位（未落库前验证），流式聚合，不走重试 */
 export async function testSlot(slot: ModelSlot, apiKey: string): Promise<string> {
   const adapter = adapters[slot.provider];
   const startedAt = Date.now();
-  try {
-    const text = await adapter.complete(
-      slot,
+  const req: CompletionRequest = {
+    task: "test",
+    maxTokens: 64,
+    messages: [
       {
-        task: "test",
-        maxTokens: 64,
-        messages: [
-          {
-            role: "user",
-            content: "请只回答四个字：试炼已过",
-          },
-        ],
+        role: "user",
+        content: "请只回答四个字：试炼已过",
       },
-      apiKey,
-    );
+    ],
+  };
+  try {
+    let text: string;
+    try {
+      text = await collectStream(adapter, slot, req, apiKey);
+    } catch {
+      // 流式失败回落非流式（个别网关只支持其一）
+      text = await adapter.complete(slot, req, apiKey);
+    }
     await logCall("test", "narrative", startedAt, true);
     return text;
   } catch (err) {
