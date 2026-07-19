@@ -34,7 +34,7 @@ export async function POST(request: Request) {
   const chapter = await prisma.chapter.findUnique({
     where: { id: chapterId },
     include: {
-      timeline: { select: { worldId: true } },
+      timeline: { select: { id: true, worldId: true } },
       messages: { orderBy: { index: "desc" }, take: 1 },
     },
   });
@@ -97,6 +97,17 @@ export async function POST(request: Request) {
           meta: meta as unknown as Prisma.InputJsonValue,
         },
       });
+      // 查探裁决回填：揭示的隐藏大事记翻转为可见，标注揭晓章
+      if (meta.revealedEventIds?.length) {
+        await prisma.chronicleEntry.updateMany({
+          where: {
+            id: { in: meta.revealedEventIds },
+            timelineId: chapter.timeline.id,
+            revealed: false,
+          },
+          data: { revealed: true, revealedAtChapter: chapter.index },
+        });
+      }
       return { messageId: saved.id };
     },
   });

@@ -10,10 +10,12 @@ import type { Scale } from "@/lib/cards/schemas";
 export const META_START = "<<<META";
 export const META_END = "META>>>";
 
-/** 尾部结构化块（M1 仅两个字段；M2 扩展 revealed_event_ids 等） */
+/** 尾部结构化块 */
 export type NarratorMeta = {
   suggestions: string[];
   chapterBreakHint: boolean;
+  /** 查探裁决：本轮揭示的隐藏大事记 id */
+  revealedEventIds?: string[];
 };
 
 const EMPTY_META: NarratorMeta = { suggestions: [], chapterBreakHint: false };
@@ -41,9 +43,16 @@ export function splitMetaBlock(full: string): { prose: string; meta: NarratorMet
           .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
           .slice(0, 4)
       : [];
+    const revealedEventIds = Array.isArray(json.revealed_event_ids)
+      ? json.revealed_event_ids.filter((s): s is string => typeof s === "string")
+      : undefined;
     return {
       prose,
-      meta: { suggestions, chapterBreakHint: json.chapterBreakHint === true },
+      meta: {
+        suggestions,
+        chapterBreakHint: json.chapterBreakHint === true,
+        ...(revealedEventIds?.length ? { revealedEventIds } : {}),
+      },
     };
   } catch {
     return { prose, meta: EMPTY_META };
@@ -90,9 +99,10 @@ function outputContract(): string {
   return `OUTPUT CONTRACT (strict):
 1) Write the narrative prose in Chinese.
 2) After the prose, on a NEW line, output exactly: ${META_START}
-3) Then output ONE JSON object: {"suggestions": ["…", "…"], "chapterBreakHint": false}
+3) Then output ONE JSON object: {"suggestions": ["…", "…"], "chapterBreakHint": false, "revealed_event_ids": []}
    - suggestions: 2-4 SHORT Chinese action options the player god might plausibly take next (in-fiction, first person optional).
    - chapterBreakHint: true ONLY when a major scene shift or large time jump makes this a natural chapter break; otherwise false.
+   - revealed_event_ids: ids of hidden chronicle entries you revealed this reply (only when an INVESTIGATION ADJUDICATION block was provided; otherwise omit or []).
 4) Close with a final line: ${META_END}
 Nothing may follow ${META_END}. Never mention or explain this block inside the prose.`;
 }
@@ -115,6 +125,10 @@ export function narratorSystem(opts: {
     persona: unknown;
     faithScope: string | null;
   } | null;
+  /** 未消费征兆（诸神幕后行动的世间回声）——至多织入 1-2 条，绝不点破 */
+  omens?: string[];
+  /** 玩家查探命中的隐藏大事记（id: 文本），由模型裁决揭示程度 */
+  hiddenEntries?: { id: string; text: string; godName: string }[];
 }): string {
   const blocks: string[] = [coreRules(opts.worldName)];
 
@@ -142,13 +156,21 @@ export function narratorSystem(opts: {
 
   blocks.push(`== CURRENT SCALE ==\n${SCALE_RULES[opts.scale]}`);
 
-  // ── M2 结构位：征兆队列（OMENS）──
-  // 诸神回合产出的未消费征兆将注入于此，要求每回复至多织入 1–2 条、
-  // 润物细无声——不打标记、不解释（docs/04 §2 OMENS 规则）。M1 暂无。
+  // ── 征兆队列（OMENS）：诸神幕后行动的世间回声 ──
+  if (opts.omens?.length) {
+    blocks.push(`== PENDING OMENS (offstage divine actions' worldly echoes) ==
+Weave AT MOST 1-2 of these into your reply as passing, unexplained details — a dimmed votive fire, an odd tide, a priest's uneasy dream. NEVER flag them, NEVER explain them, NEVER attribute them to a god. They must read as ordinary texture of the world:
+${opts.omens.map((o, i) => `${i + 1}. ${o}`).join("\n")}`);
+  }
 
-  // ── M2 结构位：查探裁决（INVESTIGATION）──
-  // 玩家占卜/窥探/审问命中隐藏编年史条目时注入并附 id，由模型按角色内
-  // 合理性裁决揭示程度，并在 META 回填 revealed_event_ids。M1 暂无。
+  // ── 查探裁决（INVESTIGATION）──
+  if (opts.hiddenEntries?.length) {
+    blocks.push(`== INVESTIGATION ADJUDICATION ==
+The player god is actively probing (divination / insight / interrogation). The following HIDDEN chronicle entries match their probe. Adjudicate by in-fiction plausibility of their method and power:
+- full reveal, partial glimpse, or a misleading fragment — your call, but something must come back.
+- List the ids of entries you revealed (fully or partially) in the META block's "revealed_event_ids".
+${opts.hiddenEntries.map((e) => `[${e.id}] (${e.godName}) ${e.text}`).join("\n")}`);
+  }
 
   blocks.push(outputContract());
   return blocks.join("\n\n");

@@ -132,6 +132,140 @@ function proseWindow(
   return kept.join("\n\n");
 }
 
+/** 查探语义检测：占卜/洞察/审问/窥探/追查（角色内主动揭雾手段） */
+const PROBE_RE =
+  /占卜|卜算|窥探|洞察|洞见|审问|拷问|追查|探查|查探|侦查|神览|天眼|推演|感知.{0,6}(真相|幕后|阴谋)|谁在(背后|暗中)/;
+
+/** 消费征兆队列：取未消费的至多 3 条并标记消费（叙事一次机会织入） */
+async function consumeOmens(
+  timelineId: string,
+): Promise<{ texts: string[] }> {
+  const omens = await prisma.omenQueue.findMany({
+    where: { timelineId, consumed: false },
+    orderBy: { createdAt: "asc" },
+    take: 3,
+  });
+  if (omens.length) {
+    await prisma.omenQueue.updateMany({
+      where: { id: { in: omens.map((o) => o.id) } },
+      data: { consumed: true },
+    });
+  }
+  return { texts: omens.map((o) => o.text) };
+}
+
+/** 查探命中：玩家在查探时，检索隐藏大事记供裁决 */
+async function hiddenEntriesForProbe(
+  timelineId: string,
+  probeText: string,
+): Promise<{ id: string; text: string; godName: string }[]> {
+  if (!PROBE_RE.test(probeText)) return [];
+  const [hidden, gods] = await Promise.all([
+    prisma.chronicleEntry.findMany({
+      where: { timelineId, revealed: false },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    }),
+    prisma.god.findMany({
+      where: { timelineId },
+      select: { id: true, name: true },
+    }),
+  ]);
+  if (!hidden.length) return [];
+  const godName = new Map(gods.map((g) => [g.id, g.name]));
+
+  // 命中优先：查探文本点名的神/实体相关条目在前，其余按新近度补足
+  const named = hidden.filter((h) =>
+    h.godIds.some((gid) => {
+      const n = godName.get(gid);
+      return n && probeText.includes(n);
+    }),
+  );
+  const rest = hidden.filter((h) => !named.includes(h));
+  return [...named, ...rest].slice(0, 6).map((h) => ({
+    id: h.id,
+    text: h.text,
+    godName: h.godIds.map((g) => godName.get(g) ?? "?").join("、") || "未知",
+  }));
+}
+
+/** 实体状态卡注入：在场实体强制 + 命中实体（名字/别名出现在检索文本中） */
+async function entityCardsBlock(
+  timelineId: string,
+  searchText: string,
+): Promise<string | null> {
+  const entities = await prisma.entity.findMany({
+    where: { timelineId },
+    include: { sections: true },
+  });
+  if (!entities.length) return null;
+
+  const present = entities.filter((e) => e.scenePresence);
+  const mentioned = entities.filter(
+    (e) =>
+      !e.scenePresence &&
+      [e.name, ...e.aliases].some((n) => n && searchText.includes(n)),
+  );
+
+  const BUDGET = 6000;
+  let used = 0;
+  const blocks: string[] = [];
+  // 在场实体全卡 > 命中实体（active 全卡 / dormant 摘要）
+  for (const e of [...present, ...mentioned]) {
+    const full = e.heat === "active" || e.isChosen;
+    const secs = full
+      ? e.sections
+          .filter((s) => s.revealed)
+          .map((s) => {
+            const text =
+              typeof s.content === "object" && s.content !== null
+                ? ((s.content as Record<string, unknown>).text ?? "")
+                : "";
+            return `  ${s.key}: ${text}`;
+          })
+          .join("\n")
+      : "";
+    const card = `--- ${e.name}(${e.type})${e.isChosen ? "【神选者】" : ""}${e.scenePresence ? "【在场】" : ""} ---\n${e.summary}${secs ? `\n${secs}` : ""}`;
+    if (used + card.length > BUDGET) break;
+    blocks.push(card);
+    used += card.length;
+  }
+  if (!blocks.length) return null;
+  return `CODEX CARDS (established facts — stay consistent; chosen ones' fates matter):\n\n${blocks.join("\n\n")}`;
+}
+
+/** 相关编年史注入：命中实体的近期已揭示条目 */
+async function chronicleBlock(
+  timelineId: string,
+  searchText: string,
+): Promise<string | null> {
+  const entries = await prisma.chronicleEntry.findMany({
+    where: { timelineId, revealed: true },
+    orderBy: { createdAt: "desc" },
+    take: 60,
+  });
+  if (!entries.length) return null;
+  const entities = await prisma.entity.findMany({
+    where: { timelineId },
+    select: { id: true, name: true, aliases: true },
+  });
+  const hitIds = new Set(
+    entities
+      .filter((e) => [e.name, ...e.aliases].some((n) => n && searchText.includes(n)))
+      .map((e) => e.id),
+  );
+  const related = entries
+    .filter((c) => c.entityIds.some((id) => hitIds.has(id)))
+    .slice(0, 8);
+  // 兜底：最近 4 条全局编年史保证时间连续感
+  const recent = entries.slice(0, 4);
+  const merged = [...new Map([...related, ...recent].map((c) => [c.id, c])).values()];
+  if (!merged.length) return null;
+  return `CHRONICLE (what history records so far):\n${merged
+    .map((c) => `[${c.yearLabel || `第${c.chapterIndex}章`}] ${c.text}`)
+    .join("\n")}`;
+}
+
 export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage[]> {
   const world = await prisma.world.findUnique({
     where: { id: opts.worldId },
@@ -167,7 +301,14 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
   });
   const playerGod = gods.find((g) => g.isPlayer) ?? null;
 
-  // ── system 1：narrator 模板 + 风格/主题/宇宙论/融合公理/玩家神/尺度 ──
+  // ── 征兆消费 + 查探检测 ──
+  const probeText = opts.playerInput ?? "";
+  const [omens, hiddenEntries] = await Promise.all([
+    consumeOmens(chapter.timelineId),
+    hiddenEntriesForProbe(chapter.timelineId, probeText),
+  ]);
+
+  // ── system 1：narrator 模板 + 风格/主题/宇宙论/融合公理/玩家神/尺度/征兆/查探 ──
   const system1 = narratorSystem({
     scale: opts.scale,
     worldName: world.name,
@@ -184,18 +325,26 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
           faithScope: playerGod.faithScope,
         }
       : null,
+    omens: omens.texts,
+    hiddenEntries,
   });
 
   // ── system 2：主神卡片集 ──
   const system2 = godsSystemBlock(gods.filter((g) => !g.isPlayer));
 
-  // ── system 3：世界书命中（playerInput + 最近 6 条消息文本） ──
+  // ── 检索文本（world书/实体卡/编年史共用） ──
   const windowMessages = [...prevTail, ...chapter.messages];
   const searchText = [
     opts.playerInput ?? "",
     ...windowMessages.slice(-RECENT_FOR_LORE).map((m) => m.content),
   ].join("\n");
+
+  // ── system 3：世界书 + 实体状态卡 + 相关编年史 ──
   const lore = lorebookBlock(world.lorebookEntries, searchText);
+  const [entityCards, chronicle] = await Promise.all([
+    entityCardsBlock(chapter.timelineId, searchText),
+    chronicleBlock(chapter.timelineId, searchText),
+  ]);
 
   // ── 正文窗口 + 本轮输入，拼成单条 user（防中转站丢多轮） ──
   const windowText = proseWindow(windowMessages);
@@ -215,7 +364,9 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
 
   const messages: ChatMessage[] = [{ role: "system", content: system1 }];
   messages.push({ role: "system", content: system2 });
+  if (entityCards) messages.push({ role: "system", content: entityCards });
   if (lore) messages.push({ role: "system", content: lore });
+  if (chronicle) messages.push({ role: "system", content: chronicle });
   messages.push({ role: "user", content: parts.join("\n\n") });
   return messages;
 }
