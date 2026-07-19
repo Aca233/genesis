@@ -181,6 +181,21 @@ const NARRATIVE =
   "锈月洲的夜空泛着青灰色的辉光。\n\n你在亚空间浅层睁开了目光——万千机修士的祈祷如齿轮般咬合，托举着你新生的位格。首席机正阿澈跪在圣所中央，她的义肢手臂上刻着你的徽记。\n\n「上尊，」她低声道，「北天剑宗的剑侍今夜第三次越过了界碑。」\n\n<<<META\n{\"suggestions\": [\"垂听阿澈的完整禀报\", \"以神念扫过界碑处的剑侍\", \"降下神谕安抚信众\"], \"chapterBreakHint\": false}\nMETA>>>";
 
 const server = http.createServer((req, res) => {
+  // 模型名录（GET /v1/models）
+  if (req.method === "GET" && req.url?.includes("/models")) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        data: [
+          { id: "mock-model" },
+          { id: "mock-model-pro" },
+          { id: "mock-model-flash" },
+        ],
+      }),
+    );
+    return;
+  }
+
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {

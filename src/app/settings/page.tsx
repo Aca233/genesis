@@ -21,7 +21,7 @@ const EMPTY_SLOT: SlotForm = {
 
 const PROVIDER_HINTS: Record<SlotForm["provider"], string> = {
   "openai-compatible":
-    "OpenAI 兼容协议（含各类中转站）。Base URL 通常以 /v1 结尾，如 https://api.example.com/v1",
+    "OpenAI 兼容协议（含各类中转站）。Base URL 通常以 /v1 结尾（如 https://api.example.com/v1）；漏写 /v1 时系统会自动尝试补全。",
   anthropic: "Anthropic 官方协议。Base URL 如 https://api.anthropic.com",
   gemini: "Google Gemini 协议。Base URL 如 https://generativelanguage.googleapis.com",
 };
@@ -30,6 +30,7 @@ function SlotEditor({
   title,
   subtitle,
   slot,
+  slotName,
   onChange,
   onTest,
   testing,
@@ -38,11 +39,50 @@ function SlotEditor({
   title: string;
   subtitle: string;
   slot: SlotForm;
+  /** 已保存槽位名（未填明文 key 时用已存密文取名录/试炼） */
+  slotName: "narrative" | "backstage";
   onChange: (s: SlotForm) => void;
   onTest: () => void;
   testing: boolean;
   testResult: { ok: boolean; text: string } | null;
 }) {
+  // 模型名录：取回的列表 + 筛选下拉
+  const [models, setModels] = useState<string[] | null>(null);
+  const [listing, setListing] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  async function fetchModels() {
+    if (listing || !slot.baseUrl) return;
+    setListing(true);
+    setListError(null);
+    try {
+      const res = await fetch("/api/settings/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: slot.provider,
+          baseUrl: slot.baseUrl,
+          ...(slot.apiKey ? { apiKey: slot.apiKey } : { useSaved: slotName }),
+        }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error ?? "取名录失败");
+      setModels(json.models);
+      setPickerOpen(true);
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setListing(false);
+    }
+  }
+
+  // 筛选：模型名输入即过滤
+  const filtered =
+    models?.filter((m) =>
+      m.toLowerCase().includes(slot.model.trim().toLowerCase()),
+    ) ?? [];
+
   return (
     <fieldset className="rounded-lg border border-line bg-paper-raised p-5">
       <legend
@@ -92,15 +132,64 @@ function SlotEditor({
         </label>
 
         <div className="grid grid-cols-2 gap-3">
-          <label className="grid gap-1 text-sm text-ink-soft">
-            模型名
+          <div className="relative grid content-start gap-1 text-sm text-ink-soft">
+            <span className="flex items-center justify-between">
+              模型名
+              <button
+                type="button"
+                onClick={() => void fetchModels()}
+                disabled={listing || !slot.baseUrl}
+                className="text-xs text-gilt/70 transition hover:text-gilt disabled:opacity-40"
+                title="从端点取回可用模型列表"
+              >
+                {listing ? "取名录中…" : "📜 取诸名录"}
+              </button>
+            </span>
             <input
               value={slot.model}
-              onChange={(e) => onChange({ ...slot, model: e.target.value })}
+              onChange={(e) => {
+                onChange({ ...slot, model: e.target.value });
+                if (models) setPickerOpen(true);
+              }}
+              onFocus={() => {
+                if (models) setPickerOpen(true);
+              }}
+              onBlur={() => setTimeout(() => setPickerOpen(false), 150)}
               placeholder="claude-sonnet-4-5 / gpt-4o / gemini-2.5-pro…"
               className="rounded-md border border-line bg-paper-sunken p-2 text-ink outline-none focus:border-gilt/60"
             />
-          </label>
+            {listError && (
+              <span className="text-xs text-cinnabar">{listError}</span>
+            )}
+            {/* 名录下拉（输入即筛选） */}
+            {pickerOpen && models && (
+              <div className="absolute top-full z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-line bg-paper-raised shadow-lg">
+                {filtered.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-ink-faint">
+                    名录中无匹配（共 {models.length} 个）
+                  </p>
+                ) : (
+                  filtered.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        onChange({ ...slot, model: m });
+                        setPickerOpen(false);
+                      }}
+                      className={`block w-full truncate px-3 py-1.5 text-left text-sm transition hover:bg-gilt/10 hover:text-gilt ${
+                        m === slot.model ? "text-gilt" : "text-ink"
+                      }`}
+                      title={m}
+                    >
+                      {m}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
           <label className="grid gap-1 text-sm text-ink-soft">
             温度（可选）
             <input
@@ -265,6 +354,7 @@ export default function SettingsPage() {
       <div className="grid gap-6">
         <SlotEditor
           title="叙事模型"
+          slotName="narrative"
           subtitle="主正文生成。建议使用你最好的模型。"
           slot={narrative}
           onChange={setNarrative}
@@ -277,6 +367,7 @@ export default function SettingsPage() {
           <div>
             <SlotEditor
               title="幕后模型"
+              slotName="backstage"
               subtitle="诸神回合、状态抽取、编年史压缩。可填便宜快的模型。"
               slot={backstage}
               onChange={setBackstage}
