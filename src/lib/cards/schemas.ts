@@ -37,7 +37,8 @@ export const RelationLabelSchema = z.enum([
   "unknown",  // 未知（星图不画线）
 ]);
 
-export const ScaleSchema = z.enum(["scene", "era", "epoch"]);
+/** 叙事尺度五档：瞬息/场景/数载/年代/纪元 */
+export const ScaleSchema = z.enum(["moment", "scene", "years", "era", "epoch"]);
 export type Scale = z.infer<typeof ScaleSchema>;
 
 // ───────────────────────── 单卡 ─────────────────────────

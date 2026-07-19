@@ -64,15 +64,15 @@ export function PlayDrawer({
             className="fixed inset-0 z-40 bg-ink/25"
             aria-hidden
           />
-          {/* 抽屉体 */}
+          {/* 抽屉体（右缘留出符文列宽度，不遮挡换页签） */}
           <motion.aside
             key="drawer"
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 320, damping: 34 }}
-            className="fixed right-0 top-0 z-50 flex h-full flex-col border-l border-line bg-paper shadow-2xl"
-            style={{ width: "min(40rem, 90vw)" }}
+            className="fixed right-0 top-0 z-50 flex h-full flex-col border-l border-line bg-paper pr-12 shadow-2xl max-sm:pb-14 max-sm:pr-0"
+            style={{ width: "min(43rem, 92vw)" }}
             role="dialog"
             aria-label={TAB_TITLES[tab]}
           >

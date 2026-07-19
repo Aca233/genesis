@@ -53,7 +53,9 @@ export function splitMetaBlock(full: string): { prose: string; meta: NarratorMet
 // ───────────────────────── 尺度三档文体规则 ─────────────────────────
 
 const SCALE_RULES: Record<Scale, string> = {
+  moment: `MOMENT scale — a single breath of time. Ultra-close: one exchange of dialogue, one gesture, one heartbeat rendered in fine sensory grain. The reply covers seconds to minutes at most; do NOT advance beyond the immediate beat.`,
   scene: `SCENE scale — moment-to-moment novelistic prose (小说正文). Anchor to a concrete place and hour; render dialogue and action line by line with sensory detail. Do not skip time beyond the immediate moment.`,
+  years: `YEARS scale — a span of several years: seasonal rhythm prose. Show projects maturing, children growing, faiths spreading; interleave 1-2 close-up vignettes with summary passage of the years turning.`,
   era: `ERA scale — a montage spanning years to decades: annalistic prose (编年纪事) interleaved with 2-3 vivid close-up vignettes (特写). Name the spans of years; show change accumulating across seasons, reigns and generations.`,
   epoch: `EPOCH scale — centuries and beyond, written in a historian's register (史官笔法): the rise and fall of faiths, dynasties and peoples. Individuals appear only as history remembers them.`,
 };

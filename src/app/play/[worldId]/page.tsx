@@ -43,6 +43,9 @@ export default function PlayPage({
     busyRef.current = busy;
   }, [busy]);
 
+  // 当前生成的中止句柄（搁笔）
+  const abortRef = useRef<AbortController | null>(null);
+
   const [drawerTab, setDrawerTab] = useState<DrawerTab | null>(null);
 
   const chapterId = state?.currentChapter.id;
@@ -72,7 +75,10 @@ export default function PlayPage({
         setMessages(json.messages);
         // 初始尺度沿用最后一条消息
         const last = json.messages.at(-1);
-        if (last && ["scene", "era", "epoch"].includes(last.scale)) {
+        if (
+          last &&
+          ["moment", "scene", "years", "era", "epoch"].includes(last.scale)
+        ) {
           setScale(last.scale as Scale);
         }
       } catch (err) {
@@ -99,27 +105,45 @@ export default function PlayPage({
     }) => {
       setGenError(null);
       setStreamingText("");
+      const ac = new AbortController();
+      abortRef.current = ac;
       let acc = "";
-      await streamNarration("/api/chat", body, {
-        onText: (t) => {
-          acc += t;
-          setStreamingText(acc);
+      await streamNarration(
+        "/api/chat",
+        body,
+        {
+          onText: (t) => {
+            acc += t;
+            setStreamingText(acc);
+          },
+          onDone: async () => {
+            // narrator 已落库 → 拉取对齐（含玩家消息与 meta）
+            await syncMessages(body.chapterId);
+            setStreamingText(null);
+          },
+          onError: async (msg) => {
+            // say 的玩家消息可能已落库 → 对齐
+            await syncMessages(body.chapterId);
+            setStreamingText(null);
+            setGenError(msg);
+          },
         },
-        onDone: async () => {
-          // narrator 已落库 → 拉取对齐（含玩家消息与 meta）
-          await syncMessages(body.chapterId);
-          setStreamingText(null);
-        },
-        onError: async (msg) => {
-          // say 的玩家消息可能已落库 → 对齐
-          await syncMessages(body.chapterId);
-          setStreamingText(null);
-          setGenError(msg);
-        },
-      });
+        ac.signal,
+      );
+      // 搁笔中止：服务端可能已（或未）落库，统一对齐
+      if (ac.signal.aborted) {
+        await syncMessages(body.chapterId);
+        setStreamingText(null);
+      }
+      abortRef.current = null;
     },
     [syncMessages],
   );
+
+  /** 搁笔：中止当前生成（已写出的文字由对齐结果决定去留） */
+  const stopGen = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   // 空章自动开场（严格模式防抖：仅触发一次；defer 避免 effect 内同步 setState）
   const openingFired = useRef(false);
@@ -143,13 +167,10 @@ export default function PlayPage({
     [chapterId, scale, runChat],
   );
 
-  const doContinue = useCallback(
-    (directive?: string) => {
-      if (!chapterId || busyRef.current) return;
-      void runChat({ chapterId, scale, mode: "continue", directive });
-    },
-    [chapterId, scale, runChat],
-  );
+  const doContinue = useCallback(() => {
+    if (!chapterId || busyRef.current) return;
+    void runChat({ chapterId, scale, mode: "continue" });
+  }, [chapterId, scale, runChat]);
 
   /** 重试：重新对齐消息后允许再发（不自动重发） */
   const retry = useCallback(() => {
@@ -203,23 +224,37 @@ export default function PlayPage({
       setGenError(null);
       setRerollingId(id);
       setRerollingText("");
+      const ac = new AbortController();
+      abortRef.current = ac;
       let acc = "";
-      void streamNarration(`/api/messages/${id}/variants`, {}, {
-        onText: (t) => {
-          acc += t;
-          setRerollingText(acc);
+      void streamNarration(
+        `/api/messages/${id}/variants`,
+        {},
+        {
+          onText: (t) => {
+            acc += t;
+            setRerollingText(acc);
+          },
+          onDone: async () => {
+            await syncMessages(chapterId);
+            setRerollingId(null);
+            setRerollingText("");
+          },
+          onError: async (msg) => {
+            await syncMessages(chapterId);
+            setRerollingId(null);
+            setRerollingText("");
+            setGenError(msg);
+          },
         },
-        onDone: async () => {
+        ac.signal,
+      ).then(async () => {
+        if (ac.signal.aborted) {
           await syncMessages(chapterId);
           setRerollingId(null);
           setRerollingText("");
-        },
-        onError: async (msg) => {
-          await syncMessages(chapterId);
-          setRerollingId(null);
-          setRerollingText("");
-          setGenError(msg);
-        },
+        }
+        abortRef.current = null;
       });
     },
     [chapterId, syncMessages],
@@ -297,6 +332,7 @@ export default function PlayPage({
           canContinue={messages.length > 0}
           onSend={send}
           onContinue={doContinue}
+          onStop={stopGen}
         />
       </div>
 

@@ -25,7 +25,8 @@ export function RuneRail({
 }) {
   return (
     <nav
-      className="fixed right-0 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-1 rounded-l-lg border border-r-0 border-line bg-paper-raised/90 py-2 shadow max-sm:bottom-0 max-sm:left-0 max-sm:right-0 max-sm:top-auto max-sm:translate-y-0 max-sm:flex-row max-sm:justify-around max-sm:rounded-none max-sm:border max-sm:py-1"
+      // z-[60] 高于抽屉（z-50）：抽屉展开时符文列仍可点击、可直接换页签
+      className="fixed right-0 top-1/2 z-[60] flex -translate-y-1/2 flex-col gap-1 rounded-l-lg border border-r-0 border-line bg-paper-raised/95 py-2 shadow-lg max-sm:bottom-0 max-sm:left-0 max-sm:right-0 max-sm:top-auto max-sm:translate-y-0 max-sm:flex-row max-sm:justify-around max-sm:rounded-none max-sm:border max-sm:py-1"
       aria-label="符文列"
     >
       {RUNES.map((r) => (
