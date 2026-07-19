@@ -25,6 +25,9 @@ function joinUrl(base: string, path: string): string {
   return `${base.replace(/\/+$/, "")}${path}`;
 }
 
+/** 部分网关（Bedrock 系中转）强制要求 max_tokens——未配置时给足额默认值 */
+const DEFAULT_MAX_TOKENS = 8192;
+
 async function readError(res: Response): Promise<string> {
   const body = await res.text().catch(() => "");
   return `HTTP ${res.status}: ${body.slice(0, 500)}`;
@@ -65,7 +68,7 @@ const openaiAdapter: ProviderAdapter = {
         model: slot.model,
         messages: req.messages,
         temperature: req.temperature ?? slot.temperature,
-        max_tokens: req.maxTokens ?? slot.maxTokens,
+        max_tokens: req.maxTokens ?? slot.maxTokens ?? DEFAULT_MAX_TOKENS,
         stream: false,
       }),
     });
@@ -87,7 +90,7 @@ const openaiAdapter: ProviderAdapter = {
         model: slot.model,
         messages: req.messages,
         temperature: req.temperature ?? slot.temperature,
-        max_tokens: req.maxTokens ?? slot.maxTokens,
+        max_tokens: req.maxTokens ?? slot.maxTokens ?? DEFAULT_MAX_TOKENS,
         stream: true,
       }),
     });
@@ -120,7 +123,7 @@ function toAnthropicBody(slot: ModelSlot, req: CompletionRequest, stream: boolea
     system: system || undefined,
     messages,
     temperature: req.temperature ?? slot.temperature,
-    max_tokens: req.maxTokens ?? slot.maxTokens ?? 8192,
+    max_tokens: req.maxTokens ?? slot.maxTokens ?? DEFAULT_MAX_TOKENS,
     stream,
   };
 }
@@ -190,7 +193,7 @@ function toGeminiBody(slot: ModelSlot, req: CompletionRequest) {
     contents,
     generationConfig: {
       temperature: req.temperature ?? slot.temperature,
-      maxOutputTokens: req.maxTokens ?? slot.maxTokens,
+      maxOutputTokens: req.maxTokens ?? slot.maxTokens ?? DEFAULT_MAX_TOKENS,
     },
   };
 }
