@@ -1,0 +1,223 @@
+// 《创世》数据模型 —— 见 docs/03-数据模型.md
+// 单用户期 user_id 恒为 "local"，为后续 Discord OAuth 预留。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────── 世界与时间线 ─────────────────────────
+
+model World {
+  id                 String     @id @default(cuid())
+  userId             String     @default("local") @map("user_id")
+  name               String
+  genesisInput       String     @map("genesis_input") // 原初神谕
+  status             String     @default("draft") // draft | playing | concluded
+  draftDeck          Json?      @map("draft_deck") // 创世草稿卡组（开局落地后清空）
+  lockedPaths        String[]   @map("locked_paths") // 卡片编辑器 player_locked 字段路径
+  themeCard          Json?      @map("theme_card") // 纪年名/位阶命名/措辞
+  styleCard          Json?      @map("style_card") // 叙事风格卡
+  cosmology          Json? // 宇宙论卡
+  fusionAxiom        Json?      @map("fusion_axiom") // 融合公理卡（仅多IP融合）
+  activeTimelineId   String?    @map("active_timeline_id")
+  timelines          Timeline[]
+  lorebookEntries    LorebookEntry[]
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("worlds")
+}
+
+model Timeline {
+  id          String           @id @default(cuid())
+  worldId     String           @map("world_id")
+  world       World            @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  parentId    String?          @map("parent_id") // 自哪条时间线分叉（M3）
+  forkChapter Int?             @map("fork_chapter")
+  chapters    Chapter[]
+  gods        God[]
+  entities    Entity[]
+  chronicles  ChronicleEntry[]
+  omens       OmenQueue[]
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  @@index([worldId])
+  @@map("timelines")
+}
+
+model Chapter {
+  id          String    @id @default(cuid())
+  timelineId  String    @map("timeline_id")
+  timeline    Timeline  @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  index       Int
+  title       String?
+  summary     String? // 章末史官小结
+  settleState String    @default("open") @map("settle_state") // open | settling:<step> | settled
+  snapshot    Json? // 章快照（M3 分叉用）
+  messages    Message[]
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([timelineId, index])
+  @@map("chapters")
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  chapterId String   @map("chapter_id")
+  chapter   Chapter  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  index     Int
+  role      String // player | narrator
+  content   String
+  scale     String   @default("scene") // scene | era | epoch
+  variants  Json? // 异文候选 [{content, chosen}]
+  meta      Json? // 建议/揭示事件/实体链接span/edited标记
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([chapterId, index])
+  @@map("messages")
+}
+
+// ───────────────────────── 诸神 ─────────────────────────
+
+model God {
+  id             String   @id @default(cuid())
+  timelineId     String   @map("timeline_id")
+  timeline       Timeline @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  name           String
+  aliases        String[] // 检索用：别名+称号
+  tier           String // major | minor | player
+  isPlayer       Boolean  @default(false) @map("is_player")
+  rank           String   @default("nascent") // ember..sovereign 内部枚举，主题卡负责措辞映射
+  domains        String[] // 领域关键词
+  persona        Json? // 人格卡（可见）
+  voice          Json? // 声纹卡（可见）
+  agenda         Json? // 议程卡（默认隐藏）
+  agendaRevealed Boolean  @default(false) @map("agenda_revealed")
+  relations      Json? // { targetId: {label, note} }
+  faithScope     String?  @map("faith_scope")
+  codexEntityId  String?  @map("codex_entity_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([timelineId])
+  @@map("gods")
+}
+
+// ───────────────────────── 百科（Codex）─────────────────────────
+
+model Entity {
+  id            String          @id @default(cuid())
+  timelineId    String          @map("timeline_id")
+  timeline      Timeline        @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  type          String // faction | character | race | place | artifact | cult
+  name          String
+  aliases       String[]
+  emblemSeed    String          @map("emblem_seed") // 程序纹章种子
+  imageUrl      String?         @map("image_url") // 玩家上传；预留 AI 生图
+  starred       Boolean         @default(false)
+  isChosen      Boolean         @default(false) @map("is_chosen") // 神选者：永不降档/压缩
+  heat          String          @default("active") // active | dormant
+  scenePresence Boolean         @default(false) @map("scene_presence")
+  summary       String // 摘要卡（dormant 时的全部）
+  lockedPaths   String[]        @map("locked_paths") // player_locked 字段路径
+  sections      EntitySection[]
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  @@index([timelineId, type])
+  @@map("entities")
+}
+
+model EntitySection {
+  id           String  @id @default(cuid())
+  entityId     String  @map("entity_id")
+  entity       Entity  @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  key          String // 栏目键，受类型模板约束
+  content      Json
+  revealed     Boolean @default(true) // false → 传闻/经卷残缺
+  rumorText    String? @map("rumor_text") // 未揭示时的传闻（可误导）
+  playerLocked Boolean @default(false) @map("player_locked")
+
+  @@unique([entityId, key])
+  @@map("entity_sections")
+}
+
+// ───────────────────────── 编年史 ─────────────────────────
+
+model ChronicleEntry {
+  id                String   @id @default(cuid())
+  timelineId        String   @map("timeline_id")
+  timeline          Timeline @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  chapterIndex      Int      @map("chapter_index")
+  yearLabel         String   @map("year_label") // 主题卡纪年体系
+  text              String // 史官笔法
+  entityIds         String[] @map("entity_ids")
+  godIds            String[] @map("god_ids")
+  revealed          Boolean  @default(true) // false = 诸神隐藏行动
+  revealedAtChapter Int?     @map("revealed_at_chapter")
+  source            String   @default("narrative") // narrative | pantheon | manual
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([timelineId, chapterIndex])
+  @@map("chronicle_entries")
+}
+
+model OmenQueue {
+  id         String   @id @default(cuid())
+  timelineId String   @map("timeline_id")
+  timeline   Timeline @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  godId      String   @map("god_id")
+  text       String // 征兆：将润物细无声织入下章
+  consumed   Boolean  @default(false)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([timelineId, consumed])
+  @@map("omen_queue")
+}
+
+// ───────────────────────── 世界书（ST 兼容）─────────────────────────
+
+model LorebookEntry {
+  id      String   @id @default(cuid())
+  worldId String   @map("world_id")
+  world   World    @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  keys    String[] // ST 触发词
+  content String
+  enabled Boolean  @default(true)
+  stExtra Json?    @map("st_extra") // 保留 ST 原始字段，导出还原
+  source  String   @default("imported") // imported | generated
+
+  @@index([worldId])
+  @@map("lorebook_entries")
+}
+
+// ───────────────────────── 设置与日志 ─────────────────────────
+
+model Settings {
+  userId        String   @id @default("local") @map("user_id")
+  narrativeSlot Json?    @map("narrative_slot") // ModelSlot（key 为 AES-256-GCM 密文）
+  backstageSlot Json?    @map("backstage_slot")
+  embeddingSlot Json?    @map("embedding_slot")
+  prefs         Json? // 建议开关/翻章建议/烛光模式/文风预设
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
+
+model LlmCall {
+  id         String   @id @default(cuid())
+  task       String // narrative | genesis | pantheon | extract | chronicle | test
+  slot       String // narrative | backstage
+  durationMs Int      @map("duration_ms")
+  ok         Boolean
+  error      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("llm_calls")
+}

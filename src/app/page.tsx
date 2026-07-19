@@ -1,65 +1,50 @@
-import Image from "next/image";
+"use client";
+
+import { useTheme } from "@/components/theme/useTheme";
 
 export default function Home() {
+  const { candle, setMode } = useTheme();
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main className="flex flex-1 flex-col items-center justify-center gap-10 px-6">
+      <header className="text-center">
+        <h1
+          className="text-6xl font-black tracking-widest text-ink"
+          style={{ fontFamily: "var(--font-display)" }}
+        >
+          创世
+        </h1>
+        <p className="mt-4 text-ink-soft">
+          说出你的第一句神谕——你是谁，这是怎样的世界。
+        </p>
+      </header>
+
+      <section className="w-full max-w-xl">
+        <textarea
+          rows={3}
+          placeholder="我是战锤40K与凡人修仙传融合世界中，飞升失败坠入亚空间的道尊……"
+          className="w-full resize-none rounded-lg border border-line bg-paper-sunken p-4 text-ink outline-none transition focus:border-gilt/60 focus:shadow-[0_0_16px_var(--gilt-glow)]"
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+        <div className="mt-3 flex items-center justify-between">
+          <button
+            onClick={() => setMode(candle ? "day" : "candle")}
+            className="text-sm text-ink-faint transition hover:text-gilt"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            {candle ? "☀ 展卷于日" : "🕯 燃烛夜读"}
+          </button>
+          <button
+            className="rounded-md border border-gilt/50 px-6 py-2 text-gilt transition hover:bg-gilt/10 disabled:opacity-50"
+            disabled
+            title="世界生成尚未接入（M1.3）"
           >
-            Documentation
-          </a>
+            创世
+          </button>
         </div>
-      </main>
-    </div>
+      </section>
+
+      <footer className="text-xs text-ink-faint">
+        ——此界之史，由汝亲书——
+      </footer>
+    </main>
   );
 }

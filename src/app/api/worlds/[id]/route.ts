@@ -1,0 +1,80 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import type { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db";
+import { WorldDeckSchema } from "@/lib/cards/schemas";
+
+/**
+ * GET    /api/worlds/[id] —— 读取世界（含草稿卡组）
+ * PATCH  /api/worlds/[id] —— 手改卡组（记录 lockedPaths）
+ * DELETE /api/worlds/[id] —— 删除存档
+ */
+
+const PatchSchema = z.object({
+  deck: z.unknown(),
+  /** 本次手改涉及的字段路径（点分）——将被标记为 player_locked */
+  editedPaths: z.array(z.string()).default([]),
+});
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const world = await prisma.world.findUnique({
+    where: { id },
+    include: {
+      timelines: { select: { id: true }, orderBy: { createdAt: "asc" } },
+    },
+  });
+  if (!world) return NextResponse.json({ error: "不存在" }, { status: 404 });
+  return NextResponse.json({ world });
+}
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const body = PatchSchema.parse(await request.json());
+
+  const parsed = WorldDeckSchema.safeParse(body.deck);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "卡组校验失败", issues: parsed.error.issues.slice(0, 5) },
+      { status: 400 },
+    );
+  }
+
+  const world = await prisma.world.findUnique({ where: { id } });
+  if (!world) return NextResponse.json({ error: "不存在" }, { status: 404 });
+
+  const lockedPaths = [...new Set([...world.lockedPaths, ...body.editedPaths])];
+  const deck = parsed.data;
+
+  await prisma.world.update({
+    where: { id },
+    data: {
+      name: deck.worldName,
+      draftDeck: deck as unknown as Prisma.InputJsonValue,
+      lockedPaths,
+      themeCard: deck.theme as unknown as Prisma.InputJsonValue,
+      styleCard: deck.style as unknown as Prisma.InputJsonValue,
+      cosmology: deck.cosmology as unknown as Prisma.InputJsonValue,
+      fusionAxiom: deck.fusionAxiom
+        ? (deck.fusionAxiom as unknown as Prisma.InputJsonValue)
+        : undefined,
+    },
+  });
+
+  return NextResponse.json({ ok: true, lockedPaths });
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  await prisma.world.delete({ where: { id } });
+  return NextResponse.json({ ok: true });
+}
