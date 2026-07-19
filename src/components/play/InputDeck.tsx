@@ -19,6 +19,7 @@ export function InputDeck({
   onSend,
   onContinue,
   onStop,
+  onSettle,
 }: {
   scale: Scale;
   onScaleChange: (s: Scale) => void;
@@ -31,6 +32,8 @@ export function InputDeck({
   onContinue: () => void;
   /** 停止当前生成 */
   onStop: () => void;
+  /** 结束本章 → 岁月流转结算 */
+  onSettle: () => void;
 }) {
   const [text, setText] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -58,7 +61,7 @@ export function InputDeck({
       {/* 翻章提示（淡金细线，仅样式） */}
       {chapterBreakHint && !busy && (
         <div className="mb-1 border-t border-gilt/40 pt-1 text-center text-xs text-gilt/70">
-          本章似已抵达段落。翻章结算将于 M2 实装。
+          本章似已抵达段落——可提笔「结束本章」，让岁月流转。
         </div>
       )}
 
@@ -115,6 +118,19 @@ export function InputDeck({
               title="不发神谕，让史官顺着剧情接着写"
             >
               续笔
+            </button>
+            {/* 结束本章 → 岁月流转（translucent gilt；翻章提示时呼吸微光） */}
+            <button
+              onClick={() => !busy && canContinue && onSettle()}
+              disabled={busy || !canContinue}
+              className={`shrink-0 transition disabled:opacity-40 ${
+                chapterBreakHint
+                  ? "animate-pulse text-gilt"
+                  : "text-ink-soft hover:text-gilt"
+              }`}
+              title="结束本章：史官落笔成史，诸神各行其是，岁月翻页"
+            >
+              ⌘ 结束本章
             </button>
             {/* 烛光切换（游戏内） */}
             <button

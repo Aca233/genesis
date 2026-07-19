@@ -5,11 +5,13 @@ import { motion, AnimatePresence } from "motion/react";
 import type { DrawerTab, GodRow, WorldInfo } from "./types";
 import { GodPanel } from "./GodPanel";
 import { LorePanel } from "./LorePanel";
+import { CodexPanel } from "./CodexPanel";
+import { ChroniclePanel } from "./ChroniclePanel";
+import { StarmapPanel } from "./StarmapPanel";
 
 /**
  * 右抽屉：spring 滑出 + 半透遮罩，Esc/遮罩点击关闭。
- * 神格/设定集已实装；星图/年表/众生录为 M2 残卷占位。
- * 数据全部来自页面初始 state，无新请求。
+ * 神格/设定集来自页面初始 state；众生录/年表按需请求；星图纯前端布局。
  */
 
 const TAB_TITLES: Record<DrawerTab, string> = {
@@ -20,23 +22,20 @@ const TAB_TITLES: Record<DrawerTab, string> = {
   codex: "👥 众生录",
 };
 
-function Placeholder() {
-  return (
-    <div className="flex h-64 items-center justify-center">
-      <p className="fog-text">此卷将于岁月中展开（M2）</p>
-    </div>
-  );
-}
-
 export function PlayDrawer({
   tab,
   world,
   gods,
+  timelineId,
+  initialEntityId,
   onClose,
 }: {
   tab: DrawerTab | null;
   world: WorldInfo;
   gods: GodRow[];
+  timelineId: string;
+  /** 正文实体链接点开时的定位实体 */
+  initialEntityId?: string | null;
   onClose: () => void;
 }) {
   // Esc 关闭
@@ -97,8 +96,16 @@ export function PlayDrawer({
                 <GodPanel gods={gods} theme={world.themeCard} />
               ) : tab === "lore" ? (
                 <LorePanel world={world} />
+              ) : tab === "codex" ? (
+                <CodexPanel
+                  timelineId={timelineId}
+                  theme={world.themeCard}
+                  initialEntityId={initialEntityId}
+                />
+              ) : tab === "chronicle" ? (
+                <ChroniclePanel timelineId={timelineId} />
               ) : (
-                <Placeholder />
+                <StarmapPanel gods={gods} theme={world.themeCard} />
               )}
             </div>
           </motion.aside>

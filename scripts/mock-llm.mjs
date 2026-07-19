@@ -173,12 +173,103 @@ const deck = {
       exalted: "大罗",
       sovereign: "道祖",
     },
+    typeNames: {
+      faction: "宗门势力",
+      character: "风云人物",
+      race: "众生种属",
+      place: "山川洲陆",
+      artifact: "法宝奇物",
+      cult: "道统教门",
+    },
     addressStyle: "尊神为「上尊」，凡人自称「弟子」",
   },
 };
 
 const NARRATIVE =
   "锈月洲的夜空泛着青灰色的辉光。\n\n你在亚空间浅层睁开了目光——万千机修士的祈祷如齿轮般咬合，托举着你新生的位格。首席机正阿澈跪在圣所中央，她的义肢手臂上刻着你的徽记。\n\n「上尊，」她低声道，「北天剑宗的剑侍今夜第三次越过了界碑。」\n\n<<<META\n{\"suggestions\": [\"垂听阿澈的完整禀报\", \"以神念扫过界碑处的剑侍\", \"降下神谕安抚信众\"], \"chapterBreakHint\": false}\nMETA>>>";
+
+// ── 结算阶段的结构化响应（stream 聚合返回，与网关一致） ──
+
+const pantheonTurn = {
+  action: {
+    description: "遣一名剑侍假扮行脚商人潜入锈月洲，暗查机修士行会的圣所布防。",
+    targets: ["机修士行会", "锈月洲"],
+  },
+  omen: "城南茶肆来了个不喝茶的商人，总在打听圣所开坛的时辰。",
+  agendaUpdate: { shortTermGoals: ["查明机魂道尊圣所虚实"] },
+  relationsUpdate: [],
+  proactiveEvent: null,
+};
+
+const extraction = {
+  newEntities: [
+    {
+      type: "character",
+      name: "阿澈",
+      aliases: ["首席机正"],
+      summary: "机修士行会首席机正，机魂道尊最虔诚的信徒。",
+      sections: [
+        { key: "overview", title: "其人", text: "义肢右臂刻有神徽的年轻机正，沉静而果决。" },
+        { key: "relationToPlayer", title: "与上尊之缘", text: "首位听见神谕之人，行会中的代言者。" },
+      ],
+      isChosen: false,
+    },
+  ],
+  entityUpdates: [
+    {
+      name: "机修士行会",
+      sectionDeltas: [
+        { key: "overview", title: "行会近况", text: "圣所初立，信众渐聚，然剑宗剑侍已三越界碑。" },
+      ],
+      summary: null,
+      newAliases: null,
+      becameChosen: null,
+      died: null,
+      scenePresent: true,
+    },
+  ],
+  godUpdates: [],
+  revealSections: [],
+};
+
+const chronicle = {
+  entries: [
+    {
+      yearLabel: "锈潮纪三百年冬",
+      text: "机魂道尊初醒于亚空间浅层，锈月洲机修士行会立圣所以奉之。",
+      entityNames: ["机修士行会", "锈月洲"],
+      godNames: ["机魂道尊"],
+    },
+    {
+      yearLabel: "锈潮纪三百年冬",
+      text: "北天剑宗剑侍三越界碑，正邪之辨暗流初起。",
+      entityNames: ["北天剑宗"],
+      godNames: ["青冥剑主"],
+    },
+  ],
+  epilogue:
+    "是岁冬，新神初啼于锈月，剑气已侵于界碑。史笔至此，犹闻齿轮与剑鸣相和之声——福祸未可知也。",
+  chapterTitle: "机魂初醒",
+};
+
+/** 按请求内容路由到对应的结构化 JSON（找不到则退回叙事）。
+ * 标记必须各阶段唯一：narrator 提示里也含 "chronicle entries"、史官提示里含
+ * "offstage actions"，故只用角色开场白这类独有短语。 */
+function routeContent(messagesText) {
+  if (messagesText.includes("Genesis Engine")) {
+    return JSON.stringify(deck);
+  }
+  if (messagesText.includes("divine politics")) {
+    return JSON.stringify(pantheonTurn);
+  }
+  if (messagesText.includes("You are the Archivist")) {
+    return JSON.stringify(extraction);
+  }
+  if (messagesText.includes("Court Historian")) {
+    return JSON.stringify(chronicle);
+  }
+  return null;
+}
 
 const server = http.createServer((req, res) => {
   // 模型名录（GET /v1/models）
@@ -200,16 +291,15 @@ const server = http.createServer((req, res) => {
   req.on("data", (c) => (body += c));
   req.on("end", () => {
     let stream = false;
-    let isGenesis = false;
+    let structured = null;
     try {
       const json = JSON.parse(body || "{}");
       stream = Boolean(json.stream);
-      const text = JSON.stringify(json.messages ?? "");
-      isGenesis = text.includes("Genesis Engine") || text.includes("world deck");
+      structured = routeContent(JSON.stringify(json.messages ?? ""));
     } catch {}
 
     if (!stream) {
-      const content = isGenesis ? JSON.stringify(deck) : "试炼已过";
+      const content = structured ?? "试炼已过";
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -219,12 +309,13 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    // 流式：把 NARRATIVE 切成 20 字符块推送
+    // 流式：结构化 JSON 或叙事正文，切成 20 字符块推送
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
     });
-    const chunks = NARRATIVE.match(/[\s\S]{1,20}/g) ?? [];
+    const payload = structured ?? NARRATIVE;
+    const chunks = payload.match(/[\s\S]{1,20}/g) ?? [];
     let i = 0;
     const timer = setInterval(() => {
       if (i < chunks.length) {

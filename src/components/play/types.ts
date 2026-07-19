@@ -65,6 +65,8 @@ export type GodRow = {
 export type ThemeCard = {
   eraSystem?: string;
   rankNames?: Partial<Record<string, string>>;
+  /** 众生录六类的世界观措辞（LLM 生成），如 faction→宗门势力 */
+  typeNames?: Partial<Record<string, string>>;
   addressStyle?: string;
 };
 

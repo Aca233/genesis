@@ -40,3 +40,68 @@ export function relationTone(label: string | undefined): string {
   if (label === "ally") return "border-gilt/50 text-gilt";
   return "border-line text-ink-faint";
 }
+
+/** 实体六类的通用回退名（主题卡 typeNames 缺省时用） */
+export const ENTITY_TYPE_LABELS: Record<string, string> = {
+  faction: "势力",
+  character: "人物",
+  race: "种族",
+  place: "地域",
+  artifact: "神物",
+  cult: "教派",
+};
+
+/** 优先主题卡的世界观措辞（修仙界「宗门势力」/ 哥特帝国「军团诸侯」…） */
+export function entityTypeName(
+  theme: ThemeCard | null | undefined,
+  type: string,
+): string {
+  return theme?.typeNames?.[type] ?? ENTITY_TYPE_LABELS[type] ?? type;
+}
+
+/** 众生录分组展示顺序 */
+export const ENTITY_TYPE_ORDER = [
+  "faction",
+  "character",
+  "race",
+  "place",
+  "artifact",
+  "cult",
+] as const;
+
+/** 实体栏目键 → 通用回退标题（史官生成的 content.title 优先） */
+export const SECTION_LABELS: Record<string, string> = {
+  overview: "总览",
+  territory: "疆域",
+  polity: "政体",
+  faith: "信仰",
+  keyFigures: "要人",
+  military: "武力",
+  identity: "身份",
+  affiliation: "所属",
+  lifespan: "寿数",
+  personality: "性情",
+  faithHistory: "信史",
+  relationToPlayer: "与本尊之缘",
+  distribution: "分布",
+  divineTies: "神缘",
+  innerFactions: "内争",
+  kind: "类属",
+  allegiance: "归属",
+  geography: "山川形胜",
+  majorEvents: "大事",
+  holder: "持有者",
+  powers: "神异",
+  origin: "来历",
+  whereabouts: "下落",
+  deity: "所奉之神",
+  doctrine: "教义",
+  holySites: "圣地",
+  structure: "教阶",
+  heresies: "异端",
+  secularTies: "俗世牵连",
+};
+
+export function sectionName(key: string): string {
+  return SECTION_LABELS[key] ?? key;
+}

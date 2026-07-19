@@ -486,7 +486,7 @@ async function runExtraction(
             .filter((s) => validKeys.has(s.key))
             .map((s) => ({
               key: s.key,
-              content: { text: s.text } as Prisma.InputJsonValue,
+              content: { title: s.title, text: s.text } as Prisma.InputJsonValue,
             })),
         },
       },
@@ -518,9 +518,11 @@ async function runExtraction(
         create: {
           entityId: target.id,
           key: d.key,
-          content: { text: d.text } as Prisma.InputJsonValue,
+          content: { title: d.title, text: d.text } as Prisma.InputJsonValue,
         },
-        update: { content: { text: d.text } as Prisma.InputJsonValue },
+        update: {
+          content: { title: d.title, text: d.text } as Prisma.InputJsonValue,
+        },
       });
     }
   }

@@ -14,6 +14,11 @@ import { StoryStream } from "@/components/play/StoryStream";
 import { InputDeck } from "@/components/play/InputDeck";
 import { RuneRail } from "@/components/play/RuneRail";
 import { PlayDrawer } from "@/components/play/PlayDrawer";
+import { SettleCeremony } from "@/components/play/SettleCeremony";
+import {
+  EntityIndexProvider,
+  type EntityIndexItem,
+} from "@/components/play/entity-index";
 
 /**
  * 对局主界面（M1.6–M1.8）：中央书页正文 + 底部输入区 + 右缘符文列/抽屉。
@@ -47,6 +52,14 @@ export default function PlayPage({
   const abortRef = useRef<AbortController | null>(null);
 
   const [drawerTab, setDrawerTab] = useState<DrawerTab | null>(null);
+  /** 正文实体链接点开时定位的实体（进入众生录详情） */
+  const [drawerEntityId, setDrawerEntityId] = useState<string | null>(null);
+
+  // 岁月流转：结算演出
+  const [settling, setSettling] = useState(false);
+
+  // 正文实体微光链接索引
+  const [entityIndex, setEntityIndex] = useState<EntityIndexItem[]>([]);
 
   const chapterId = state?.currentChapter.id;
 
@@ -59,6 +72,24 @@ export default function PlayPage({
     const json = (await res.json()) as { messages: MessageRow[] };
     setMessages(json.messages);
   }, []);
+
+  /** 实体索引（正文微光链接）：加载时 + 结算后刷新 */
+  const syncEntityIndex = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/worlds/${worldId}/entity-index`);
+      if (!res.ok) return;
+      const json = (await res.json()) as { index: EntityIndexItem[] };
+      setEntityIndex(json.index);
+    } catch {
+      // 索引失败不阻断对局，正文只是无链接
+    }
+  }, [worldId]);
+
+  useEffect(() => {
+    // defer：避免 effect 内同步 setState（索引到达前正文只是无链接）
+    const t = setTimeout(() => void syncEntityIndex(), 0);
+    return () => clearTimeout(t);
+  }, [syncEntityIndex]);
 
   useEffect(() => {
     let cancelled = false;
@@ -179,6 +210,30 @@ export default function PlayPage({
     void syncMessages(chapterId);
   }, [chapterId, syncMessages]);
 
+  // ── 岁月流转（章末结算） ──
+
+  /** 结算完成：全量重载 state（新章、诸神关系、位阶都可能已变），重置开场防抖 */
+  const onSettleFinished = useCallback(async () => {
+    setSettling(false);
+    try {
+      const res = await fetch(`/api/worlds/${worldId}/state`);
+      if (!res.ok) return;
+      const json = (await res.json()) as PlayState;
+      openingFired.current = false; // 新章空 → 自动开场重新武装
+      setState(json);
+      setMessages(json.messages);
+      void syncEntityIndex();
+    } catch {
+      // 重载失败保留旧界面，玩家可手动刷新
+    }
+  }, [worldId, syncEntityIndex]);
+
+  /** 正文实体链接 / 众生录定位 */
+  const openEntity = useCallback((id: string) => {
+    setDrawerEntityId(id);
+    setDrawerTab("codex");
+  }, []);
+
   // ── 消息四件套 ──
 
   /** 朱批：PATCH 后以响应行替换本地 */
@@ -293,57 +348,74 @@ export default function PlayPage({
   }
 
   return (
-    <main className="relative flex min-h-screen flex-col">
-      {/* 世界名（页眉淡墨，紧凑） */}
-      <header className="pointer-events-none sticky top-0 z-20 bg-gradient-to-b from-[var(--paper)] via-[var(--paper)]/80 to-transparent px-6 pb-2 pt-2 text-center">
-        <span
-          className="pointer-events-auto text-sm tracking-widest text-ink-faint"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          {state.world.name}
-        </span>
-      </header>
+    <EntityIndexProvider index={entityIndex} openEntity={openEntity}>
+      <main className="relative flex min-h-screen flex-col">
+        {/* 世界名（页眉淡墨，紧凑） */}
+        <header className="pointer-events-none sticky top-0 z-20 bg-gradient-to-b from-[var(--paper)] via-[var(--paper)]/80 to-transparent px-6 pb-2 pt-2 text-center">
+          <span
+            className="pointer-events-auto text-sm tracking-widest text-ink-faint"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            {state.world.name}
+          </span>
+        </header>
 
-      {/* 书页正文（中央限宽，大屏加宽） */}
-      <div className="mx-auto w-full max-w-3xl flex-1 px-6 max-sm:pb-16 xl:max-w-4xl">
-        <StoryStream
-          chapterIndex={state.currentChapter.index}
-          chapterTitle={state.currentChapter.title}
-          prevTail={state.prevChapterTail}
-          messages={messages}
-          streamingText={streamingText}
-          rerollingId={rerollingId}
-          rerollingText={rerollingText}
-          busy={busy}
-          error={genError}
-          onRetry={retry}
-          onEdit={edit}
-          onCut={cut}
-          onReroll={reroll}
-          onSwitchVariant={switchVariant}
+        {/* 书页正文（中央限宽，大屏加宽） */}
+        <div className="mx-auto w-full max-w-3xl flex-1 px-6 max-sm:pb-16 xl:max-w-4xl">
+          <StoryStream
+            chapterIndex={state.currentChapter.index}
+            chapterTitle={state.currentChapter.title}
+            prevTail={state.prevChapterTail}
+            messages={messages}
+            streamingText={streamingText}
+            rerollingId={rerollingId}
+            rerollingText={rerollingText}
+            busy={busy}
+            error={genError}
+            onRetry={retry}
+            onEdit={edit}
+            onCut={cut}
+            onReroll={reroll}
+            onSwitchVariant={switchVariant}
+          />
+
+          <InputDeck
+            scale={scale}
+            onScaleChange={setScale}
+            suggestions={suggestions}
+            chapterBreakHint={chapterBreakHint}
+            busy={busy}
+            canContinue={messages.length > 0}
+            onSend={send}
+            onContinue={doContinue}
+            onStop={stopGen}
+            onSettle={() => setSettling(true)}
+          />
+        </div>
+
+        {/* 右缘符文列 + 抽屉 */}
+        <RuneRail active={drawerTab} onOpen={(t) => setDrawerTab(t)} />
+        <PlayDrawer
+          tab={drawerTab}
+          world={state.world}
+          gods={state.gods}
+          timelineId={state.timeline.id}
+          initialEntityId={drawerEntityId}
+          onClose={() => {
+            setDrawerTab(null);
+            setDrawerEntityId(null);
+          }}
         />
 
-        <InputDeck
-          scale={scale}
-          onScaleChange={setScale}
-          suggestions={suggestions}
-          chapterBreakHint={chapterBreakHint}
-          busy={busy}
-          canContinue={messages.length > 0}
-          onSend={send}
-          onContinue={doContinue}
-          onStop={stopGen}
-        />
-      </div>
-
-      {/* 右缘符文列 + 抽屉 */}
-      <RuneRail active={drawerTab} onOpen={(t) => setDrawerTab(t)} />
-      <PlayDrawer
-        tab={drawerTab}
-        world={state.world}
-        gods={state.gods}
-        onClose={() => setDrawerTab(null)}
-      />
-    </main>
+        {/* 岁月流转：章末结算演出 */}
+        {settling && chapterId && (
+          <SettleCeremony
+            chapterId={chapterId}
+            onFinished={() => void onSettleFinished()}
+            onClose={() => setSettling(false)}
+          />
+        )}
+      </main>
+    </EntityIndexProvider>
   );
 }

@@ -2,23 +2,29 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useEntityIndex } from "./entity-index";
+import { linkifyChildren } from "./EntityLink";
 
 /**
  * 叙事正文 Markdown 渲染（古卷风格）。
  * 模型输出常含 *强调*、**着重**、分隔线、列表等——按书页样式渲染而非裸露星号。
+ * 段落/强调内的纯文本节点做实体名匹配 → 微光链接。
  */
 export function Prose({ text }: { text: string }) {
+  const { patterns } = useEntityIndex();
+  const link = (children: React.ReactNode) => linkifyChildren(children, patterns);
+
   return (
     <div className="prose-scroll leading-loose text-ink">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          p: ({ children }) => <p className="my-3">{children}</p>,
+          p: ({ children }) => <p className="my-3">{link(children)}</p>,
           em: ({ children }) => (
-            <em className="italic text-ink-soft">{children}</em>
+            <em className="italic text-ink-soft">{link(children)}</em>
           ),
           strong: ({ children }) => (
-            <strong className="font-bold text-ink">{children}</strong>
+            <strong className="font-bold text-ink">{link(children)}</strong>
           ),
           hr: () => (
             <p className="my-5 select-none text-center text-sm tracking-[0.4em] text-gilt/50">
@@ -55,7 +61,7 @@ export function Prose({ text }: { text: string }) {
           ol: ({ children }) => (
             <ol className="my-3 list-decimal pl-6 marker:text-gilt/60">{children}</ol>
           ),
-          li: ({ children }) => <li className="my-1">{children}</li>,
+          li: ({ children }) => <li className="my-1">{link(children)}</li>,
           blockquote: ({ children }) => (
             <blockquote className="my-3 border-l-2 border-gilt/40 pl-4 text-ink-soft">
               {children}

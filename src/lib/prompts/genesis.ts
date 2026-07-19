@@ -18,7 +18,7 @@ Rules:
    If canon has more true gods than 9, the overflow becomes one-line minorGods. For each major god produce persona, a distinctive VOICE card (verbal tics, forms of address, catchphrases, things they would never say — each god must be unmistakable in dialogue), and a hidden AGENDA card (goals, methods, stance toward the player god with motive, active schemes). Agendas must interlock with epochConflict.hiddenCurrents so the world has living intrigue.
 4. PLAYER GOD: infer their origin from the decree (newborn god / canonical god / reincarnated / usurper...). Respect what the player states about themselves; fill gaps boldly. Give them a starting situation with immediate hooks.
 5. FACTIONS/RACES/PLACES: each faction includes faith alignment (which gods, how fervent). Keep counts sensible for the world.
-6. STYLE: infer the narrative style from the decree's phrasing (epic 史诗 / webnovel 网文爽文 / grimdark 黑深残 / lightnovel 轻小说 / canon 仿原IP文风). THEME: era naming, rank vocabulary matching the world's flavor (map every internal rank key to an in-world term).
+6. STYLE: infer the narrative style from the decree's phrasing (epic 史诗 / webnovel 网文爽文 / grimdark 黑深残 / lightnovel 轻小说 / canon 仿原IP文风). THEME: era naming, rank vocabulary matching the world's flavor (map every internal rank key to an in-world term), and typeNames — an in-world Chinese label for each codex category (faction/character/race/place/artifact/cult), e.g. a xianxia world: faction→宗门势力, artifact→法宝; a gothic empire: faction→军团诸侯, cult→异端教派.
 7. If lorebook excerpts are provided, they are AUTHORITATIVE over your own knowledge on any conflict.
 8. ALL user-facing string values must be written in Chinese. Keys stay English per schema.
 

@@ -1,0 +1,391 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import type { ThemeCard } from "./types";
+import { Emblem } from "./Emblem";
+import { entityTypeName, ENTITY_TYPE_ORDER, sectionName } from "./lexicon";
+
+/**
+ * 众生录：六类实体分组列表 + 详情卡（docs/01 §9.2）。
+ * 措辞随世界观：类名取主题卡 typeNames，栏目标题取史官生成的 content.title。
+ * 迷雾：未揭示栏目显示传闻残卷；手改即锁（playerLocked）。
+ * heat=dormant → 淡墨折叠；isChosen → 神选金环。
+ */
+
+type EntityLite = {
+  id: string;
+  type: string;
+  name: string;
+  aliases: string[];
+  emblemSeed: string;
+  imageUrl: string | null;
+  starred: boolean;
+  isChosen: boolean;
+  heat: string;
+  summary: string;
+  scenePresence: boolean;
+};
+
+type SectionRow = {
+  id: string;
+  key: string;
+  /** title 由史官按世界观措辞生成；缺省回退 lexicon 通用名。开局种子含 names 列表形 */
+  content: { title?: string; text?: string; names?: string[] } | null;
+  revealed: boolean;
+  rumorText: string | null;
+  playerLocked: boolean;
+};
+
+type EntityDetail = EntityLite & { sections: SectionRow[] };
+
+type ChronicleRow = {
+  id: string;
+  chapterIndex: number;
+  yearLabel: string;
+  text: string;
+  revealedAtChapter: number | null;
+};
+
+// ── 列表 ──
+
+function EntityRow({
+  entity,
+  onOpen,
+  onStar,
+}: {
+  entity: EntityLite;
+  onOpen: () => void;
+  onStar: () => void;
+}) {
+  const dormant = entity.heat === "dormant";
+  return (
+    <li
+      className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition hover:border-gilt/40 ${
+        entity.isChosen
+          ? "border-gilt/50 bg-paper-raised"
+          : "border-line bg-paper-raised"
+      } ${dormant ? "opacity-55" : ""}`}
+      onClick={onOpen}
+    >
+      <Emblem
+        seed={entity.emblemSeed}
+        type={entity.type}
+        size={38}
+        imageUrl={entity.imageUrl}
+      />
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-1.5 text-sm text-ink">
+          <span className="truncate">{entity.name}</span>
+          {entity.isChosen && (
+            <span className="shrink-0 text-[10px] text-gilt" title="神选者">
+              ◈ 神选
+            </span>
+          )}
+          {entity.scenePresence && (
+            <span
+              className="shrink-0 text-[10px] text-cinnabar/70"
+              title="在场"
+            >
+              ·在场
+            </span>
+          )}
+        </p>
+        <p className="truncate text-xs text-ink-faint">
+          {dormant ? "（尘封）" : ""}
+          {entity.summary}
+        </p>
+      </div>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onStar();
+        }}
+        className={`shrink-0 text-base transition ${
+          entity.starred ? "text-gilt" : "text-ink-faint/40 hover:text-gilt/60"
+        }`}
+        title={entity.starred ? "取消标星" : "标星（常驻上下文）"}
+      >
+        {entity.starred ? "★" : "☆"}
+      </button>
+    </li>
+  );
+}
+
+// ── 详情 ──
+
+function SectionBlock({ s }: { s: SectionRow }) {
+  return (
+    <section className="border-t border-line pt-2.5">
+      <h4 className="mb-1 flex items-center gap-2 text-xs tracking-widest text-ink-faint">
+        {s.content?.title || sectionName(s.key)}
+        {s.playerLocked && (
+          <span className="text-[10px] text-gilt/60" title="手书已锁，史官不改">
+            ✎ 亲录
+          </span>
+        )}
+      </h4>
+      {s.revealed ? (
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-soft">
+          {s.content?.text ?? s.content?.names?.join("、") ?? ""}
+        </p>
+      ) : (
+        <p className="fog-text text-sm">
+          {s.rumorText ? `传闻：${s.rumorText}` : "此处经卷残缺"}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function EntityDetailView({
+  entityId,
+  theme,
+  onBack,
+  onStarred,
+}: {
+  entityId: string;
+  theme: ThemeCard | null;
+  onBack: (() => void) | null;
+  onStarred: (id: string, starred: boolean) => void;
+}) {
+  const [detail, setDetail] = useState<EntityDetail | null>(null);
+  const [chronicle, setChronicle] = useState<ChronicleRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/codex/${entityId}`);
+        const json = (await res.json()) as {
+          entity?: EntityDetail;
+          chronicle?: ChronicleRow[];
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!res.ok || !json.entity) {
+          setError(json.error ?? "此册无从寻觅");
+          return;
+        }
+        setDetail(json.entity);
+        setChronicle(json.chronicle ?? []);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [entityId]);
+
+  const toggleStar = useCallback(async () => {
+    if (!detail) return;
+    const next = !detail.starred;
+    setDetail({ ...detail, starred: next });
+    onStarred(detail.id, next);
+    await fetch(`/api/codex/${detail.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ starred: next }),
+    });
+  }, [detail, onStarred]);
+
+  if (error) return <p className="text-sm text-cinnabar">{error}</p>;
+  if (!detail) return <p className="fog-text text-sm">展卷中…</p>;
+
+  return (
+    <div className="grid gap-4">
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="justify-self-start text-sm text-ink-faint transition hover:text-gilt"
+        >
+          ← 回众生录
+        </button>
+      )}
+
+      <header className="flex items-start gap-4">
+        <Emblem
+          seed={detail.emblemSeed}
+          type={detail.type}
+          size={56}
+          imageUrl={detail.imageUrl}
+        />
+        <div className="min-w-0 flex-1">
+          <h3
+            className="flex items-center gap-2 text-xl text-ink"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            {detail.name}
+            <button
+              onClick={toggleStar}
+              className={`text-base ${detail.starred ? "text-gilt" : "text-ink-faint/40 hover:text-gilt/60"}`}
+              title={detail.starred ? "取消标星" : "标星（常驻上下文）"}
+            >
+              {detail.starred ? "★" : "☆"}
+            </button>
+          </h3>
+          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-faint">
+            <span className="rounded border border-line px-1.5 py-0.5">
+              {entityTypeName(theme, detail.type)}
+            </span>
+            {detail.isChosen && (
+              <span className="rounded border border-gilt/50 px-1.5 py-0.5 text-gilt">
+                ◈ 神选者
+              </span>
+            )}
+            {detail.heat === "dormant" && <span>（尘封）</span>}
+            {detail.aliases.length > 0 && (
+              <span>又称：{detail.aliases.join("、")}</span>
+            )}
+          </p>
+        </div>
+      </header>
+
+      <p className="text-sm leading-relaxed text-ink-soft">{detail.summary}</p>
+
+      <div className="grid gap-3">
+        {detail.sections.map((s) => (
+          <SectionBlock key={s.id} s={s} />
+        ))}
+        {detail.sections.length === 0 && (
+          <p className="fog-text text-sm">册页尚薄——待岁月充实。</p>
+        )}
+      </div>
+
+      {chronicle.length > 0 && (
+        <div className="border-t border-line pt-3">
+          <h4 className="mb-2 text-xs tracking-widest text-ink-faint">其史</h4>
+          <ul className="grid gap-2">
+            {chronicle.map((c) => (
+              <li key={c.id} className="flex gap-3 text-sm">
+                <span className="shrink-0 text-xs text-gilt/70">{c.yearLabel}</span>
+                <span className="text-ink-soft">
+                  {c.text}
+                  {c.revealedAtChapter != null && (
+                    <span className="ml-1 text-xs text-ink-faint">
+                      （第{c.revealedAtChapter}章方揭）
+                    </span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 面板 ──
+
+export function CodexPanel({
+  timelineId,
+  theme,
+  initialEntityId,
+}: {
+  timelineId: string;
+  theme: ThemeCard | null;
+  initialEntityId?: string | null;
+}) {
+  const [entities, setEntities] = useState<EntityLite[] | null>(null);
+  const [openId, setOpenId] = useState<string | null>(initialEntityId ?? null);
+  const [filter, setFilter] = useState("");
+
+  const load = useCallback(async () => {
+    const res = await fetch(`/api/codex?timelineId=${timelineId}`);
+    if (!res.ok) return;
+    const json = (await res.json()) as { entities: EntityLite[] };
+    setEntities(json.entities);
+  }, [timelineId]);
+
+  useEffect(() => {
+    // defer：避免 effect 内同步 setState
+    const t = setTimeout(() => void load(), 0);
+    return () => clearTimeout(t);
+  }, [load]);
+
+  const star = useCallback(
+    async (id: string, starred: boolean) => {
+      setEntities((es) =>
+        es ? es.map((e) => (e.id === id ? { ...e, starred } : e)) : es,
+      );
+      await fetch(`/api/codex/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ starred }),
+      });
+    },
+    [],
+  );
+
+  if (openId) {
+    return (
+      <EntityDetailView
+        entityId={openId}
+        theme={theme}
+        onBack={() => {
+          setOpenId(null);
+          void load(); // 详情页星标可能变过 → 回列表刷新
+        }}
+        onStarred={(id, starred) =>
+          setEntities((es) =>
+            es ? es.map((e) => (e.id === id ? { ...e, starred } : e)) : es,
+          )
+        }
+      />
+    );
+  }
+
+  if (!entities) return <p className="fog-text text-sm">展卷中…</p>;
+  if (entities.length === 0) {
+    return <p className="fog-text text-sm">众生尚未入册——史官将在章末清点。</p>;
+  }
+
+  const q = filter.trim();
+  const shown = q
+    ? entities.filter(
+        (e) =>
+          e.name.includes(q) ||
+          e.aliases.some((a) => a.includes(q)) ||
+          e.summary.includes(q),
+      )
+    : entities;
+
+  return (
+    <div className="grid gap-5">
+      <input
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="检索众生（名讳 / 别称 / 摘要）…"
+        className="w-full rounded-md border border-line bg-paper-sunken px-3 py-1.5 text-sm text-ink outline-none placeholder:text-ink-faint/60 focus:border-gilt/50"
+      />
+
+      {ENTITY_TYPE_ORDER.map((type) => {
+        const group = shown.filter((e) => e.type === type);
+        if (group.length === 0) return null;
+        return (
+          <div key={type}>
+            <h3 className="mb-2 text-xs tracking-widest text-ink-faint">
+              {entityTypeName(theme, type)}
+              <span className="ml-1.5 text-ink-faint/60">{group.length}</span>
+            </h3>
+            <ul className="grid gap-2">
+              {group.map((e) => (
+                <EntityRow
+                  key={e.id}
+                  entity={e}
+                  onOpen={() => setOpenId(e.id)}
+                  onStar={() => void star(e.id, !e.starred)}
+                />
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+      {shown.length === 0 && (
+        <p className="fog-text text-sm">无一众生应此检索。</p>
+      )}
+    </div>
+  );
+}

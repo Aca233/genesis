@@ -149,6 +149,14 @@ export const ThemeCardSchema = z.object({
   rankNames: z
     .record(RankSchema, z.string())
     .describe("位阶的世界观措辞映射，如 nascent→散仙"),
+  typeNames: z
+    .record(
+      z.enum(["faction", "character", "race", "place", "artifact", "cult"]),
+      z.string(),
+    )
+    .describe(
+      "众生录六类的世界观措辞，如修仙界 faction→宗门势力、cult→道统；哥特帝国 faction→军团诸侯",
+    ),
   addressStyle: z.string().describe("称谓习惯"),
 });
 

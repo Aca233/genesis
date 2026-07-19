@@ -23,7 +23,13 @@ export const ExtractionSchema = z.object({
         aliases: z.array(z.string()),
         summary: z.string().describe("一句话摘要（120字内）"),
         sections: z
-          .array(z.object({ key: z.string(), text: z.string() }))
+          .array(
+            z.object({
+              key: z.string(),
+              title: z.string().describe("栏目标题，按世界观措辞的中文"),
+              text: z.string(),
+            }),
+          )
           .describe("按类型模板的栏目，仅写有据可依的"),
         isChosen: z.boolean().describe("是否玩家神选者（获赐印记）"),
       }),
@@ -34,7 +40,13 @@ export const ExtractionSchema = z.object({
       z.object({
         name: z.string().describe("已入册实体名（用正名）"),
         sectionDeltas: z
-          .array(z.object({ key: z.string(), text: z.string() }))
+          .array(
+            z.object({
+              key: z.string(),
+              title: z.string().describe("栏目标题，按世界观措辞的中文"),
+              text: z.string(),
+            }),
+          )
           .describe("栏目级更新（整栏覆写文本）"),
         summary: z.string().nullish().describe("摘要变化时更新"),
         newAliases: z.array(z.string()).nullish(),
@@ -112,6 +124,7 @@ Rules:
 ${Object.entries(SECTION_TEMPLATES)
   .map(([t, keys]) => `  ${t}: ${keys.join(", ")}`)
   .join("\n")}
+- Every section carries a "title": a short Chinese heading phrased in THIS world's voice (a cultivation world might title "military" as 「道兵战力」, a gothic empire as 「军团武备」). Keep titles stable for the same entity across chapters unless the world's framing shifts.
 - Write ONLY what the narrative supports; never invent facts to fill sections.
 - CHOSEN marks: if the player god granted a mark/blessing formally binding a mortal, set isChosen/becameChosen.
 - Mortal lifespans: if the chapter spans years (era/epoch scale), reflect aging/succession in lifespan sections.
