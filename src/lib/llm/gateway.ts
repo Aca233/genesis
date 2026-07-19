@@ -51,6 +51,8 @@ export async function resolveSlot(
 function isRetryable(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   if (/HTTP (429|500|502|503|504|529)/.test(msg)) return true;
+  // 中转站的 route_not_found / upstream 类 404 往往换个上游即通，值得重试
+  if (/HTTP 404/.test(msg) && /route_not_found|upstream|数据面/.test(msg)) return true;
   // fetch 网络层错误
   return /fetch failed|ECONNRESET|ETIMEDOUT|ECONNREFUSED|socket/i.test(msg);
 }

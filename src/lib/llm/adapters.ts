@@ -133,10 +133,14 @@ const openaiAdapter: ProviderAdapter = {
   },
 
   async listModels(baseUrl, apiKey) {
-    // 中转站路径千奇百怪：依次尝试 /models 与 /v1/models
+    // 中转站路径千奇百怪：依次尝试 base/models、根/models、base/v1/models
     const base = baseUrl.replace(/\/+$/, "");
     const candidates = [`${base}/models`];
-    if (!/\/v1$/.test(base)) candidates.push(`${base}/v1/models`);
+    if (/\/v1$/.test(base)) {
+      candidates.push(`${base.replace(/\/v1$/, "")}/models`); // 有的站挂在根路径
+    } else {
+      candidates.push(`${base}/v1/models`);
+    }
 
     let lastError = "";
     for (const url of candidates) {
@@ -159,7 +163,9 @@ const openaiAdapter: ProviderAdapter = {
       if (ids.length) return ids;
       lastError = "端点返回了空模型列表";
     }
-    throw new Error(lastError || "取名录失败");
+    throw new Error(
+      `${lastError || "取名录失败"}（该端点可能不提供模型列表接口——可直接手动输入模型名）`,
+    );
   },
 };
 
