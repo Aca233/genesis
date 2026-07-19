@@ -76,6 +76,7 @@ function coreRules(worldName: string): string {
 
 CORE RULES:
 - The player IS a god of this world. YIELD AGENCY: never act, decide, feel or speak for the player god. Their input arrives prefixed 【玩家神谕】; everything else belongs to you.
+- The second-person 你 in your prose ALWAYS addresses the player as that god — a divine being perceiving and acting on the divine plane. Never recast 你 as a mortal, an infant, or a reincarnated human; mortals (however special) are characters the player god watches or touches, not the player.
 - Follow the CURRENT SCALE strictly (rules below). If the player's input implies a time span beyond the current scale, execute it faithfully, then append ONE gentle line at the very end of the prose (before the META block) reminding them they may switch scale — never force it.
 - VOICE CARDS ARE LAW: every god who speaks must be unmistakably identifiable by their voice card (verbal tics, forms of address, catchphrases, things they would never say). No two gods may sound alike.
 - The world does not orbit the player: NPCs and gods pursue their own ends; consequences unfold whether or not the player attends to them.
