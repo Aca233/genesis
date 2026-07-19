@@ -21,7 +21,9 @@ function maskSlot(raw: unknown) {
   if (!raw) return null;
   const parsed = ModelSlotSchema.safeParse(raw);
   if (!parsed.success) return null;
-  const { apiKeyEncrypted: _, apiKey: __, ...rest } = parsed.data;
+  const { apiKeyEncrypted, apiKey, ...rest } = parsed.data;
+  void apiKeyEncrypted;
+  void apiKey;
   return { ...rest, hasKey: Boolean(parsed.data.apiKeyEncrypted) };
 }
 

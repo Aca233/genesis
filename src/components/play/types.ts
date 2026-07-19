@@ -1,0 +1,118 @@
+import type { Scale } from "@/lib/cards/schemas";
+
+/**
+ * 对局界面前端类型 —— 对应 GET /api/worlds/[id]/state 契约。
+ * 后端 Json 字段（persona/agenda/themeCard 等）以宽松可选结构承接，缺省容忍。
+ */
+
+/** 消息 meta（叙事契约 + 朱批标记） */
+export type MessageMeta = {
+  suggestions?: string[];
+  chapterBreakHint?: boolean;
+  edited?: boolean;
+};
+
+/** 异文候选 */
+export type Variant = {
+  content: string;
+  meta?: MessageMeta;
+  chosen: boolean;
+};
+
+/** Message 行（prisma shape，Json 已具体化） */
+export type MessageRow = {
+  id: string;
+  chapterId: string;
+  index: number;
+  role: "player" | "narrator";
+  content: string;
+  scale: Scale | string;
+  variants: Variant[] | null;
+  meta: MessageMeta | null;
+  createdAt: string;
+};
+
+/** 神明关系（对玩家） */
+export type GodRelation = { label: string; note?: string };
+
+/** 议程卡（仅揭示后下发） */
+export type GodAgenda = {
+  longTermGoal?: string;
+  shortTermGoals?: string[];
+  methods?: string;
+  stanceToPlayer?: { level?: string; motive?: string };
+  schemes?: string[];
+};
+
+export type GodRow = {
+  id: string;
+  name: string;
+  tier: "major" | "minor" | "player";
+  isPlayer: boolean;
+  rank: string;
+  domains: string[];
+  /** 玩家神 {origin, situation}；主神/次神 {text} */
+  persona: { text?: string; origin?: string; situation?: string } | null;
+  voice: unknown;
+  faithScope: string | null;
+  relations: { player?: GodRelation } | null;
+  agenda: GodAgenda | null;
+  agendaRevealed: boolean;
+};
+
+// ── 世界核心卡（Json 宽松结构） ──
+
+export type ThemeCard = {
+  eraSystem?: string;
+  rankNames?: Partial<Record<string, string>>;
+  addressStyle?: string;
+};
+
+export type StyleCard = { preset?: string; presetName?: string; toneNotes?: string };
+
+export type Cosmology = {
+  origin?: string;
+  powerSystem?: string;
+  laws?: string;
+  divinity?: string;
+};
+
+export type FusionAxiom = {
+  sourceIps?: string[];
+  axioms?: string[];
+  powerMapping?: string;
+  conflictRule?: string;
+};
+
+export type EpochConflict = {
+  epochName?: string;
+  yearLabel?: string;
+  overtConflicts?: string[];
+  hiddenCurrents?: string[];
+};
+
+export type WorldInfo = {
+  id: string;
+  name: string;
+  status: string; // draft | playing | concluded
+  genesisInput: string;
+  themeCard: ThemeCard | null;
+  styleCard: StyleCard | null;
+  cosmology: Cosmology | null;
+  fusionAxiom: FusionAxiom | null;
+  /** 后端 state 暂未下发此卡（M1）；防御性预留，缺省时设定集页显示残卷占位 */
+  epochConflict?: EpochConflict | null;
+};
+
+/** GET /api/worlds/[id]/state 全量 */
+export type PlayState = {
+  world: WorldInfo;
+  timeline: { id: string };
+  gods: GodRow[];
+  currentChapter: { id: string; index: number; title: string | null };
+  messages: MessageRow[];
+  prevChapterTail: MessageRow[];
+};
+
+/** 右缘符文抽屉页签（香炉为独立 Link，不在此列） */
+export type DrawerTab = "starmap" | "chronicle" | "god" | "lore" | "codex";
