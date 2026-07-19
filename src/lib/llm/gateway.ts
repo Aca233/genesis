@@ -48,13 +48,30 @@ export async function resolveSlot(
   return { slot, apiKey: decryptSecret(slot.apiKeyEncrypted), slotName: usedName };
 }
 
+/** 网络层/断流类错误（undici 的 terminated、other side closed 等都算） */
+function isNetworkError(msg: string): boolean {
+  return /fetch failed|terminated|other side closed|aborted|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|socket|UND_ERR/i.test(
+    msg,
+  );
+}
+
 function isRetryable(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   if (/HTTP (429|500|502|503|504|529)/.test(msg)) return true;
   // 中转站的 route_not_found / upstream 类 404 往往换个上游即通，值得重试
   if (/HTTP 404/.test(msg) && /route_not_found|upstream|数据面/.test(msg)) return true;
-  // fetch 网络层错误
-  return /fetch failed|ECONNRESET|ETIMEDOUT|ECONNREFUSED|socket/i.test(msg);
+  return isNetworkError(msg);
+}
+
+/** 把裸网络错误翻译成用户可读的说明（终局失败时用；HTTP 错误已自带响应体不动它） */
+function describeError(err: unknown): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (isNetworkError(msg) && !/^HTTP \d/.test(msg)) {
+    return new Error(
+      `与模型端点的连接中断（${msg}）——多为中转站在长响应中途掐断连接。已自动重试仍失败，可稍后再试或换用更稳的端点/模型。`,
+    );
+  }
+  return err instanceof Error ? err : new Error(msg);
 }
 
 async function backoff(attempt: number) {
@@ -130,10 +147,10 @@ export async function complete(
     await logCall(req.task, used, startedAt, true);
     return text;
   } catch (fallbackErr) {
-    const message =
-      lastError instanceof Error ? lastError.message : String(lastError ?? fallbackErr);
+    const finalErr = lastError ?? fallbackErr;
+    const message = finalErr instanceof Error ? finalErr.message : String(finalErr);
     await logCall(req.task, used, startedAt, false, message);
-    throw lastError ?? fallbackErr;
+    throw describeError(finalErr);
   }
 }
 
