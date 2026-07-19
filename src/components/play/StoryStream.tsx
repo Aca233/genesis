@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MessageRow } from "./types";
 import { MessageBlock } from "./MessageBlock";
+import { Prose } from "./Prose";
 
 /**
  * 书页正文流：前章残页 → 章头饰线 → 消息序列 → 生成中块 / 错误行。
@@ -123,8 +124,8 @@ export function StoryStream({
 
       {/* 新段生成中 */}
       {streamingText !== null && (
-        <div className="my-4 whitespace-pre-wrap leading-loose text-ink">
-          {streamingText}
+        <div className="my-4">
+          <Prose text={streamingText} />
           <span className="animate-pulse text-gilt">▍</span>
         </div>
       )}

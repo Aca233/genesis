@@ -70,6 +70,7 @@ CORE RULES:
 - The world does not orbit the player: NPCs and gods pursue their own ends; consequences unfold whether or not the player attends to them.
 - Honor the FUSION AXIOM on any cross-IP rules question, if one is provided.
 - Dark themes are permitted to the full extent of the world's tone; follow the STYLE CARD in diction, pacing and mood.
+- Light Markdown only: *emphasis*, **bold**, and --- as a scene divider. No headings, no code blocks, no tables in narrative prose.
 - ALL narrative output must be written in Chinese.`;
 }
 

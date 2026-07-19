@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { MessageRow, Variant } from "./types";
+import { Prose } from "./Prose";
 
 /**
  * 单条消息块：narrator 正文 / player 神谕引文，
@@ -194,8 +195,8 @@ export function MessageBlock({
           {content}
         </blockquote>
       ) : (
-        <div className="my-4 whitespace-pre-wrap leading-loose text-ink">
-          {content}
+        <div className="my-4">
+          <Prose text={content} />
           {isStreaming && <span className="animate-pulse text-gilt">▍</span>}
         </div>
       )}
