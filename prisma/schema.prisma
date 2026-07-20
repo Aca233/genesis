@@ -42,6 +42,7 @@ model Timeline {
   chapters    Chapter[]
   gods        God[]
   entities    Entity[]
+  abilities   Ability[]
   chronicles  ChronicleEntry[]
   omens       OmenQueue[]
   createdAt   DateTime         @default(now()) @map("created_at")
@@ -59,8 +60,9 @@ model Chapter {
   summary     String? // 章末史官小结
   settleState String    @default("open") @map("settle_state") // open | settling:<step> | settled
   snapshot    Json? // 章快照（M3 分叉用）
-  messages    Message[]
-  createdAt   DateTime  @default(now()) @map("created_at")
+  messages      Message[]
+  abilityEvents AbilityEvent[]
+  createdAt     DateTime  @default(now()) @map("created_at")
 
   @@unique([timelineId, index])
   @@map("chapters")
@@ -75,8 +77,9 @@ model Message {
   content   String
   scale     String   @default("scene") // scene | era | epoch
   variants  Json? // 异文候选 [{content, chosen}]
-  meta      Json? // 建议/揭示事件/实体链接span/edited标记
-  createdAt DateTime @default(now()) @map("created_at")
+  meta          Json? // 建议/揭示事件/实体链接span/edited标记
+  abilityEvents AbilityEvent[]
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@unique([chapterId, index])
   @@map("messages")
@@ -100,8 +103,9 @@ model God {
   agendaRevealed Boolean  @default(false) @map("agenda_revealed")
   relations      Json? // { targetId: {label, note} }
   faithScope     String?  @map("faith_scope")
-  codexEntityId  String?  @map("codex_entity_id")
-  createdAt      DateTime @default(now()) @map("created_at")
+  codexEntityId  String?    @map("codex_entity_id")
+  abilities      Ability[] @relation("GodAbilities")
+  createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@index([timelineId])
@@ -119,18 +123,95 @@ model Entity {
   aliases       String[]
   emblemSeed    String          @map("emblem_seed") // 程序纹章种子
   imageUrl      String?         @map("image_url") // 玩家上传；预留 AI 生图
-  starred       Boolean         @default(false)
-  isChosen      Boolean         @default(false) @map("is_chosen") // 神选者：永不降档/压缩
+  starred          Boolean            @default(false)
+  isChosen         Boolean            @default(false) @map("is_chosen") // 神选者：永不降档/压缩
+  isMajorCharacter Boolean            @default(false) @map("is_major_character")
+  raceId           String?            @map("race_id")
+  race             Entity?            @relation("CharacterRace", fields: [raceId], references: [id], onDelete: SetNull)
+  raceMembers      Entity[]           @relation("CharacterRace")
   heat          String          @default("active") // active | dormant
   scenePresence Boolean         @default(false) @map("scene_presence")
   summary       String // 摘要卡（dormant 时的全部）
   lockedPaths   String[]        @map("locked_paths") // player_locked 字段路径
-  sections      EntitySection[]
-  createdAt     DateTime        @default(now()) @map("created_at")
+  sections              EntitySection[]
+  abilities             Ability[]         @relation("EntityAbilities")
+  memberships           EntityMembership[] @relation("MembershipCharacter")
+  membershipsAsFaction  EntityMembership[] @relation("MembershipFaction")
+  createdAt             DateTime           @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")
 
   @@index([timelineId, type])
   @@map("entities")
+}
+
+model Ability {
+  id              String          @id @default(cuid())
+  timelineId      String          @map("timeline_id")
+  timeline        Timeline        @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  entityId        String?         @map("entity_id")
+  entity          Entity?         @relation("EntityAbilities", fields: [entityId], references: [id], onDelete: Cascade)
+  godId           String?         @map("god_id")
+  god             God?            @relation("GodAbilities", fields: [godId], references: [id], onDelete: Cascade)
+  sourceAbilityId String?         @map("source_ability_id")
+  sourceAbility   Ability?        @relation("AbilitySource", fields: [sourceAbilityId], references: [id], onDelete: SetNull)
+  derivedAbilities Ability[]      @relation("AbilitySource")
+  name            String
+  kind            String
+  effect          String
+  trigger         String
+  cost            String
+  limitations     String
+  mastery         String
+  state           String          @default("normal")
+  visibility      String          @default("known")
+  rumorText       String?         @map("rumor_text")
+  lockedFields    String[]        @map("locked_fields")
+  version         Int             @default(1)
+  events          AbilityEvent[]
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  @@index([timelineId])
+  @@index([entityId])
+  @@index([godId])
+  @@index([sourceAbilityId])
+  @@map("abilities")
+}
+
+model AbilityEvent {
+  id        String   @id @default(cuid())
+  abilityId String   @map("ability_id")
+  ability   Ability  @relation(fields: [abilityId], references: [id], onDelete: Cascade)
+  chapterId String   @map("chapter_id")
+  chapter   Chapter  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  messageId String?  @map("message_id")
+  message   Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  type      String
+  before    Json?
+  after     Json?
+  evidence  String
+  scale     String
+  dedupeKey String   @unique @map("dedupe_key")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([abilityId, createdAt])
+  @@index([chapterId])
+  @@index([messageId])
+  @@map("ability_events")
+}
+
+model EntityMembership {
+  id          String @id @default(cuid())
+  characterId String @map("character_id")
+  character   Entity @relation("MembershipCharacter", fields: [characterId], references: [id], onDelete: Cascade)
+  factionId   String @map("faction_id")
+  faction     Entity @relation("MembershipFaction", fields: [factionId], references: [id], onDelete: Cascade)
+  role        String
+  isPrimary   Boolean @default(false) @map("is_primary")
+
+  @@unique([characterId, factionId])
+  @@index([factionId])
+  @@map("entity_memberships")
 }
 
 model EntitySection {
