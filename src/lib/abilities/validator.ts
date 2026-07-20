@@ -214,9 +214,34 @@ export function assertValidTransition(
   }
 }
 
-export type AbilityDeckReferences = Record<string, unknown>;
+export interface WorldDeckRef {
+  ref: string;
+}
+
+export interface WorldDeckAbilityRef extends WorldDeckRef {
+  kind: string;
+}
+
+/** Structural contract for the final WorldDeck reference graph (Task 5 independent). */
+export interface WorldDeckReferenceGraph {
+  races: Array<WorldDeckRef & { abilities: WorldDeckAbilityRef[] }>;
+  factions: Array<WorldDeckRef & { keyCharacterRefs: WorldDeckRef[] }>;
+  majorCharacters: Array<
+    WorldDeckRef & {
+      raceRef: string | WorldDeckRef;
+      factionMemberships: Array<{ factionRef: string | WorldDeckRef }>;
+      learnedTraditionRefs: Array<{ sourceAbilityRef: string | WorldDeckRef }>;
+      racialOverrides: Array<{ sourceAbilityRef: string | WorldDeckRef }>;
+    }
+  >;
+}
 
 type DeckRecord = Record<string, unknown>;
+
+interface DeckAbilitySource {
+  raceRef: string;
+  kind: string;
+}
 
 function isRecord(value: unknown): value is DeckRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -224,139 +249,146 @@ function isRecord(value: unknown): value is DeckRecord {
 
 function deckList(deck: DeckRecord, field: string): unknown[] {
   const value = deck[field];
-  if (value === undefined) {
-    return [];
-  }
   if (!Array.isArray(value)) {
     fail(`${field} 必须是数组`);
   }
   return value;
 }
 
-function referenceId(value: unknown, label: string): string {
-  const id = typeof value === "string" ? value : isRecord(value) ? value.id : undefined;
-  if (typeof id !== "string" || id.trim() === "" || id.trim() !== id) {
-    fail(`${label} 必须是非空且无首尾空白的 ID 引用`);
+function record(value: unknown, label: string): DeckRecord {
+  if (!isRecord(value)) {
+    fail(`${label} 必须是对象`);
   }
-  return id;
+  return value;
 }
 
-function assertUnique(ids: readonly string[], label: string): void {
+function referenceRef(value: unknown, label: string): string {
+  const ref = typeof value === "string" ? value : isRecord(value) ? value.ref : undefined;
+  if (typeof ref !== "string" || ref.trim() === "" || ref.trim() !== ref) {
+    fail(`${label} 必须是非空且无首尾空白的 ref`);
+  }
+  return ref;
+}
+
+function fieldRef(recordValue: DeckRecord, field: string, label: string): string {
+  if (recordValue[field] === undefined) {
+    fail(`${label}缺失`);
+  }
+  return referenceRef(recordValue[field], label);
+}
+
+function assertUnique(refs: readonly string[], label: string): void {
   const seen = new Set<string>();
-  for (const id of ids) {
-    if (seen.has(id)) {
-      fail(`${label} 不能包含重复引用 "${id}"`);
+  for (const ref of refs) {
+    if (seen.has(ref)) {
+      fail(`${label} 不能包含重复 ref "${ref}"`);
     }
-    seen.add(id);
+    seen.add(ref);
   }
 }
 
-function requireReference(id: string, ids: ReadonlySet<string>, label: string): void {
-  if (!ids.has(id)) {
-    fail(`${label}引用 "${id}" 不存在`);
+function requireReference(ref: string, available: ReadonlySet<string>, label: string): void {
+  if (!available.has(ref)) {
+    fail(`${label}引用 "${ref}" 不存在`);
   }
-}
-
-function fieldReference(record: DeckRecord, names: readonly string[], label: string): string {
-  for (const name of names) {
-    if (record[name] !== undefined) {
-      return referenceId(record[name], label);
-    }
-  }
-  fail(`${label}缺失`);
 }
 
 /**
- * Validates the reference graph of the planned deck payload without coupling
- * this module to Task 5's future Zod type. String and `{ id }` references are
- * both accepted; malformed unknown input always produces a domain error.
+ * Validates the final nested WorldDeck reference graph without importing the
+ * future Task 5 Zod schema. Every error is a readable domain validation error.
  */
-export function validateDeckReferences(deck: AbilityDeckReferences): void {
-  if (!isRecord(deck)) {
-    fail("deck 必须是对象");
-  }
+export function validateDeckReferences(deck: WorldDeckReferenceGraph): void {
+  const root = record(deck, "WorldDeck");
+  const races = new Set<string>();
+  const abilities = new Map<string, DeckAbilitySource>();
 
-  // Retain validation for the compact legacy id arrays used by early callers.
-  for (const field of ["abilityIds", "entityIds", "godIds"] as const) {
-    const ids = deckList(deck, field).map((value, index) => referenceId(value, `${field}[${index}]`));
-    assertUnique(ids, field);
-  }
+  const raceRefs: string[] = [];
+  for (const [raceIndex, rawRace] of deckList(root, "races").entries()) {
+    const race = record(rawRace, `races[${raceIndex}]`);
+    const raceRef = fieldRef(race, "ref", `races[${raceIndex}].ref`);
+    raceRefs.push(raceRef);
+    races.add(raceRef);
 
-  const raceIds = deckList(deck, "races").map((value, index) => referenceId(value, `races[${index}]`));
-  const factionIds = deckList(deck, "factions").map((value, index) => referenceId(value, `factions[${index}]`));
-  assertUnique(raceIds, "races");
-  assertUnique(factionIds, "factions");
-  const races = new Set(raceIds);
-  const factions = new Set(factionIds);
-
-  const characters = new Set<string>();
-  for (const [index, value] of deckList(deck, "majorCharacters").entries()) {
-    if (!isRecord(value)) {
-      fail(`majorCharacters[${index}] 必须是对象`);
-    }
-    const id = fieldReference(value, ["id", "character", "characterId"], `majorCharacters[${index}] 人物引用`);
-    if (characters.has(id)) {
-      fail(`majorCharacters 不能包含重复引用 "${id}"`);
-    }
-    characters.add(id);
-    const raceId = fieldReference(value, ["race", "raceId"], `majorCharacters[${index}] 种族引用`);
-    requireReference(raceId, races, "种族");
-  }
-
-  const abilities = new Map<string, string>();
-  for (const [index, value] of deckList(deck, "abilities").entries()) {
-    if (!isRecord(value)) {
-      fail(`abilities[${index}] 必须是对象`);
-    }
-    const id = referenceId(value, `abilities[${index}]`);
-    if (abilities.has(id)) {
-      fail(`abilities 不能包含重复引用 "${id}"`);
-    }
-    if (typeof value.kind !== "string") {
-      fail(`abilities[${index}].kind 缺失`);
-    }
-    abilities.set(id, value.kind);
-  }
-
-  const membershipKeys: string[] = [];
-  for (const [index, value] of deckList(deck, "factionMemberships").entries()) {
-    if (!isRecord(value)) {
-      fail(`factionMemberships[${index}] 必须是对象`);
-    }
-    const characterId = fieldReference(value, ["character", "characterId"], `factionMemberships[${index}] 人物引用`);
-    const factionId = fieldReference(value, ["faction", "factionId"], `factionMemberships[${index}] 势力引用`);
-    requireReference(characterId, characters, "人物");
-    requireReference(factionId, factions, "势力");
-    membershipKeys.push(`${characterId}:${factionId}`);
-  }
-  assertUnique(membershipKeys, "factionMemberships");
-
-  const keyCharacters = deckList(deck, "keyCharacterRefs").map((value, index) =>
-    referenceId(value, `keyCharacterRefs[${index}]`),
-  );
-  assertUnique(keyCharacters, "keyCharacterRefs");
-  keyCharacters.forEach((id) => requireReference(id, characters, "关键人物"));
-
-  const validateAbilityRefs = (field: string, expectedKind: "racial_tradition" | "racial_innate") => {
-    const keys: string[] = [];
-    for (const [index, value] of deckList(deck, field).entries()) {
-      if (!isRecord(value)) {
-        fail(`${field}[${index}] 必须是对象`);
+    const abilityRefs: string[] = [];
+    for (const [abilityIndex, rawAbility] of deckList(race, "abilities").entries()) {
+      const ability = record(rawAbility, `races[${raceIndex}].abilities[${abilityIndex}]`);
+      const abilityRef = fieldRef(ability, "ref", `races[${raceIndex}].abilities[${abilityIndex}].ref`);
+      abilityRefs.push(abilityRef);
+      if (abilities.has(abilityRef)) {
+        fail(`abilities 不能包含重复 ref "${abilityRef}"`);
       }
-      const characterId = fieldReference(value, ["character", "characterId"], `${field}[${index}] 人物引用`);
-      const abilityId = fieldReference(value, ["ability", "abilityId"], `${field}[${index}] 能力引用`);
-      requireReference(characterId, characters, "人物");
-      if (!abilities.has(abilityId)) {
-        fail(`能力引用 "${abilityId}" 不存在`);
+      if (typeof ability.kind !== "string") {
+        fail(`races[${raceIndex}].abilities[${abilityIndex}].kind 缺失`);
       }
-      if (abilities.get(abilityId) !== expectedKind) {
-        fail(`${field} 只能引用 ${expectedKind} 能力`);
-      }
-      keys.push(`${characterId}:${abilityId}`);
+      abilities.set(abilityRef, { raceRef, kind: ability.kind });
     }
-    assertUnique(keys, field);
-  };
+    assertUnique(abilityRefs, `races[${raceIndex}].abilities`);
+  }
+  assertUnique(raceRefs, "races");
 
-  validateAbilityRefs("learnedTraditionRefs", "racial_tradition");
-  validateAbilityRefs("racialOverrides", "racial_innate");
+  const factions = new Map<string, DeckRecord>();
+  const factionRefs: string[] = [];
+  for (const [index, rawFaction] of deckList(root, "factions").entries()) {
+    const faction = record(rawFaction, `factions[${index}]`);
+    const factionRef = fieldRef(faction, "ref", `factions[${index}].ref`);
+    factionRefs.push(factionRef);
+    factions.set(factionRef, faction);
+  }
+  assertUnique(factionRefs, "factions");
+
+  const characters = new Map<string, { raceRef: string; value: DeckRecord }>();
+  const characterRefs: string[] = [];
+  for (const [index, rawCharacter] of deckList(root, "majorCharacters").entries()) {
+    const character = record(rawCharacter, `majorCharacters[${index}]`);
+    const characterRef = fieldRef(character, "ref", `majorCharacters[${index}].ref`);
+    const raceRef = fieldRef(character, "raceRef", `majorCharacters[${index}].raceRef`);
+    characterRefs.push(characterRef);
+    requireReference(raceRef, races, "种族");
+    characters.set(characterRef, { raceRef, value: character });
+  }
+  assertUnique(characterRefs, "majorCharacters");
+
+  for (const [factionRef, faction] of factions) {
+    const keyRefs = deckList(faction, "keyCharacterRefs").map((value, index) =>
+      referenceRef(value, `factions[${factionRef}].keyCharacterRefs[${index}]`),
+    );
+    assertUnique(keyRefs, `factions[${factionRef}].keyCharacterRefs`);
+    keyRefs.forEach((ref) => requireReference(ref, new Set(characters.keys()), "关键人物"));
+  }
+
+  for (const [characterRef, character] of characters) {
+    const memberships = deckList(character.value, "factionMemberships").map((value, index) => {
+      const membership = record(value, `majorCharacters[${characterRef}].factionMemberships[${index}]`);
+      return fieldRef(membership, "factionRef", `majorCharacters[${characterRef}].factionMemberships[${index}].factionRef`);
+    });
+    assertUnique(memberships, `majorCharacters[${characterRef}].factionMemberships`);
+    memberships.forEach((ref) => requireReference(ref, new Set(factions.keys()), "势力"));
+
+    const validateSources = (
+      field: "learnedTraditionRefs" | "racialOverrides",
+      expectedKind: "racial_tradition" | "racial_innate",
+      mustMatchRace: boolean,
+    ) => {
+      const refs = deckList(character.value, field).map((value, index) => {
+        const source = record(value, `majorCharacters[${characterRef}].${field}[${index}]`);
+        return fieldRef(source, "sourceAbilityRef", `majorCharacters[${characterRef}].${field}[${index}].sourceAbilityRef`);
+      });
+      assertUnique(refs, `majorCharacters[${characterRef}].${field}`);
+      for (const sourceRef of refs) {
+        const source = abilities.get(sourceRef);
+        if (source === undefined) {
+          fail(`能力来源引用 "${sourceRef}" 不存在`);
+        }
+        if (source.kind !== expectedKind) {
+          fail(`${field} 只能引用 ${expectedKind} 能力`);
+        }
+        if (mustMatchRace && source.raceRef !== character.raceRef) {
+          fail(`族群技艺来源必须属于人物主种族 "${character.raceRef}"`);
+        }
+      }
+    };
+
+    validateSources("learnedTraditionRefs", "racial_tradition", true);
+    validateSources("racialOverrides", "racial_innate", false);
+  }
 }

@@ -115,11 +115,68 @@ describe("assertValidTransition", () => {
   });
 });
 
-describe("validateDeckReferences", () => {
-  it("拒绝带有首尾空白的引用 ID", () => {
-    expect(() => validateDeckReferences({ abilityIds: [" ability-1"] })).toThrow(
-      /空白/,
-    );
+describe("validateDeckReferences nested WorldDeck reference graph", () => {
+  const deck = {
+    races: [
+      {
+        ref: "race-1",
+        abilities: [
+          { ref: "race-1-innate", kind: "racial_innate" },
+          { ref: "race-1-tradition", kind: "racial_tradition" },
+        ],
+      },
+      {
+        ref: "race-2",
+        abilities: [{ ref: "race-2-tradition", kind: "racial_tradition" }],
+      },
+    ],
+    factions: [{ ref: "faction-1", keyCharacterRefs: [{ ref: "character-1" }] }],
+    majorCharacters: [
+      {
+        ref: "character-1",
+        raceRef: "race-1",
+        factionMemberships: [{ factionRef: "faction-1" }],
+        learnedTraditionRefs: [{ sourceAbilityRef: "race-1-tradition" }],
+        racialOverrides: [{ sourceAbilityRef: "race-1-innate" }],
+      },
+    ],
+  };
+
+  it("接受最终嵌套的 WorldDeck 引用图谱", () => {
+    expect(() => validateDeckReferences(deck)).not.toThrow();
+  });
+
+  it("拒绝同类重复 ref", () => {
+    expect(() =>
+      validateDeckReferences({
+        ...deck,
+        races: [...deck.races, { ref: "race-1", abilities: [] }],
+      }),
+    ).toThrow(/重复.*race-1/);
+  });
+
+  it.each([
+    ["种族", { ...deck, majorCharacters: [{ ...deck.majorCharacters[0], raceRef: "missing-race" }] }],
+    ["势力", { ...deck, majorCharacters: [{ ...deck.majorCharacters[0], factionMemberships: [{ factionRef: "missing-faction" }] }] }],
+    ["人物", { ...deck, factions: [{ ref: "faction-1", keyCharacterRefs: [{ ref: "missing-character" }] }] }],
+    ["能力", { ...deck, majorCharacters: [{ ...deck.majorCharacters[0], learnedTraditionRefs: [{ sourceAbilityRef: "missing-ability" }] }] }],
+  ])("拒绝不存在的%s引用", (_label, invalidDeck) => {
+    expect(() => validateDeckReferences(invalidDeck)).toThrow(/不存在/);
+  });
+
+  it("拒绝跨种族族群技艺来源和错误的覆写类型", () => {
+    expect(() =>
+      validateDeckReferences({
+        ...deck,
+        majorCharacters: [{ ...deck.majorCharacters[0], learnedTraditionRefs: [{ sourceAbilityRef: "race-2-tradition" }] }],
+      }),
+    ).toThrow(/主种族/);
+    expect(() =>
+      validateDeckReferences({
+        ...deck,
+        majorCharacters: [{ ...deck.majorCharacters[0], racialOverrides: [{ sourceAbilityRef: "race-1-tradition" }] }],
+      }),
+    ).toThrow(/racial_innate/);
   });
 });
 
@@ -214,48 +271,5 @@ describe("能力所有者类型", () => {
         } as AbilityOwnershipInput,
       ),
     ).rejects.toThrow("族群技艺来源必须属于人物主种族");
-  });
-});
-
-describe("validateDeckReferences planned deck shape", () => {
-  const deck = {
-    races: [{ id: "race-1" }],
-    factions: [{ id: "faction-1" }],
-    majorCharacters: [{ id: "character-1", race: { id: "race-1" } }],
-    factionMemberships: [{ character: { id: "character-1" }, faction: { id: "faction-1" } }],
-    keyCharacterRefs: [{ id: "character-1" }],
-    abilities: [{ id: "innate-1", kind: "racial_innate" }, { id: "tradition-1", kind: "racial_tradition" }],
-    learnedTraditionRefs: [{ character: { id: "character-1" }, ability: { id: "tradition-1" } }],
-    racialOverrides: [{ character: { id: "character-1" }, ability: { id: "innate-1" } }],
-  };
-
-  it("拒绝重复的关键人物引用", () => {
-    expect(() =>
-      validateDeckReferences({ ...deck, keyCharacterRefs: [{ id: "character-1" }, { id: "character-1" }] }),
-    ).toThrow(/重复.*character-1/);
-  });
-
-  it.each([
-    ["种族", { ...deck, majorCharacters: [{ id: "character-1", race: { id: "missing-race" } }] }],
-    ["势力", { ...deck, factionMemberships: [{ character: { id: "character-1" }, faction: { id: "missing-faction" } }] }],
-    ["人物", { ...deck, factionMemberships: [{ character: { id: "missing-character" }, faction: { id: "faction-1" } }] }],
-    ["能力", { ...deck, learnedTraditionRefs: [{ character: { id: "character-1" }, ability: { id: "missing-ability" } }] }],
-  ])("拒绝不存在的%s引用", (_label, invalidDeck) => {
-    expect(() => validateDeckReferences(invalidDeck)).toThrow(/不存在/);
-  });
-
-  it("拒绝引用错误能力类型的传统学习和种族覆写", () => {
-    expect(() =>
-      validateDeckReferences({
-        ...deck,
-        learnedTraditionRefs: [{ character: { id: "character-1" }, ability: { id: "innate-1" } }],
-      }),
-    ).toThrow(/racial_tradition/);
-    expect(() =>
-      validateDeckReferences({
-        ...deck,
-        racialOverrides: [{ character: { id: "character-1" }, ability: { id: "tradition-1" } }],
-      }),
-    ).toThrow(/racial_innate/);
   });
 });

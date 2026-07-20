@@ -19,6 +19,7 @@ interface TransactionOptions {
   duplicateSource?: AbilityStoredRecord | null;
   chapter?: { id: string; timelineId: string } | null;
   message?: { id: string; chapterId: string; scale: string } | null;
+  updateError?: Error & { code?: string; meta?: { target?: string[] } };
 }
 
 function ability(overrides: Partial<AbilityStoredRecord> = {}): AbilityStoredRecord {
@@ -66,6 +67,9 @@ function transaction(initialAbility = ability(), options: TransactionOptions = {
       findFirst: async () => options.duplicateSource ?? null,
       update: async ({ where, data }) => {
         calls.update += 1;
+        if (options.updateError !== undefined) {
+          throw options.updateError;
+        }
         if (
           where.id_version.id !== currentAbility.id ||
           where.id_version.version !== currentAbility.version
@@ -227,6 +231,33 @@ describe("applyAbilityChange integrity guards", () => {
         version: 1,
         patch: { name: "新版影行" },
         event: { ...change.event, type: "mutated", dedupeKey: "duplicate-source" },
+      }),
+    ).rejects.toThrow(/重复.*来源/);
+  });
+
+  it("将数据库来源唯一约束冲突转换为可读的重复来源错误", async () => {
+    const source = ability({
+      id: "template-1",
+      entityId: "race-1",
+      kind: "racial_tradition",
+      sourceAbilityId: null,
+    });
+    const derived = ability({
+      id: "derived-1",
+      kind: "racial_tradition",
+      sourceAbilityId: "template-1",
+    });
+    const uniqueError = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+      meta: { target: ["entity_id", "source_ability_id"] },
+    });
+
+    await expect(
+      applyAbilityChange(transaction(derived, { sourceAbility: source, updateError: uniqueError }).tx, {
+        abilityId: "derived-1",
+        version: 1,
+        patch: { name: "新版影行" },
+        event: { ...change.event, type: "mutated", dedupeKey: "db-duplicate-source" },
       }),
     ).rejects.toThrow(/重复.*来源/);
   });

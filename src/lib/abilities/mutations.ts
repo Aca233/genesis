@@ -264,6 +264,21 @@ async function assertNoDuplicateDerivedSource(
   }
 }
 
+function isSourceUniquenessError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const candidate = error as { code?: unknown; meta?: { target?: unknown } };
+  if (candidate.code !== "P2002" || !Array.isArray(candidate.meta?.target)) {
+    return false;
+  }
+  const target = candidate.meta.target;
+  return (
+    target.includes("entity_id") &&
+    target.includes("source_ability_id")
+  );
+}
+
 function throwConflict(): never {
   throw new AbilityOptimisticConflictError("能力已被其他变更更新，请刷新后重试");
 }
@@ -312,6 +327,9 @@ export async function applyAbilityChange(
   } catch (error) {
     if (error instanceof AbilityValidationError) {
       throw error;
+    }
+    if (isSourceUniquenessError(error)) {
+      throw new AbilityValidationError("同一人物不能拥有重复的活跃种族能力来源");
     }
     throwConflict();
   }

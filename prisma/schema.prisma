@@ -175,6 +175,7 @@ model Ability {
   @@index([entityId])
   @@index([godId])
   @@index([sourceAbilityId])
+  @@unique([entityId, sourceAbilityId])
   @@map("abilities")
 }
 
