@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { parsePersistedWorldDeck, type WorldDeck } from "@/lib/cards/schemas";
-import { validateDeckReferences } from "@/lib/abilities/validator";
 import { factionSections } from "@/lib/cards/faction-sections";
+import { materializeDeckAbilities } from "@/lib/abilities/embark";
+import { validateDeckReferences } from "@/lib/abilities/validator";
 
 /**
  * POST /api/worlds/[id]/embark —— 开局：草稿卡组物化为时间线+诸神+百科实体+第一章
@@ -17,21 +18,198 @@ function emblemSeed(name: string): string {
   return h.toString(36);
 }
 
-function raceSections(r: WorldDeck["races"][number]) {
+function raceSections(race: WorldDeck["races"][number]) {
   return [
-    { key: "overview", content: { text: r.traits } },
-    { key: "lifespan", content: { text: r.lifespan } },
-    { key: "distribution", content: { text: r.distribution } },
-    { key: "divineTies", content: { text: r.divineTies } },
+    { key: "overview", content: { text: race.traits } },
+    { key: "lifespan", content: { text: race.lifespan } },
+    { key: "distribution", content: { text: race.distribution } },
+    { key: "divineTies", content: { text: race.divineTies } },
   ];
 }
 
-function placeSections(p: WorldDeck["places"][number]) {
+function placeSections(place: WorldDeck["places"][number]) {
   return [
-    { key: "overview", content: { text: p.overview } },
-    { key: "kind", content: { text: p.kind } },
-    { key: "allegiance", content: { text: p.allegiance } },
+    { key: "overview", content: { text: place.overview } },
+    { key: "kind", content: { text: place.kind } },
+    { key: "allegiance", content: { text: place.allegiance } },
   ];
+}
+
+function characterSections(character: WorldDeck["majorCharacters"][number]) {
+  return [
+    { key: "overview", content: { text: character.situation } },
+    { key: "identity", content: { text: character.identity } },
+    { key: "affiliation", content: { text: character.factionMemberships.map(({ role }) => role).join("、") } },
+    { key: "lifespan", content: { text: character.ageStage } },
+    { key: "personality", content: { text: character.personality } },
+    { key: "faithHistory", content: { text: character.divineTies } },
+    { key: "relationToPlayer", content: { text: character.conflictTies } },
+  ];
+}
+
+/**
+ * Creates every opening record from a validated card deck. It deliberately does
+ * all reference resolution through maps built from this transaction's new IDs,
+ * so a failed lookup throws and the enclosing Prisma transaction rolls back.
+ */
+export async function materializeEmbarkDeck(
+  tx: Prisma.TransactionClient,
+  worldId: string,
+  deck: WorldDeck,
+): Promise<{ timelineId: string; chapterId: string }> {
+  const timeline = await tx.timeline.create({ data: { worldId } });
+  const ids = {
+    raceByRef: new Map<string, string>(),
+    factionByRef: new Map<string, string>(),
+    characterByRef: new Map<string, string>(),
+    godByRef: new Map<string, string>(),
+    abilityByRef: new Map<string, string>(),
+  };
+
+  const playerGod = await tx.god.create({
+    data: {
+      timelineId: timeline.id,
+      name: deck.playerGod.name,
+      aliases: [],
+      tier: "player",
+      isPlayer: true,
+      rank: deck.playerGod.rank,
+      domains: deck.playerGod.domains,
+      persona: {
+        origin: deck.playerGod.origin,
+        situation: deck.playerGod.situation,
+      } as Prisma.InputJsonValue,
+      faithScope: deck.playerGod.faithBase,
+    },
+  });
+  ids.godByRef.set(deck.playerGod.ref, playerGod.id);
+
+  for (const god of deck.majorGods) {
+    const created = await tx.god.create({
+      data: {
+        timelineId: timeline.id,
+        name: god.name,
+        aliases: god.aliases,
+        tier: "major",
+        rank: god.rank,
+        domains: god.domains,
+        persona: { text: god.persona } as Prisma.InputJsonValue,
+        voice: god.voice as Prisma.InputJsonValue,
+        agenda: god.agenda as unknown as Prisma.InputJsonValue,
+        relations: {
+          player: {
+            label: god.initialRelationToPlayer.label,
+            note: god.initialRelationToPlayer.note,
+          },
+        } as Prisma.InputJsonValue,
+        faithScope: god.faithScope,
+      },
+    });
+    ids.godByRef.set(god.ref, created.id);
+  }
+
+  for (const god of deck.minorGods) {
+    await tx.god.create({
+      data: {
+        timelineId: timeline.id,
+        name: god.name,
+        aliases: [],
+        tier: "minor",
+        persona: { text: god.brief } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  for (const race of deck.races) {
+    const created = await tx.entity.create({
+      data: {
+        timelineId: timeline.id,
+        type: "race",
+        name: race.name,
+        aliases: race.aliases,
+        emblemSeed: emblemSeed(race.name),
+        summary: race.traits.slice(0, 120),
+        sections: { create: raceSections(race) },
+      },
+    });
+    ids.raceByRef.set(race.ref, created.id);
+  }
+
+  for (const faction of deck.factions) {
+    const created = await tx.entity.create({
+      data: {
+        timelineId: timeline.id,
+        type: "faction",
+        name: faction.name,
+        aliases: faction.aliases,
+        emblemSeed: emblemSeed(faction.name),
+        summary: faction.overview.slice(0, 120),
+        sections: {
+          create: factionSections(faction, deck.majorCharacters) as {
+            key: string;
+            content: Prisma.InputJsonValue;
+          }[],
+        },
+      },
+    });
+    ids.factionByRef.set(faction.ref, created.id);
+  }
+
+  for (const place of deck.places) {
+    await tx.entity.create({
+      data: {
+        timelineId: timeline.id,
+        type: "place",
+        name: place.name,
+        aliases: place.aliases,
+        emblemSeed: emblemSeed(place.name),
+        summary: place.overview.slice(0, 120),
+        sections: { create: placeSections(place) },
+      },
+    });
+  }
+
+  for (const character of deck.majorCharacters) {
+    const raceId = ids.raceByRef.get(character.raceRef);
+    if (raceId === undefined) {
+      throw new Error(`无法解析种族引用 "${character.raceRef}"`);
+    }
+
+    const created = await tx.entity.create({
+      data: {
+        timelineId: timeline.id,
+        type: "character",
+        name: character.name,
+        aliases: character.aliases,
+        emblemSeed: emblemSeed(character.name),
+        isMajorCharacter: true,
+        raceId,
+        summary: character.situation.slice(0, 120),
+        sections: { create: characterSections(character) },
+      },
+    });
+    ids.characterByRef.set(character.ref, created.id);
+  }
+
+  await materializeDeckAbilities(tx, timeline.id, deck, ids);
+
+  const chapter = await tx.chapter.create({
+    data: {
+      timelineId: timeline.id,
+      index: 1,
+      title: "创世",
+    },
+  });
+
+  await tx.world.update({
+    where: { id: worldId },
+    data: {
+      status: "playing",
+      activeTimelineId: timeline.id,
+    },
+  });
+
+  return { timelineId: timeline.id, chapterId: chapter.id };
 }
 
 export async function POST(
@@ -55,139 +233,11 @@ export async function POST(
     return NextResponse.json({ error: "草稿卡组已损坏" }, { status: 500 });
   }
 
-  const result = await prisma.$transaction(async (tx) => {
-    const timeline = await tx.timeline.create({
-      data: { worldId: world.id },
-    });
-
-    // 玩家神
-    await tx.god.create({
-      data: {
-        timelineId: timeline.id,
-        name: deck.playerGod.name,
-        aliases: [],
-        tier: "player",
-        isPlayer: true,
-        rank: deck.playerGod.rank,
-        domains: deck.playerGod.domains,
-        persona: {
-          origin: deck.playerGod.origin,
-          situation: deck.playerGod.situation,
-        } as Prisma.InputJsonValue,
-        faithScope: deck.playerGod.faithBase,
-      },
-    });
-
-    // 主神（议程默认隐藏）
-    for (const god of deck.majorGods) {
-      await tx.god.create({
-        data: {
-          timelineId: timeline.id,
-          name: god.name,
-          aliases: god.aliases,
-          tier: "major",
-          rank: god.rank,
-          domains: god.domains,
-          persona: { text: god.persona } as Prisma.InputJsonValue,
-          voice: god.voice as Prisma.InputJsonValue,
-          agenda: god.agenda as unknown as Prisma.InputJsonValue,
-          relations: {
-            player: {
-              label: god.initialRelationToPlayer.label,
-              note: god.initialRelationToPlayer.note,
-            },
-          } as Prisma.InputJsonValue,
-          faithScope: god.faithScope,
-        },
-      });
-    }
-
-    // 次要神
-    for (const god of deck.minorGods) {
-      await tx.god.create({
-        data: {
-          timelineId: timeline.id,
-          name: god.name,
-          aliases: [],
-          tier: "minor",
-          persona: { text: god.brief } as Prisma.InputJsonValue,
-        },
-      });
-    }
-
-    // 百科首批实体
-    const entityData: {
-      type: string;
-      name: string;
-      aliases: string[];
-      summary: string;
-      sections: { key: string; content: Prisma.InputJsonValue }[];
-    }[] = [
-      ...deck.factions.map((f) => ({
-        type: "faction",
-        name: f.name,
-        aliases: f.aliases,
-        summary: f.overview.slice(0, 120),
-        sections: factionSections(f, deck.majorCharacters) as {
-          key: string;
-          content: Prisma.InputJsonValue;
-        }[],
-      })),
-      ...deck.races.map((r) => ({
-        type: "race",
-        name: r.name,
-        aliases: r.aliases,
-        summary: r.traits.slice(0, 120),
-        sections: raceSections(r) as {
-          key: string;
-          content: Prisma.InputJsonValue;
-        }[],
-      })),
-      ...deck.places.map((p) => ({
-        type: "place",
-        name: p.name,
-        aliases: p.aliases,
-        summary: p.overview.slice(0, 120),
-        sections: placeSections(p) as {
-          key: string;
-          content: Prisma.InputJsonValue;
-        }[],
-      })),
-    ];
-
-    for (const e of entityData) {
-      await tx.entity.create({
-        data: {
-          timelineId: timeline.id,
-          type: e.type,
-          name: e.name,
-          aliases: e.aliases,
-          emblemSeed: emblemSeed(e.name),
-          summary: e.summary,
-          sections: { create: e.sections },
-        },
-      });
-    }
-
-    // 第一章
-    const chapter = await tx.chapter.create({
-      data: {
-        timelineId: timeline.id,
-        index: 1,
-        title: "创世",
-      },
-    });
-
-    await tx.world.update({
-      where: { id: world.id },
-      data: {
-        status: "playing",
-        activeTimelineId: timeline.id,
-      },
-    });
-
-    return { timelineId: timeline.id, chapterId: chapter.id };
-  });
-
-  return NextResponse.json(result);
+  try {
+    const result = await prisma.$transaction((tx) => materializeEmbarkDeck(tx, world.id, deck));
+    return NextResponse.json(result);
+  } catch (error) {
+    console.error("Failed to materialize embark deck", error);
+    return NextResponse.json({ error: "开局物化失败" }, { status: 500 });
+  }
 }
