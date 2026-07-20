@@ -12,8 +12,15 @@ export type NarrationFinalizationTx = Omit<AbilityMutationTx, "message" | "abili
     findUnique(args: { where: { id: string } }): Promise<unknown>;
     update(args: {
       where: { id: string };
-      data: { status: string; narratorMessageId: string; resultMeta: Prisma.InputJsonValue };
+      data: {
+        status: string; narratorMessageId: string; resultMeta: Prisma.InputJsonValue;
+        error: null; leaseExpiresAt: null;
+      };
     }): Promise<unknown>;
+    updateMany(args: {
+      where: { id: string; status: string; attempt: number };
+      data: { leaseExpiresAt: Date };
+    }): Promise<{ count: number }>;
   };
   message: {
     findUnique(args: { where: { id: string } }): Promise<{
@@ -56,6 +63,7 @@ export async function finalizeNarration(
     chapterIndex: number;
     timelineId: string;
     narratorIndex: number;
+    attempt?: number;
     requestMeta?: GenerationRequestMeta;
     prose: string;
     meta: NarratorMeta;
@@ -68,6 +76,13 @@ export async function finalizeNarration(
   checkCancelled();
   return client.$transaction(async (tx) => {
     checkCancelled();
+    if (input.attempt !== undefined) {
+      const owned = await tx.generationRequest.updateMany({
+        where: { id: input.generationId, status: "pending", attempt: input.attempt },
+        data: { leaseExpiresAt: new Date(Date.now() + 5 * 60 * 1000) },
+      });
+      if (owned.count !== 1) throw new Error("叙事生成 lease 已被接管");
+    }
     const existing = await tx.message.findUnique({
       where: { id: input.generationId },
     });
@@ -155,6 +170,8 @@ export async function finalizeNarration(
       where: { id: input.generationId },
       data: {
         status: "completed",
+        error: null,
+        leaseExpiresAt: null,
         narratorMessageId: saved.id,
         resultMeta: input.meta as unknown as Prisma.InputJsonValue,
       },

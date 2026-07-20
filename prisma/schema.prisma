@@ -78,6 +78,9 @@ model GenerationRequest {
   content           String?
   directive         String?
   status            String   @default("pending")
+  error             String?
+  attempt           Int      @default(1)
+  leaseExpiresAt    DateTime? @map("lease_expires_at")
   playerMessageId   String?  @map("player_message_id")
   narratorMessageId String   @map("narrator_message_id")
   playerIndex       Int?     @map("player_index")

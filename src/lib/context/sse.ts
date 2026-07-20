@@ -10,11 +10,17 @@ export function narratorSSE(opts: {
   messages: ChatMessage[];
   signal?: AbortSignal;
   onDone: (result: { prose: string; meta: NarratorMeta; signal: AbortSignal }) => Promise<{ messageId: string }>;
+  onFailure?: (error: Error) => Promise<void>;
 }): Response {
   const encoder = new TextEncoder();
   const upstream = new AbortController();
   let closed = false;
-  const abort = () => { closed = true; upstream.abort(); };
+  const abort = () => {
+    if (closed) return;
+    closed = true;
+    upstream.abort();
+    void opts.onFailure?.(new Error("叙事生成已取消"));
+  };
   if (opts.signal?.aborted) abort();
   else opts.signal?.addEventListener("abort", abort, { once: true });
 
@@ -77,6 +83,7 @@ export function narratorSSE(opts: {
         const { messageId } = await opts.onDone({ ...parsed, signal: upstream.signal });
         if (!closed && !upstream.signal.aborted) send({ type: "done", messageId, meta: parsed.meta });
       } catch (error) {
+        await opts.onFailure?.(error instanceof Error ? error : new Error(String(error)));
         if (!closed && !upstream.signal.aborted) {
           send({ type: "error", message: error instanceof Error ? error.message : String(error) });
         }
@@ -111,21 +118,28 @@ export function narratorCompletionSSE(opts: {
   completion?: GenerationCompletion;
   waitForCompletion?: () => Promise<GenerationCompletion | null>;
   signal?: AbortSignal;
+  maxWaitMs?: number;
+  pollIntervalMs?: number;
 }): Response {
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
         let completion = opts.completion;
-        while (!completion && !opts.signal?.aborted) {
+        const deadline = Date.now() + (opts.maxWaitMs ?? 15_000);
+        while (!completion && !opts.signal?.aborted && Date.now() < deadline) {
           completion = await opts.waitForCompletion?.() ?? undefined;
-          if (!completion) await new Promise((resolve) => setTimeout(resolve, 100));
+          if (!completion) await new Promise((resolve) => setTimeout(resolve, opts.pollIntervalMs ?? 100));
         }
         if (completion && !opts.signal?.aborted) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
             type: "done",
             messageId: completion.messageId,
             meta: completion.meta,
+          })}\n\n`));
+        } else if (!opts.signal?.aborted) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            type: "error", message: "叙事生成仍在处理中，请重试",
           })}\n\n`));
         }
       } finally {

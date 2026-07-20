@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  OpeningGenerationConflictError: class OpeningGenerationConflictError extends Error {},
   prisma: {
     chapter: { findUnique: vi.fn() },
     message: { create: vi.fn() },
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   finalizeNarration: vi.fn(),
   prepareGenerationRequest: vi.fn(),
   readGenerationCompletion: vi.fn(),
+  markGenerationFailed: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mocks.prisma }));
@@ -27,6 +29,8 @@ vi.mock("@/lib/chat/finalize", () => ({
 vi.mock("@/lib/chat/request", () => ({
   prepareGenerationRequest: mocks.prepareGenerationRequest,
   readGenerationCompletion: mocks.readGenerationCompletion,
+  markGenerationFailed: mocks.markGenerationFailed,
+  OpeningGenerationConflictError: mocks.OpeningGenerationConflictError,
 }));
 
 import { POST } from "./route";
@@ -49,6 +53,7 @@ describe("POST /api/chat", () => {
     mocks.finalizeNarration.mockResolvedValue({ messageId: "generation-1", reused: false });
     mocks.prepareGenerationRequest.mockResolvedValue({
       state: "owner",
+      attempt: 1,
       meta: {
         type: "chat-generation-request",
         chapterId: "chapter-1",
@@ -124,6 +129,24 @@ describe("POST /api/chat", () => {
     });
   });
 
+  it("首次 opening 已有消息的 typed conflict 映射为 409", async () => {
+    mocks.prepareGenerationRequest.mockRejectedValue(
+      new mocks.OpeningGenerationConflictError("本章已有开场，不可重复演出"),
+    );
+    const response = await POST(new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        chapterId: "chapter-1",
+        scale: "scene",
+        mode: "opening",
+        generationId: "opening-new-id",
+      }),
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "本章已有开场，不可重复演出" });
+  });
+
   it("pending generation loser 不调用 LLM，并以 SSE 等待 durable 完成结果", async () => {
     mocks.prepareGenerationRequest.mockResolvedValue({
       state: "pending",
@@ -178,6 +201,7 @@ describe("POST /api/chat", () => {
     expect(mocks.narratorSSE).toHaveBeenCalledWith(expect.objectContaining({
       signal: request.signal,
       onDone: expect.any(Function),
+      onFailure: expect.any(Function),
     }));
     const [{ onDone }] = mocks.narratorSSE.mock.calls[0];
     await onDone({ prose: "正文", meta: { suggestions: [], chapterBreakHint: false } });
@@ -188,6 +212,36 @@ describe("POST /api/chat", () => {
         narratorIndex: 4,
         prose: "正文",
       }),
+    );
+    const [{ onFailure }] = mocks.narratorSSE.mock.calls[0];
+    await onFailure(new Error("upstream cancelled"));
+    expect(mocks.markGenerationFailed).toHaveBeenCalledWith(
+      mocks.prisma,
+      "generation-1",
+      1,
+      expect.any(Error),
+    );
+  });
+
+  it("owner 在流建立前失败也标记当前 attempt failed", async () => {
+    mocks.buildNarratorContext.mockRejectedValue(new Error("context unavailable"));
+    const request = new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        chapterId: "chapter-1",
+        scale: "scene",
+        mode: "continue",
+        generationId: "generation-1",
+      }),
+    });
+
+    await expect(POST(request)).rejects.toThrow("context unavailable");
+
+    expect(mocks.markGenerationFailed).toHaveBeenCalledWith(
+      mocks.prisma,
+      "generation-1",
+      1,
+      expect.objectContaining({ message: "context unavailable" }),
     );
   });
 });

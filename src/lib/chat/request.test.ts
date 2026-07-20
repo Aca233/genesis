@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { prepareGenerationRequest } from "./request";
+import { markGenerationFailed, prepareGenerationRequest } from "./request";
 
 function fixture() {
   const messages = new Map<string, Record<string, unknown>>();
@@ -14,6 +14,16 @@ function fixture() {
         const row = { ...data };
         requests.set(String(data.id), row);
         return row;
+      }),
+      updateMany: vi.fn(async ({ where, data }: {
+        where: { id: string; status?: string; attempt?: number };
+        data: Record<string, unknown>;
+      }) => {
+        const row = requests.get(where.id);
+        if (!row || (where.status && row.status !== where.status) ||
+            (where.attempt !== undefined && row.attempt !== where.attempt)) return { count: 0 };
+        Object.assign(row, data);
+        return { count: 1 };
       }),
     },
     message: {
@@ -66,6 +76,8 @@ describe("prepareGenerationRequest", () => {
           chapterId: "chapter-1",
           mode,
           status: "pending",
+          attempt: 1,
+          leaseExpiresAt: expect.any(Date),
         }),
       });
       expect(tx.message.create).toHaveBeenCalledTimes(mode === "say" ? 1 : 0);
@@ -99,6 +111,45 @@ describe("prepareGenerationRequest", () => {
     expect(first.state).toBe("owner");
     expect(second).toMatchObject({ state: "pending", meta: { playerIndex: 3, narratorIndex: 4 } });
     expect(tx.message.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { status: "failed", leaseExpiresAt: null },
+    { status: "pending", leaseExpiresAt: new Date(0) },
+  ])("$status 或过期 lease 可原子接管且不重复玩家消息", async (state) => {
+    const { client, tx, requests } = fixture();
+    const first = await prepareGenerationRequest(client as never, input);
+    Object.assign(requests.get(input.generationId)!, state);
+
+    const takeover = await prepareGenerationRequest(client as never, input);
+
+    expect(first).toMatchObject({ state: "owner", attempt: 1 });
+    expect(takeover).toMatchObject({ state: "owner", attempt: 2 });
+    expect(tx.generationRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: input.generationId, attempt: 1 }),
+      data: expect.objectContaining({ status: "pending", attempt: 2, error: null }),
+    }));
+    expect(tx.message.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("owner 失败只按当前 attempt 标记 failed，旧 owner 不覆盖接管者", async () => {
+    const { client, tx, requests } = fixture();
+    await prepareGenerationRequest(client as never, input);
+
+    await markGenerationFailed(client as never, input.generationId, 1, new Error("LLM failed"));
+
+    expect(requests.get(input.generationId)).toMatchObject({
+      status: "failed",
+      error: "LLM failed",
+      leaseExpiresAt: null,
+    });
+    requests.get(input.generationId)!.attempt = 2;
+    requests.get(input.generationId)!.status = "pending";
+    await markGenerationFailed(client as never, input.generationId, 1, new Error("stale"));
+    expect(tx.generationRequest.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { id: input.generationId, status: "pending", attempt: 1 },
+    }));
+    expect(requests.get(input.generationId)!.status).toBe("pending");
   });
 
   it("相同 ID 不同语义请求被拒绝", async () => {

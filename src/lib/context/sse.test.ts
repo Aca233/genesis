@@ -66,7 +66,8 @@ describe("narratorSSE", () => {
       yield { type: "text", text: "不应到达" };
     });
     const onDone = vi.fn().mockResolvedValue({ messageId: "message-1" });
-    const response = narratorSSE({ messages: [], onDone });
+    const onFailure = vi.fn().mockResolvedValue(undefined);
+    const response = narratorSSE({ messages: [], onDone, onFailure });
     const reader = response.body!.getReader();
 
     await reader.read();
@@ -75,6 +76,7 @@ describe("narratorSSE", () => {
 
     expect(upstreamSignal?.aborted).toBe(true);
     expect(onDone).not.toHaveBeenCalled();
+    expect(onFailure).toHaveBeenCalledWith(expect.any(Error));
   });
 });
 
@@ -88,6 +90,19 @@ describe("narratorCompletionSSE", () => {
     const output = await events(narratorCompletionSSE({ completion }));
 
     expect(output).toEqual([{ type: "done", ...completion }]);
+  });
+
+  it("pending 等待超过上限后发送 SSE error 并停止轮询", async () => {
+    const waitForCompletion = vi.fn().mockResolvedValue(null);
+
+    const output = await events(narratorCompletionSSE({
+      waitForCompletion,
+      maxWaitMs: 1,
+      pollIntervalMs: 1,
+    }));
+
+    expect(output).toEqual([{ type: "error", message: "叙事生成仍在处理中，请重试" }]);
+    expect(waitForCompletion.mock.calls.length).toBeLessThanOrEqual(3);
   });
 });
 

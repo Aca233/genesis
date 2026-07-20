@@ -27,6 +27,7 @@ function fixture() {
         resultMeta: null,
       })),
       update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     message: {
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) => state.messages.get(where.id) ?? null),
@@ -63,6 +64,7 @@ const base = {
     playerIndex: 3,
     narratorIndex: 4,
   },
+  attempt: 1,
   prose: "叙事正文",
   scale: "scene" as const,
   meta: {
@@ -89,6 +91,10 @@ describe("finalizeNarration", () => {
     await finalizeNarration(client as never, { ...base, logInvalidReveal: log });
 
     expect(client.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.generationRequest.updateMany).toHaveBeenCalledWith({
+      where: { id: "generation-1", status: "pending", attempt: 1 },
+      data: { leaseExpiresAt: expect.any(Date) },
+    });
     expect(tx.message.create).toHaveBeenCalledTimes(1);
     expect(mocks.reveal).toHaveBeenCalledWith(tx, expect.objectContaining({
       abilityId: "ability-1",
@@ -100,6 +106,8 @@ describe("finalizeNarration", () => {
       where: { id: "generation-1" },
       data: expect.objectContaining({
         status: "completed",
+        error: null,
+        leaseExpiresAt: null,
         narratorMessageId: "generation-1",
         resultMeta: base.meta,
       }),
