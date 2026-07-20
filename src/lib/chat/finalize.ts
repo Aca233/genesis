@@ -1,17 +1,21 @@
 import type { Prisma } from "@prisma/client";
 import type { Scale } from "@/lib/cards/schemas";
 import type { NarratorMeta } from "@/lib/prompts/narrator";
+import { parseGenerationRequestMeta, type GenerationRequestMeta } from "./request";
 import {
   revealAbilityInTransaction,
   type AbilityMutationTx,
 } from "@/lib/abilities/mutations";
 
-export type NarrationFinalizationTx = AbilityMutationTx & {
-  message: AbilityMutationTx["message"] & {
+export type NarrationFinalizationTx = Omit<AbilityMutationTx, "message" | "ability"> & {
+  message: {
     findUnique(args: { where: { id: string } }): Promise<{
       id: string;
       chapterId: string;
+      index?: number;
+      role?: string;
       scale: string;
+      meta?: unknown;
     } | null>;
     create(args: { data: Record<string, unknown> }): Promise<{ id: string }>;
   };
@@ -45,6 +49,7 @@ export async function finalizeNarration(
     chapterIndex: number;
     timelineId: string;
     narratorIndex: number;
+    requestMeta?: GenerationRequestMeta;
     prose: string;
     meta: NarratorMeta;
     scale: Scale;
@@ -60,7 +65,13 @@ export async function finalizeNarration(
       where: { id: input.generationId },
     });
     if (existing) {
-      if (existing.chapterId !== input.chapterId || existing.scale !== input.scale) {
+      const request = parseGenerationRequestMeta(existing.meta);
+      if (
+        existing.chapterId !== input.chapterId || existing.scale !== input.scale ||
+        existing.role !== "narrator" || existing.index !== input.narratorIndex ||
+        !request || request.narratorMessageId !== input.generationId ||
+        request.playerMessageId !== (input.requestMeta?.playerMessageId ?? null)
+      ) {
         throw new Error("generationId 已被其他叙事请求占用");
       }
       return { messageId: existing.id, reused: true };
@@ -75,23 +86,33 @@ export async function finalizeNarration(
         content: input.prose,
         scale: input.scale,
         variants: [{ content: input.prose, meta: input.meta, chosen: true }] as Prisma.InputJsonValue,
-        meta: input.meta as unknown as Prisma.InputJsonValue,
+        meta: {
+          ...input.meta,
+          ...(input.requestMeta ? { generationRequest: input.requestMeta } : {}),
+        } as unknown as Prisma.InputJsonValue,
       },
     });
     checkCancelled();
 
+    const reveals = new Map<string, NonNullable<NarratorMeta["abilityReveals"]>[number]>();
     for (const reveal of input.meta.abilityReveals ?? []) {
+      const existingReveal = reveals.get(reveal.abilityId);
+      if (!existingReveal || reveal.visibility === "known") {
+        reveals.set(reveal.abilityId, reveal);
+      }
+    }
+    const visibilityRank = { hidden: 0, rumored: 1, known: 2 } as const;
+    for (const reveal of reveals.values()) {
       checkCancelled();
       const ability = await tx.ability.findFirst({
         where: { id: reveal.abilityId, timelineId: input.timelineId },
       });
       if (!ability) {
-        input.logInvalidReveal?.({
-          abilityId: reveal.abilityId,
-          generationId: input.generationId,
-        });
+        input.logInvalidReveal?.({ abilityId: reveal.abilityId, generationId: input.generationId });
         continue;
       }
+      const currentVisibility = ability.visibility as keyof typeof visibilityRank;
+      if (visibilityRank[currentVisibility] >= visibilityRank[reveal.visibility]) continue;
       await revealAbilityInTransaction(tx, {
         abilityId: ability.id,
         version: ability.version,

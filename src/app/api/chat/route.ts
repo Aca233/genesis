@@ -8,6 +8,10 @@ import {
   finalizeNarration,
   type NarrationFinalizationClient,
 } from "@/lib/chat/finalize";
+import {
+  prepareGenerationRequest,
+  type GenerationRequestClient,
+} from "@/lib/chat/request";
 
 /**
  * POST /api/chat —— 叙事主循环（SSE 流）
@@ -59,25 +63,34 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "本章已有开场，不可重复演出" }, { status: 409 });
   }
 
-  // say：先落玩家消息（即使后续 LLM 失败也保留）
-  let nextIndex = lastIndex + 1;
-  if (mode === "say") {
-    await prisma.message.create({
-      data: {
-        chapterId,
-        index: nextIndex,
-        role: "player",
-        content: content!.trim(),
-        scale,
-      },
+  // 在任何玩家消息写入前，以 generationId 原子校验/保留整次请求协议。
+  const proposedPlayerIndex = mode === "say" ? lastIndex + 1 : null;
+  const proposedNarratorIndex = lastIndex + (mode === "say" ? 2 : 1);
+  const prepared = await prepareGenerationRequest(
+    prisma as unknown as GenerationRequestClient,
+    {
+      generationId,
+      chapterId,
+      mode,
+      scale,
+      content: mode === "say" ? content!.trim() : undefined,
+      directive: directive?.trim() || undefined,
+      playerIndex: proposedPlayerIndex,
+      narratorIndex: proposedNarratorIndex,
+    },
+  );
+  if (prepared.completedMessageId) {
+    return NextResponse.json({
+      messageId: prepared.completedMessageId,
+      generationId,
+      completed: true,
     });
-    nextIndex += 1;
   }
+  const narratorIndex = prepared.meta.narratorIndex;
 
   // 组装上下文（say 模式下玩家消息已落库，builder 会把它计入窗口；
   // playerInput 只用于世界书匹配，末尾输入由窗口内最后一条承担会重复——
   // 因此这里以 beforeIndex 剔除刚落库的那条，由 builder 在末尾单独注入）
-  const narratorIndex = nextIndex;
   const messages = await buildNarratorContext({
     worldId: chapter.timeline.worldId,
     chapterId,
@@ -100,6 +113,7 @@ export async function POST(request: Request) {
           chapterIndex: chapter.index,
           timelineId: chapter.timeline.id,
           narratorIndex,
+          requestMeta: prepared.meta,
           prose,
           meta,
           scale,

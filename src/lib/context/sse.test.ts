@@ -56,3 +56,20 @@ describe("narratorSSE", () => {
     expect(onDone).not.toHaveBeenCalled();
   });
 });
+
+it.each([
+  `<<<META\n{"suggestions":[],"chapterBreakHint":false}\nMETA>>>`,
+  `正文\r\n<<<META\r\n{"suggestions":[],"chapterBreakHint":false}\r\nMETA>>>`,
+])("SSE 从不发送合法 META framing：%s", async (full) => {
+  mocks.stream.mockImplementation(async function* () {
+    yield { type: "text", text: full.slice(0, 7) };
+    yield { type: "text", text: full.slice(7) };
+  });
+  const output = await events(narratorSSE({
+    messages: [],
+    onDone: vi.fn().mockResolvedValue({ messageId: "message-1" }),
+  }));
+  const text = output.filter((event) => event.type === "text").map((event) => event.text).join("");
+  expect(text).not.toContain("<<<META");
+  expect(text).not.toContain("META>>>");
+});

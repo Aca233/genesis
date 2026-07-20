@@ -28,3 +28,12 @@ describe("splitMetaBlock strict tail framing", () => {
     });
   });
 });
+
+it.each([
+  `<<<META\n${meta}\nMETA>>>`,
+  `正文\r\n<<<META\r\n${meta}\r\nMETA>>>\r\n`,
+])("接受 block-at-start 与 CRLF 尾块", (full) => {
+  const result = splitMetaBlock(full);
+  expect(result.meta.suggestions).toEqual(["追问"]);
+  expect(result.prose).not.toContain("<<<META");
+});

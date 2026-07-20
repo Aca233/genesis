@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   buildNarratorContext: vi.fn(),
   narratorSSE: vi.fn(),
   finalizeNarration: vi.fn(),
+  prepareGenerationRequest: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mocks.prisma }));
@@ -17,6 +18,9 @@ vi.mock("@/lib/context/builder", () => ({
 vi.mock("@/lib/context/sse", () => ({ narratorSSE: mocks.narratorSSE }));
 vi.mock("@/lib/chat/finalize", () => ({
   finalizeNarration: mocks.finalizeNarration,
+}));
+vi.mock("@/lib/chat/request", () => ({
+  prepareGenerationRequest: mocks.prepareGenerationRequest,
 }));
 
 import { POST } from "./route";
@@ -34,6 +38,21 @@ describe("POST /api/chat", () => {
     mocks.buildNarratorContext.mockResolvedValue([{ role: "user", content: "继续" }]);
     mocks.narratorSSE.mockImplementation((options) => new Response(JSON.stringify({ options })));
     mocks.finalizeNarration.mockResolvedValue({ messageId: "generation-1", reused: false });
+    mocks.prepareGenerationRequest.mockResolvedValue({
+      reused: false,
+      meta: {
+        type: "chat-generation-request",
+        chapterId: "chapter-1",
+        mode: "continue",
+        scale: "scene",
+        content: null,
+        directive: null,
+        playerMessageId: null,
+        narratorMessageId: "generation-1",
+        playerIndex: null,
+        narratorIndex: 4,
+      },
+    });
   });
 
   it("将稳定 generationId 与 request.signal 传入可取消、事务化完成链路", async () => {
