@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { ThemeCard } from "./types";
+import type {
+  AbilityEventView,
+  AbilityView,
+  CharacterMembershipView,
+  ThemeCard,
+} from "./types";
 import { Emblem } from "./Emblem";
+import { AbilityList } from "./AbilityList";
 import { entityTypeName, ENTITY_TYPE_ORDER, sectionName } from "./lexicon";
 
 /**
@@ -36,7 +42,12 @@ type SectionRow = {
   playerLocked: boolean;
 };
 
-type EntityDetail = EntityLite & { sections: SectionRow[] };
+type EntityDetail = EntityLite & {
+  sections: SectionRow[];
+  abilities: AbilityView[];
+  race?: { id: string; name: string; summary: string } | null;
+  memberships?: CharacterMembershipView[];
+};
 
 type ChronicleRow = {
   id: string;
@@ -142,14 +153,17 @@ function EntityDetailView({
   theme,
   onBack,
   onStarred,
+  onOpenEntity,
 }: {
   entityId: string;
   theme: ThemeCard | null;
   onBack: (() => void) | null;
   onStarred: (id: string, starred: boolean) => void;
+  onOpenEntity: (id: string) => void;
 }) {
   const [detail, setDetail] = useState<EntityDetail | null>(null);
   const [chronicle, setChronicle] = useState<ChronicleRow[]>([]);
+  const [abilityHistory, setAbilityHistory] = useState<Record<string, AbilityEventView[]>>({});
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -169,6 +183,21 @@ function EntityDetailView({
         }
         setDetail(json.entity);
         setChronicle(json.chronicle ?? []);
+        setAbilityHistory({});
+
+        const histories = await Promise.all(
+          (json.entity.abilities ?? []).map(async (ability) => {
+            try {
+              const historyRes = await fetch(`/api/abilities/${ability.id}/history`);
+              if (!historyRes.ok) return [ability.id, []] as const;
+              const historyJson = (await historyRes.json()) as { history?: AbilityEventView[] };
+              return [ability.id, historyJson.history ?? []] as const;
+            } catch {
+              return [ability.id, []] as const;
+            }
+          }),
+        );
+        if (!cancelled) setAbilityHistory(Object.fromEntries(histories));
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       }
@@ -253,6 +282,71 @@ function EntityDetailView({
         )}
       </div>
 
+      {detail.type === "race" && (
+        <section className="border-t border-line pt-3">
+          <h4 className="mb-3 text-xs tracking-widest text-ink-faint">种族能力</h4>
+          <AbilityList
+            abilities={detail.abilities}
+            historyByAbilityId={abilityHistory}
+            kinds={["racial_innate", "racial_tradition"]}
+          />
+        </section>
+      )}
+
+      {detail.type === "character" && (
+        <section className="grid gap-4 border-t border-line pt-3">
+          <div>
+            <h4 className="mb-2 text-xs tracking-widest text-ink-faint">出身与归属</h4>
+            <div className="grid gap-2 text-sm text-ink-soft">
+              {detail.race ? (
+                <p>
+                  种族：
+                  <button
+                    type="button"
+                    onClick={() => onOpenEntity(detail.race!.id)}
+                    className="text-gilt underline decoration-gilt/40 underline-offset-2 transition hover:text-ink"
+                  >
+                    {detail.race.name}
+                  </button>
+                </p>
+              ) : (
+                <p className="fog-text">种族谱系尚未载明</p>
+              )}
+              {(detail.memberships?.length ?? 0) > 0 && (
+                <div>
+                  <p className="mb-1 text-xs text-ink-faint">势力与职务</p>
+                  <ul className="grid gap-1">
+                    {detail.memberships!.map((membership) => (
+                      <li key={membership.id}>
+                        <button
+                          type="button"
+                          onClick={() => onOpenEntity(membership.faction.id)}
+                          className="text-gilt underline decoration-gilt/40 underline-offset-2 transition hover:text-ink"
+                        >
+                          {membership.faction.name}
+                        </button>
+                        <span> · {membership.role}</span>
+                        {membership.isPrimary && <span className="ml-1 text-xs text-gilt/75">（主要归属）</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+          <AbilityList
+            abilities={detail.abilities}
+            historyByAbilityId={abilityHistory}
+            kinds={["racial_innate", "racial_tradition", "personal"]}
+            labels={{
+              racial_innate: "继承来源",
+              racial_tradition: "已掌握技艺",
+              personal: "个人技能",
+            }}
+          />
+        </section>
+      )}
+
       {chronicle.length > 0 && (
         <div className="border-t border-line pt-3">
           <h4 className="mb-2 text-xs tracking-widest text-ink-faint">其史</h4>
@@ -333,6 +427,7 @@ export function CodexPanel({
             es ? es.map((e) => (e.id === id ? { ...e, starred } : e)) : es,
           )
         }
+        onOpenEntity={setOpenId}
       />
     );
   }

@@ -32,6 +32,60 @@ export type MessageRow = {
   createdAt: string;
 };
 
+export type AbilityKind = "racial_innate" | "racial_tradition" | "personal" | "divine";
+export type AbilityMastery = "unawakened" | "novice" | "adept" | "expert" | "master";
+export type AbilityState = "normal" | "enhanced" | "impaired" | "sealed" | "lost" | "deprecated";
+
+/** 对玩家可见的能力 DTO：已知项完整，传闻项绝不含机制字段。 */
+export type KnownAbilityView = {
+  id: string;
+  name: string;
+  kind: AbilityKind;
+  visibility: "known";
+  effect: string;
+  trigger: string;
+  cost: string;
+  limitations: string;
+  mastery: AbilityMastery;
+  state: AbilityState;
+  rumorText: string | null;
+  bloodlineJustification: string | null;
+  sourceAbilityId: string | null;
+  lockedFields: string[];
+  version: number;
+  /** 人物有效能力由种族模板默认继承时，详情接口附带。 */
+  inherited?: boolean;
+};
+
+export type RumoredAbilityView = {
+  id: string;
+  name: string;
+  kind: AbilityKind;
+  visibility: "rumored";
+  rumorText: string | null;
+  state: AbilityState;
+};
+
+export type AbilityView = KnownAbilityView | RumoredAbilityView;
+
+/** 能力沿革 DTO；传闻沿革仅提供揭示时间与传闻文本。 */
+export type AbilityEventView = {
+  id?: string;
+  type?: string;
+  evidence?: string;
+  scale?: string;
+  createdAt?: string;
+  revealedAt?: string;
+  rumorText?: string | null;
+};
+
+export type CharacterMembershipView = {
+  id: string;
+  role: string;
+  isPrimary: boolean;
+  faction: { id: string; name: string; summary: string };
+};
+
 /** 神明关系（对玩家） */
 export type GodRelation = { label: string; note?: string };
 
@@ -58,6 +112,7 @@ export type GodRow = {
   relations: { player?: GodRelation } | null;
   agenda: GodAgenda | null;
   agendaRevealed: boolean;
+  abilities: AbilityView[];
 };
 
 // ── 世界核心卡（Json 宽松结构） ──

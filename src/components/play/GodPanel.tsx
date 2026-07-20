@@ -2,6 +2,7 @@
 
 import type { GodRow, ThemeCard } from "./types";
 import { rankName, relationName, relationTone } from "./lexicon";
+import { AbilityList } from "./AbilityList";
 
 /**
  * 神格页签：玩家神卡 + 主神列表卡 + 次要神一句话列表。
@@ -49,6 +50,10 @@ function PlayerGodCard({ god, theme }: { god: GodRow; theme: ThemeCard | null })
           </div>
         )}
       </dl>
+
+      <div className="mt-4 border-t border-gilt/25 pt-3">
+        <AbilityList abilities={god.abilities} kinds={["divine"]} />
+      </div>
     </section>
   );
 }
@@ -78,6 +83,10 @@ function MajorGodCard({ god, theme }: { god: GodRow; theme: ThemeCard | null }) 
       {god.persona?.text && (
         <p className="mt-1 line-clamp-3 text-sm text-ink-soft">{god.persona.text}</p>
       )}
+
+      <div className="mt-3 border-t border-line pt-2">
+        <AbilityList abilities={god.abilities} kinds={["divine"]} />
+      </div>
 
       {/* 议程区：揭示前为残卷 */}
       <div className="mt-3 border-t border-line pt-2 text-sm">
@@ -136,9 +145,16 @@ export function GodPanel({
           <h3 className="mb-2 text-xs tracking-widest text-ink-faint">次要神祇</h3>
           <ul className="grid gap-1.5 text-sm">
             {minors.map((g) => (
-              <li key={g.id} className="flex gap-2">
-                <span className="shrink-0 text-ink">{g.name}</span>
-                <span className="text-ink-faint">{g.persona?.text ?? ""}</span>
+              <li key={g.id} className="rounded-md border border-line/70 p-2.5">
+                <div className="flex gap-2">
+                  <span className="shrink-0 text-ink">{g.name}</span>
+                  <span className="text-ink-faint">{g.persona?.text ?? ""}</span>
+                </div>
+                {g.abilities.length > 0 && (
+                  <div className="mt-2 border-t border-line/70 pt-2">
+                    <AbilityList abilities={g.abilities} kinds={["divine"]} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>
