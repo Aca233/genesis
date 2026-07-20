@@ -15,7 +15,7 @@ function ability(
   id: string,
   name: string,
   visibility: "known" | "rumored" | "hidden",
-  sourceAbility: { id: string; name: string } | null = null,
+  sourceAbility: { id: string; name: string; visibility?: "known" | "rumored" | "hidden" } | null = null,
 ) {
   return {
     id,
@@ -29,8 +29,13 @@ function ability(
     state: "normal",
     visibility,
     rumorText: visibility === "rumored" ? `关于${name}的传闻` : null,
+    bloodlineJustification: null,
     sourceAbilityId: sourceAbility?.id ?? null,
-    sourceAbility,
+    sourceAbility: sourceAbility
+      ? { ...sourceAbility, visibility: sourceAbility.visibility ?? "known" }
+      : null,
+    lockedFields: [],
+    version: 1,
   };
 }
 
@@ -138,6 +143,129 @@ describe("buildAbilityContext", () => {
     expect(context).not.toContain("无声誓");
     expect(context).not.toContain("灰烬密仪");
     expect(context).not.toContain("远方技艺");
+  });
+
+
+  it("人物上下文经有效能力解析，应用覆写并排除不可用能力", async () => {
+    const innate = {
+      ...ability("race-innate", "祖传夜视", "known"),
+      kind: "racial_innate",
+    };
+    const overridden = {
+      ...ability("character-override", "受损夜视", "known", {
+        id: innate.id,
+        name: innate.name,
+      }),
+      kind: "racial_innate",
+      state: "impaired",
+    };
+    const sealed = {
+      ...ability("character-sealed", "封印剑术", "known"),
+      state: "sealed",
+    };
+    const unawakened = {
+      ...ability("character-unawakened", "未觉灵感", "known"),
+      mastery: "unawakened",
+    };
+    const lost = {
+      ...ability("character-lost", "遗失秘技", "known"),
+      state: "lost",
+    };
+    const deprecated = {
+      ...ability("character-deprecated", "废弃旧术", "known"),
+      state: "deprecated",
+    };
+    mocks.prisma.entity.findMany.mockResolvedValue([
+      {
+        ...race,
+        abilities: [innate],
+      },
+      {
+        ...character,
+        abilities: [overridden, sealed, unawakened, lost, deprecated],
+        race: { id: race.id, name: race.name, abilities: [innate] },
+      },
+    ]);
+
+    const context = await buildAbilityContext({
+      timelineId: "timeline-1",
+      viewer: "player",
+      searchText: "林霁",
+    });
+
+    const characterEntry = context.slice(context.indexOf("受损夜视"));
+    expect(context).toContain("受损夜视");
+    expect(characterEntry).toContain("source: 祖传夜视 [race-innate]");
+    expect(context).not.toContain("owner: 林霁 [character-lin] (character)\n  kind: racial_innate\n  effect: 祖传夜视的效果");
+    expect(context).not.toContain("封印剑术");
+    expect(context).not.toContain("未觉灵感");
+    expect(context).not.toContain("遗失秘技");
+    expect(context).not.toContain("废弃旧术");
+  });
+
+  it("人物继承的有效先天能力使用种族模板作为安全来源", async () => {
+    const innate = {
+      ...ability("race-inherited", "星瞳", "known"),
+      kind: "racial_innate",
+    };
+    mocks.prisma.entity.findMany.mockResolvedValue([
+      { ...race, abilities: [innate] },
+      {
+        ...character,
+        abilities: [],
+        race: { id: race.id, name: race.name, abilities: [innate] },
+      },
+    ]);
+
+    const context = await buildAbilityContext({
+      timelineId: "timeline-1",
+      viewer: "player",
+      searchText: "林霁",
+    });
+
+    const characterBlock = context.slice(context.lastIndexOf("[race-inherited] 星瞳"));
+    expect(characterBlock).toContain("owner: 林霁 [character-lin] (character)");
+    expect(characterBlock).toContain("source: 星瞳 [race-inherited]");
+  });
+
+  it("传闻能力仅注入安全字段，并可向 Narrator 提供升级用 ability id", async () => {
+    const rumoredRace = {
+      ...ability("race-rumored", "月下蜕形", "rumored", {
+        id: "safe-source",
+        name: "古老月契",
+      }),
+      kind: "racial_innate",
+      state: "impaired",
+      mastery: "master",
+    };
+    const rumoredGod = ability("divine-acting-rumored", "潮底低语", "rumored");
+    mocks.prisma.god.findMany.mockResolvedValue([
+      playerGod,
+      { ...actingGod, abilities: [rumoredGod] },
+    ]);
+    mocks.prisma.entity.findMany.mockResolvedValue([
+      { ...race, abilities: [rumoredRace] },
+    ]);
+
+    const context = await buildAbilityContext({
+      timelineId: "timeline-1",
+      viewer: "player",
+      searchText: "逐光者与潮神",
+    });
+
+    expect(context).toContain("[race-rumored] 月下蜕形");
+    expect(context).toContain("kind: racial_innate");
+    expect(context).toContain("rumor: 关于月下蜕形的传闻");
+    expect(context).toContain("source: 古老月契 [safe-source]");
+    expect(context).toContain("[divine-acting-rumored] 潮底低语");
+    expect(context).toContain("rumor: 关于潮底低语的传闻");
+    expect(context).not.toContain("月下蜕形的效果");
+    expect(context).not.toContain("月下蜕形的触发");
+    expect(context).not.toContain("月下蜕形的代价");
+    expect(context).not.toContain("月下蜕形的限制");
+    expect(context).not.toContain("state: impaired");
+    expect(context).not.toContain("mastery: master");
+    expect(context).not.toContain("潮底低语的效果");
   });
 
   it("后台块只额外加入当前行动主神自己的隐藏神权", async () => {
