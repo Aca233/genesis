@@ -27,6 +27,7 @@ describe("normalizePersistedAbility", () => {
     state: "impaired",
     visibility: "rumored",
     rumorText: "据说她能看穿永夜。",
+    bloodlineJustification: null,
     sourceAbilityId: null,
     lockedFields: ["effect"],
     version: 3,

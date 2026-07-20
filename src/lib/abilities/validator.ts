@@ -208,9 +208,11 @@ export function assertValidTransition(
   after: Pick<AbilityInput, "state">,
   eventType?: AbilityEventType,
 ): void {
-  const wasTerminal = before.state === "lost" || before.state === "deprecated";
-  if (wasTerminal && after.state !== before.state && eventType !== "restored") {
-    fail("lost 或 deprecated 能力只能通过 restored 事件恢复");
+  if (before.state === "deprecated" && after.state !== before.state) {
+    fail("deprecated 能力不可恢复或转换状态");
+  }
+  if (before.state === "lost" && after.state !== before.state && eventType !== "restored") {
+    fail("lost 能力只能通过 restored 事件恢复");
   }
 }
 
@@ -231,7 +233,10 @@ export interface WorldDeckReferenceGraph {
       raceRef: string | WorldDeckRef;
       factionMemberships: Array<{ factionRef: string | WorldDeckRef }>;
       learnedTraditionRefs: Array<{ sourceAbilityRef: string | WorldDeckRef }>;
-      racialOverrides: Array<{ sourceAbilityRef: string | WorldDeckRef }>;
+      racialOverrides: Array<{
+        sourceAbilityRef: string | WorldDeckRef;
+        bloodlineJustification?: string | null;
+      }>;
     }
   >;
 }
@@ -369,12 +374,15 @@ export function validateDeckReferences(deck: WorldDeckReferenceGraph): void {
       expectedKind: "racial_tradition" | "racial_innate",
       mustMatchRace: boolean,
     ) => {
-      const refs = deckList(character.value, field).map((value, index) => {
-        const source = record(value, `majorCharacters[${characterRef}].${field}[${index}]`);
-        return fieldRef(source, "sourceAbilityRef", `majorCharacters[${characterRef}].${field}[${index}].sourceAbilityRef`);
+      const references = deckList(character.value, field).map((value, index) => {
+        const override = record(value, `majorCharacters[${characterRef}].${field}[${index}]`);
+        return {
+          sourceRef: fieldRef(override, "sourceAbilityRef", `majorCharacters[${characterRef}].${field}[${index}].sourceAbilityRef`),
+          bloodlineJustification: override.bloodlineJustification,
+        };
       });
-      assertUnique(refs, `majorCharacters[${characterRef}].${field}`);
-      for (const sourceRef of refs) {
+      assertUnique(references.map(({ sourceRef }) => sourceRef), `majorCharacters[${characterRef}].${field}`);
+      for (const { sourceRef, bloodlineJustification } of references) {
         const source = abilities.get(sourceRef);
         if (source === undefined) {
           fail(`能力来源引用 "${sourceRef}" 不存在`);
@@ -384,6 +392,13 @@ export function validateDeckReferences(deck: WorldDeckReferenceGraph): void {
         }
         if (mustMatchRace && source.raceRef !== character.raceRef) {
           fail(`族群技艺来源必须属于人物主种族 "${character.raceRef}"`);
+        }
+        if (
+          field === "racialOverrides" &&
+          source.raceRef !== character.raceRef &&
+          (typeof bloodlineJustification !== "string" || bloodlineJustification.trim() === "")
+        ) {
+          fail("跨种族 racial_innate 覆写必须提供非空 bloodlineJustification");
         }
       }
     };

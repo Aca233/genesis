@@ -113,6 +113,16 @@ describe("assertValidTransition", () => {
       ),
     ).toThrow(/restored/);
   });
+
+  it("deprecated 状态即使带 restored 事件也不可恢复", () => {
+    expect(() =>
+      assertValidTransition(
+        { ...ability(), state: "deprecated" },
+        { ...ability(), state: "normal" },
+        "restored",
+      ),
+    ).toThrow(/deprecated/);
+  });
 });
 
 describe("validateDeckReferences nested WorldDeck reference graph", () => {
@@ -177,6 +187,33 @@ describe("validateDeckReferences nested WorldDeck reference graph", () => {
         majorCharacters: [{ ...deck.majorCharacters[0], racialOverrides: [{ sourceAbilityRef: "race-1-tradition" }] }],
       }),
     ).toThrow(/racial_innate/);
+  });
+
+  it("跨种族 racial_innate 覆写必须持久化血脉理由", () => {
+    const crossRaceDeck = {
+      ...deck,
+      races: [
+        ...deck.races,
+        { ref: "race-3", abilities: [{ ref: "race-3-innate", kind: "racial_innate" }] },
+      ],
+      majorCharacters: [{
+        ...deck.majorCharacters[0],
+        racialOverrides: [{ sourceAbilityRef: "race-3-innate" }],
+      }],
+    };
+    expect(() => validateDeckReferences(crossRaceDeck)).toThrow(/bloodlineJustification/);
+    expect(() =>
+      validateDeckReferences({
+        ...crossRaceDeck,
+        majorCharacters: [{
+          ...crossRaceDeck.majorCharacters[0],
+          racialOverrides: [{
+            sourceAbilityRef: "race-3-innate",
+            bloodlineJustification: "已记录的星裔血脉",
+          }],
+        }],
+      }),
+    ).not.toThrow();
   });
 });
 

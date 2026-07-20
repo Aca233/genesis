@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import type { AbilityEventRecord, AbilityMutationTx, AbilityStoredRecord } from "./mutations";
 import { applyAbilityChange, revealAbility } from "./mutations";
 
@@ -16,10 +17,12 @@ type ReviewMutationTx = AbilityMutationTx & {
 
 interface TransactionOptions {
   sourceAbility?: AbilityStoredRecord | null;
+  characterRaceId?: string;
   duplicateSource?: AbilityStoredRecord | null;
   chapter?: { id: string; timelineId: string } | null;
   message?: { id: string; chapterId: string; scale: string } | null;
   updateError?: Error & { code?: string; meta?: { target?: string[] } };
+  createError?: Error;
 }
 
 function ability(overrides: Partial<AbilityStoredRecord> = {}): AbilityStoredRecord {
@@ -38,6 +41,7 @@ function ability(overrides: Partial<AbilityStoredRecord> = {}): AbilityStoredRec
     state: "normal",
     visibility: "hidden",
     rumorText: null,
+    bloodlineJustification: null,
     sourceAbilityId: null,
     lockedFields: [],
     version: 1,
@@ -48,15 +52,16 @@ function ability(overrides: Partial<AbilityStoredRecord> = {}): AbilityStoredRec
 function transaction(initialAbility = ability(), options: TransactionOptions = {}) {
   let currentAbility = initialAbility;
   const sourceAbility = options.sourceAbility ?? null;
+  const characterRaceId = options.characterRaceId ?? "race-1";
   const events = new Map<string, AbilityEventRecord>();
   const calls = { abilityFind: 0, update: 0, eventFind: 0, create: 0 };
 
   const tx: ReviewMutationTx = {
     entity: {
       findUnique: async ({ where }) =>
-        where.id === "race-1"
-          ? { id: "race-1", timelineId: "timeline-1", type: "race", raceId: null }
-          : { id: "character-1", timelineId: "timeline-1", type: "character", raceId: "race-1" },
+        where.id === characterRaceId || where.id === sourceAbility?.entityId
+          ? { id: where.id, timelineId: "timeline-1", type: "race", raceId: null }
+          : { id: "character-1", timelineId: "timeline-1", type: "character", raceId: characterRaceId },
     },
     god: { findUnique: async () => null },
     ability: {
@@ -97,6 +102,9 @@ function transaction(initialAbility = ability(), options: TransactionOptions = {
       },
       create: async ({ data }) => {
         calls.create += 1;
+        if (options.createError !== undefined) {
+          throw options.createError;
+        }
         const event = { id: `event-${calls.create}`, ...data };
         events.set(data.dedupeKey, event);
         return event;
@@ -104,7 +112,22 @@ function transaction(initialAbility = ability(), options: TransactionOptions = {
     },
   };
 
-  return { tx, calls };
+  const client = {
+    $transaction: async <T>(operation: (transaction: ReviewMutationTx) => Promise<T>) => {
+      const abilityBefore = currentAbility;
+      const eventsBefore = new Map(events);
+      try {
+        return await operation(tx);
+      } catch (error) {
+        currentAbility = abilityBefore;
+        events.clear();
+        eventsBefore.forEach((event, key) => events.set(key, event));
+        throw error;
+      }
+    },
+  };
+
+  return { tx, client, calls, currentAbility: () => currentAbility };
 }
 
 const change = {
@@ -123,13 +146,13 @@ const change = {
 
 describe("applyAbilityChange", () => {
   it("同一 dedupeKey 第二次调用只读取既有事件，不重复更新或创建", async () => {
-    const { tx, calls } = transaction();
+    const { client, calls } = transaction();
 
-    const first = await applyAbilityChange(tx, change);
+    const first = await applyAbilityChange(client, change);
     expect(first.applied).toBe(true);
     expect(calls).toMatchObject({ abilityFind: 1, update: 1, create: 1 });
 
-    const second = await applyAbilityChange(tx, change);
+    const second = await applyAbilityChange(client, change);
     expect(second.applied).toBe(false);
     expect(calls).toMatchObject({ abilityFind: 1, update: 1, create: 1, eventFind: 2 });
   });
@@ -138,7 +161,7 @@ describe("applyAbilityChange", () => {
 describe("revealAbility", () => {
   it("hidden -> rumored 必须提供 rumorText", async () => {
     await expect(
-      revealAbility(transaction().tx, {
+      revealAbility(transaction().client, {
         abilityId: "ability-1",
         version: 1,
         visibility: "rumored",
@@ -154,7 +177,7 @@ describe("revealAbility", () => {
 
   it("hidden -> rumored 不能以 null 充当 rumorText", async () => {
     await expect(
-      revealAbility(transaction().tx, {
+      revealAbility(transaction().client, {
         abilityId: "ability-1",
         version: 1,
         visibility: "rumored",
@@ -172,9 +195,9 @@ describe("revealAbility", () => {
   it.each(["hidden", "rumored"] as const)(
     "%s -> known 写入 revealed 事件",
     async (visibility) => {
-      const { tx } = transaction(ability({ visibility, rumorText: "旧日传闻" }));
+      const { client } = transaction(ability({ visibility, rumorText: "旧日传闻" }));
 
-      const result = await revealAbility(tx, {
+      const result = await revealAbility(client, {
         abilityId: "ability-1",
         version: 1,
         visibility: "known",
@@ -197,7 +220,7 @@ describe("applyAbilityChange integrity guards", () => {
   it("拒绝移除既有 lockedFields", async () => {
     await expect(
       applyAbilityChange(
-        transaction(ability({ lockedFields: ["effect"] })).tx,
+        transaction(ability({ lockedFields: ["effect"] })).client,
         {
           ...change,
           patch: { lockedFields: [] },
@@ -226,13 +249,55 @@ describe("applyAbilityChange integrity guards", () => {
     });
 
     await expect(
-      applyAbilityChange(transaction(derived, { sourceAbility: source, duplicateSource: duplicate }).tx, {
+      applyAbilityChange(transaction(derived, { sourceAbility: source, duplicateSource: duplicate }).client, {
         abilityId: "derived-1",
         version: 1,
         patch: { name: "新版影行" },
         event: { ...change.event, type: "mutated", dedupeKey: "duplicate-source" },
       }),
     ).rejects.toThrow(/重复.*来源/);
+  });
+
+  it("跨种族血脉理由必须来自持久化字段而非临时 mutation 参数", async () => {
+    const source = ability({
+      id: "celestial-template",
+      entityId: "race-2",
+      kind: "racial_innate",
+      sourceAbilityId: null,
+    });
+    const derived = ability({
+      id: "celestial-derived",
+      kind: "racial_innate",
+      sourceAbilityId: "celestial-template",
+      bloodlineJustification: null,
+    });
+    const request = {
+      abilityId: "celestial-derived",
+      version: 1,
+      patch: { name: "星裔夜视" },
+      event: { ...change.event, type: "mutated", dedupeKey: "bloodline-required" },
+    };
+
+    await expect(
+      applyAbilityChange(
+        transaction(derived, { sourceAbility: source, characterRaceId: "race-1" }).client,
+        { ...request, bloodlineJustification: "临时绕过不得生效" },
+      ),
+    ).rejects.toBeInstanceOf(ZodError);
+    await expect(
+      applyAbilityChange(
+        transaction(derived, { sourceAbility: source, characterRaceId: "race-1" }).client,
+        request,
+      ),
+    ).rejects.toThrow(/bloodlineJustification/);
+
+    const persisted = await applyAbilityChange(
+      transaction(derived, { sourceAbility: source, characterRaceId: "race-1" }).client,
+      { ...request, patch: { bloodlineJustification: "母系星裔血脉已记录" }, event: { ...request.event, dedupeKey: "bloodline-persisted" } },
+    );
+    expect(persisted.event.after).toMatchObject({
+      bloodlineJustification: "母系星裔血脉已记录",
+    });
   });
 
   it("将数据库来源唯一约束冲突转换为可读的重复来源错误", async () => {
@@ -253,7 +318,7 @@ describe("applyAbilityChange integrity guards", () => {
     });
 
     await expect(
-      applyAbilityChange(transaction(derived, { sourceAbility: source, updateError: uniqueError }).tx, {
+      applyAbilityChange(transaction(derived, { sourceAbility: source, updateError: uniqueError }).client, {
         abilityId: "derived-1",
         version: 1,
         patch: { name: "新版影行" },
@@ -269,14 +334,14 @@ describe("applyAbilityChange integrity guards", () => {
       transaction(ability(), { message: { id: "message-1", chapterId: "chapter-1", scale: "era" } }),
     ];
 
-    for (const { tx } of cases) {
-      await expect(applyAbilityChange(tx, change)).rejects.toThrow(/章节|消息|尺度/);
+    for (const { client } of cases) {
+      await expect(applyAbilityChange(client, change)).rejects.toThrow(/章节|消息|尺度/);
     }
   });
 
   it("拒绝空白 evidence", async () => {
     await expect(
-      applyAbilityChange(transaction().tx, {
+      applyAbilityChange(transaction().client, {
         ...change,
         event: { ...change.event, evidence: "  ", dedupeKey: "empty-evidence" },
       }),
@@ -285,7 +350,7 @@ describe("applyAbilityChange integrity guards", () => {
 
   it("improved 只能将 mastery 提升一阶且不能改变 state", async () => {
     await expect(
-      applyAbilityChange(transaction().tx, {
+      applyAbilityChange(transaction().client, {
         ...change,
         patch: { mastery: "master", state: "enhanced" },
         event: { ...change.event, dedupeKey: "jump-to-master" },
@@ -295,25 +360,47 @@ describe("applyAbilityChange integrity guards", () => {
 
   it("lost、sealed 与 restored 必须匹配目标状态", async () => {
     await expect(
-      applyAbilityChange(transaction().tx, {
+      applyAbilityChange(transaction().client, {
         ...change,
         patch: { state: "normal" },
         event: { ...change.event, type: "lost", dedupeKey: "lost-not-lost" },
       }),
     ).rejects.toThrow(/lost/);
     await expect(
-      applyAbilityChange(transaction(ability({ state: "lost" })).tx, {
+      applyAbilityChange(transaction(ability({ state: "lost" })).client, {
         ...change,
         patch: { state: "enhanced" },
         event: { ...change.event, type: "restored", dedupeKey: "restored-not-normal" },
       }),
     ).rejects.toThrow(/restored/);
     await expect(
-      applyAbilityChange(transaction().tx, {
+      applyAbilityChange(transaction().client, {
         ...change,
         patch: { state: "normal" },
         event: { ...change.event, type: "sealed", dedupeKey: "sealed-not-sealed" },
       }),
     ).rejects.toThrow(/sealed/);
+  });
+});
+
+
+describe("applyAbilityChange public boundary", () => {
+  it.each([
+    ["event type", { ...change, event: { ...change.event, type: "invalid" } }],
+    ["scale", { ...change, event: { ...change.event, scale: "invalid" } }],
+    ["state", { ...change, patch: { state: "invalid" } }],
+    ["mastery", { ...change, patch: { mastery: "invalid" } }],
+    ["visibility", { ...change, patch: { visibility: "invalid" } }],
+  ])("在事务前拒绝非法 %s 枚举", async (_label, invalidInput) => {
+    await expect(
+      applyAbilityChange(transaction().client, invalidInput),
+    ).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("在事件写入失败时回滚能力更新", async () => {
+    const fixture = transaction(ability(), { createError: new Error("event write failed") });
+
+    await expect(applyAbilityChange(fixture.client, change)).rejects.toThrow("event write failed");
+    expect(fixture.currentAbility()).toMatchObject({ version: 1, mastery: "adept" });
   });
 });

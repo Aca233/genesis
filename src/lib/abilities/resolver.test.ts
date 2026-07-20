@@ -29,6 +29,7 @@ function ability({
     state,
     visibility: "known",
     rumorText: null,
+    bloodlineJustification: null,
     sourceAbilityId,
     lockedFields: [],
     version: 1,

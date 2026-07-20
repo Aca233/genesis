@@ -17,6 +17,7 @@ const ability = {
   state: "impaired" as const,
   visibility: "known" as const,
   rumorText: null,
+    bloodlineJustification: null,
   sourceAbilityId: null,
   lockedFields: ["effect"],
   version: 3,

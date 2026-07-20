@@ -1,4 +1,11 @@
+import { z } from "zod";
+import { ScaleSchema } from "../cards/schemas";
 import {
+  AbilityEventTypeSchema,
+  AbilityKindSchema,
+  AbilityMasterySchema,
+  AbilityStateSchema,
+  AbilityVisibilitySchema,
   normalizePersistedAbility,
   type AbilityChangeInput,
   type AbilityEventType,
@@ -54,8 +61,6 @@ export interface ApplyAbilityChangeInput {
   version: number;
   patch: AbilityPatch;
   event: AbilityChangeEventInput;
-  /** Required only for an explicitly justified cross-race racial_innate ability. */
-  bloodlineJustification?: string | null;
 }
 
 export interface AbilityMutationTx extends Omit<AbilityValidationTx, "ability"> {
@@ -89,6 +94,11 @@ export interface AbilityMutationTx extends Omit<AbilityValidationTx, "ability"> 
   };
 }
 
+/** Minimal PrismaClient-like boundary: every public mutation runs in one transaction. */
+export interface AbilityMutationClient {
+  $transaction<T>(operation: (tx: AbilityMutationTx) => Promise<T>): Promise<T>;
+}
+
 export interface AppliedAbilityChange {
   applied: boolean;
   ability?: AbilityInput;
@@ -98,7 +108,6 @@ export interface AppliedAbilityChange {
 function ownershipInput(
   ability: AbilityStoredRecord,
   normalized: AbilityInput,
-  bloodlineJustification?: string | null,
 ): AbilityOwnershipInput {
   return {
     id: ability.id,
@@ -107,7 +116,7 @@ function ownershipInput(
     godId: ability.godId,
     sourceAbilityId: normalized.sourceAbilityId,
     kind: normalized.kind,
-    bloodlineJustification,
+    bloodlineJustification: normalized.bloodlineJustification,
   };
 }
 
@@ -126,10 +135,50 @@ function createAfter(ability: AbilityInput, patch: AbilityPatch): AbilityInput {
   };
 }
 
+const AbilityPatchSchema = z.object({
+  name: z.string(),
+  kind: AbilityKindSchema,
+  effect: z.string(),
+  trigger: z.string(),
+  cost: z.string(),
+  limitations: z.string(),
+  mastery: AbilityMasterySchema,
+  state: AbilityStateSchema,
+  visibility: AbilityVisibilitySchema,
+  rumorText: z.string().nullable(),
+  bloodlineJustification: z.string().nullable(),
+  sourceAbilityId: z.string().nullable(),
+  lockedFields: z.array(z.string()),
+}).partial().strict();
+
+const AbilityChangeEventSchema = z.object({
+  type: AbilityEventTypeSchema,
+  chapterId: z.string().min(1),
+  messageId: z.string().min(1).nullable().optional(),
+  evidence: z.string(),
+  scale: ScaleSchema,
+  dedupeKey: z.string().min(1),
+}).strict();
+
+const ApplyAbilityChangeSchema = z.object({
+  abilityId: z.string().min(1),
+  version: z.number().int().positive(),
+  patch: AbilityPatchSchema,
+  event: AbilityChangeEventSchema,
+}).strict();
+
+const RevealAbilitySchema = z.object({
+  abilityId: z.string().min(1),
+  version: z.number().int().positive(),
+  visibility: z.enum(["rumored", "known"]),
+  rumorText: z.string().nullable().optional(),
+  event: AbilityChangeEventSchema.omit({ type: true }),
+}).strict();
+
 const masteryRanks = ["unawakened", "novice", "adept", "expert", "master"] as const;
 const comparableFields: readonly (keyof Omit<AbilityInput, "id" | "version">)[] = [
   "name", "kind", "effect", "trigger", "cost", "limitations", "mastery", "state",
-  "visibility", "rumorText", "sourceAbilityId", "lockedFields",
+  "visibility", "rumorText", "bloodlineJustification", "sourceAbilityId", "lockedFields",
 ];
 
 function sameValue(left: unknown, right: unknown): boolean {
@@ -288,7 +337,7 @@ function throwConflict(): never {
  * injected transaction must encompass both writes; the id+version condition
  * makes concurrent writers fail cleanly instead of overwriting one another.
  */
-export async function applyAbilityChange(
+async function applyAbilityChangeInTx(
   tx: AbilityMutationTx,
   input: ApplyAbilityChangeInput,
 ): Promise<AppliedAbilityChange> {
@@ -314,7 +363,7 @@ export async function applyAbilityChange(
   assertMonotonicLocks(before, input.patch);
   assertValidTransition(before, after, input.event.type);
   assertEventTransition(before, after, input.event.type);
-  await validateAbilityOwnership(tx, ownershipInput(stored, after, input.bloodlineJustification));
+  await validateAbilityOwnership(tx, ownershipInput(stored, after));
   await assertNoDuplicateDerivedSource(tx, stored, after);
   const evidence = await assertEventEvidence(tx, stored, input.event);
 
@@ -351,6 +400,15 @@ export async function applyAbilityChange(
   return { applied: true, ability: normalizePersistedAbility(updated), event };
 }
 
+/** Parses untrusted input before opening one transaction for ability and event writes. */
+export async function applyAbilityChange(
+  client: AbilityMutationClient,
+  input: unknown,
+): Promise<AppliedAbilityChange> {
+  const parsed = ApplyAbilityChangeSchema.parse(input);
+  return client.$transaction((tx) => applyAbilityChangeInTx(tx, parsed));
+}
+
 export interface RevealAbilityInput {
   abilityId: string;
   version: number;
@@ -360,7 +418,7 @@ export interface RevealAbilityInput {
 }
 
 /** Reveals an ability through the normal mutation pipeline and a revealed event. */
-export async function revealAbility(
+async function revealAbilityInTx(
   tx: AbilityMutationTx,
   input: RevealAbilityInput,
 ): Promise<AppliedAbilityChange> {
@@ -395,7 +453,7 @@ export async function revealAbility(
     throw new AbilityValidationError("只有 hidden 或 rumored 能力可以变为 known");
   }
 
-  return applyAbilityChange(tx, {
+  return applyAbilityChangeInTx(tx, {
     abilityId: input.abilityId,
     version: input.version,
     patch: {
@@ -404,4 +462,13 @@ export async function revealAbility(
     },
     event: { ...input.event, type: "revealed" },
   });
+}
+
+/** Parses reveal requests and applies their ability/event mutation atomically. */
+export async function revealAbility(
+  client: AbilityMutationClient,
+  input: unknown,
+): Promise<AppliedAbilityChange> {
+  const parsed = RevealAbilitySchema.parse(input);
+  return client.$transaction((tx) => revealAbilityInTx(tx, parsed));
 }

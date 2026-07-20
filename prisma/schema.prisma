@@ -165,6 +165,7 @@ model Ability {
   state           String          @default("normal")
   visibility      String          @default("known")
   rumorText       String?         @map("rumor_text")
+  bloodlineJustification String?         @map("bloodline_justification")
   lockedFields    String[]        @map("locked_fields")
   version         Int             @default(1)
   events          AbilityEvent[]

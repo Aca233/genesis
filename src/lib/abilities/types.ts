@@ -57,6 +57,7 @@ export interface AbilityInput {
   state: AbilityState;
   visibility: AbilityVisibility;
   rumorText: string | null;
+  bloodlineJustification: string | null;
   sourceAbilityId: string | null;
   lockedFields: string[];
   version: number;
@@ -75,6 +76,7 @@ export interface PersistedAbilityRecord {
   state: string;
   visibility: string;
   rumorText: string | null;
+  bloodlineJustification: string | null;
   sourceAbilityId: string | null;
   lockedFields: string[];
   version: number;
