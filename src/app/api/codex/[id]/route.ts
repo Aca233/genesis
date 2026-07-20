@@ -27,21 +27,38 @@ const PatchSchema = z.object({
 });
 
 type AbilityWithEvents = PersistedAbilityRecord & {
-  events?: Array<{ type: string; createdAt: unknown }>;
+  events?: Array<{
+    id?: string;
+    abilityId?: string;
+    type: string;
+    evidence?: string;
+    scale?: string;
+    createdAt: unknown;
+  }>;
 };
+
+function normalizeAbilityWithoutEvents(ability: AbilityWithEvents) {
+  const { events, ...record } = ability;
+  void events;
+  return normalizePersistedAbility(record);
+}
 
 function projectVisibleAbilityEvents(abilities: readonly AbilityWithEvents[]) {
   return abilities.flatMap<unknown>((ability) => {
-    const projection = projectAbilityForPlayer(normalizePersistedAbility(ability));
+    const projection = projectAbilityForPlayer(normalizeAbilityWithoutEvents(ability));
     if (projection === null) return [];
 
     const events = ability.events ?? [];
     if (projection.visibility === "rumored") {
       return events
         .filter((event) => event.type === "revealed")
-        .map((event) => ({ revealedAt: event.createdAt, rumorText: projection.rumorText }));
+        .map((event) => ({
+          abilityId: ability.id,
+          revealedAt: event.createdAt,
+          rumorText: projection.rumorText,
+        }));
     }
-    return events;
+    return events.map((event) => ({ ...event, abilityId: ability.id }));
   });
 }
 
@@ -90,10 +107,10 @@ export async function GET(
   });
 
   const { abilities, race, memberships, ...entityFields } = entity;
-  const ownAbilities = abilities.map(normalizePersistedAbility);
+  const ownAbilities = abilities.map(normalizeAbilityWithoutEvents);
   const effectiveCharacterAbilities = entity.type === "character"
     ? resolveEffectiveAbilities({
-      raceAbilities: (race?.abilities ?? []).map(normalizePersistedAbility),
+      raceAbilities: (race?.abilities ?? []).map(normalizeAbilityWithoutEvents),
       characterAbilities: ownAbilities,
     })
     : null;
@@ -111,14 +128,15 @@ export async function GET(
     entity: {
       ...entityFields,
       abilities: projectAbilitiesForPlayer(characterAbilities),
+      abilityEvents: projectVisibleAbilityEvents(
+        entity.type === "character"
+          ? [...abilities, ...inheritedRaceAbilities]
+          : abilities,
+      ),
       ...(entity.type === "character"
         ? {
           race: race === null ? null : { id: race.id, name: race.name, summary: race.summary },
           memberships,
-          abilityEvents: projectVisibleAbilityEvents([
-            ...abilities,
-            ...inheritedRaceAbilities,
-          ]),
         }
         : {}),
     },

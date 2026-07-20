@@ -10,6 +10,11 @@ import type {
 import { Emblem } from "./Emblem";
 import { AbilityList } from "./AbilityList";
 import { entityTypeName, ENTITY_TYPE_ORDER, sectionName } from "./lexicon";
+import {
+  completeCodexDetailLoad,
+  emptyCodexDetailState,
+  failCodexDetailLoad,
+} from "./codex-detail-state";
 
 /**
  * 众生录：六类实体分组列表 + 详情卡（docs/01 §9.2）。
@@ -47,6 +52,7 @@ type EntityDetail = EntityLite & {
   abilities: AbilityView[];
   race?: { id: string; name: string; summary: string } | null;
   memberships?: CharacterMembershipView[];
+  abilityEvents?: AbilityEventView[];
 };
 
 type ChronicleRow = {
@@ -161,10 +167,10 @@ function EntityDetailView({
   onStarred: (id: string, starred: boolean) => void;
   onOpenEntity: (id: string) => void;
 }) {
-  const [detail, setDetail] = useState<EntityDetail | null>(null);
-  const [chronicle, setChronicle] = useState<ChronicleRow[]>([]);
-  const [abilityHistory, setAbilityHistory] = useState<Record<string, AbilityEventView[]>>({});
-  const [error, setError] = useState<string | null>(null);
+  const [loadState, setLoadState] = useState(() =>
+    emptyCodexDetailState<EntityDetail, ChronicleRow>(),
+  );
+  const { detail, chronicle, abilityHistory, error, loading } = loadState;
 
   useEffect(() => {
     let cancelled = false;
@@ -178,28 +184,23 @@ function EntityDetailView({
         };
         if (cancelled) return;
         if (!res.ok || !json.entity) {
-          setError(json.error ?? "此册无从寻觅");
+          setLoadState(failCodexDetailLoad(json.error ?? "此册无从寻觅"));
           return;
         }
-        setDetail(json.entity);
-        setChronicle(json.chronicle ?? []);
-        setAbilityHistory({});
-
-        const histories = await Promise.all(
-          (json.entity.abilities ?? []).map(async (ability) => {
-            try {
-              const historyRes = await fetch(`/api/abilities/${ability.id}/history`);
-              if (!historyRes.ok) return [ability.id, []] as const;
-              const historyJson = (await historyRes.json()) as { history?: AbilityEventView[] };
-              return [ability.id, historyJson.history ?? []] as const;
-            } catch {
-              return [ability.id, []] as const;
-            }
-          }),
+        setLoadState((previous) =>
+          completeCodexDetailLoad(
+            previous,
+            json.entity!,
+            json.chronicle ?? [],
+            json.entity!.abilityEvents ?? [],
+          ),
         );
-        if (!cancelled) setAbilityHistory(Object.fromEntries(histories));
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) {
+          setLoadState(
+            failCodexDetailLoad(err instanceof Error ? err.message : String(err)),
+          );
+        }
       }
     })();
     return () => {
@@ -210,7 +211,10 @@ function EntityDetailView({
   const toggleStar = useCallback(async () => {
     if (!detail) return;
     const next = !detail.starred;
-    setDetail({ ...detail, starred: next });
+    setLoadState((previous) => ({
+      ...previous,
+      detail: previous.detail ? { ...previous.detail, starred: next } : null,
+    }));
     onStarred(detail.id, next);
     await fetch(`/api/codex/${detail.id}`, {
       method: "PATCH",
@@ -219,6 +223,7 @@ function EntityDetailView({
     });
   }, [detail, onStarred]);
 
+  if (loading) return <p className="fog-text text-sm">展卷中…</p>;
   if (error) return <p className="text-sm text-cinnabar">{error}</p>;
   if (!detail) return <p className="fog-text text-sm">展卷中…</p>;
 
@@ -416,6 +421,7 @@ export function CodexPanel({
   if (openId) {
     return (
       <EntityDetailView
+        key={openId}
         entityId={openId}
         theme={theme}
         onBack={() => {

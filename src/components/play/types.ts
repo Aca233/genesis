@@ -70,6 +70,7 @@ export type AbilityView = KnownAbilityView | RumoredAbilityView;
 
 /** 能力沿革 DTO；传闻沿革仅提供揭示时间与传闻文本。 */
 export type AbilityEventView = {
+  abilityId: string;
   id?: string;
   type?: string;
   evidence?: string;

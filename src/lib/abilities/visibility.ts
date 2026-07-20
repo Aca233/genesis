@@ -24,6 +24,18 @@ export function projectAbilityForPlayer(
   }
 }
 
+
+/**
+ * Projects abilities for their owner. Owners may inspect every mechanical field,
+ * but the transport still uses the public `known` discriminator so clients never
+ * need a hidden-data rendering branch.
+ */
+export function projectAbilitiesForOwner(
+  abilities: readonly AbilityInput[],
+): KnownAbilityProjection[] {
+  return abilities.map(toKnownProjection);
+}
+
 /** Projects a collection without exposing hidden abilities to a player. */
 export function projectAbilitiesForPlayer(
   abilities: readonly AbilityInput[],

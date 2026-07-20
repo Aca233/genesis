@@ -51,6 +51,13 @@ describe("AbilityList display helpers", () => {
     ]);
   });
 
+  it("运行时收到 hidden 项时整项拒绝，不走完整字段回退", () => {
+    const hidden = { ...known, visibility: "hidden" } as unknown as AbilityView;
+
+    expect(groupAbilities([hidden])).toEqual([]);
+    expect(abilityDetailLines(hidden)).toEqual([]);
+  });
+
   it("传闻能力仅保留名称与传闻，不泄露机制字段", () => {
     const rumored: AbilityView = {
       id: "moon-step",

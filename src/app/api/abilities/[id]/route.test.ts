@@ -13,12 +13,14 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
     chronicleEntry: { findMany: vi.fn() },
   },
+  projectAbilitiesForOwner: vi.fn(),
   projectAbilitiesForPlayer: vi.fn(),
   projectAbilityForPlayer: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mocks.prisma }));
 vi.mock("@/lib/abilities/visibility", () => ({
+  projectAbilitiesForOwner: mocks.projectAbilitiesForOwner,
   projectAbilitiesForPlayer: mocks.projectAbilitiesForPlayer,
   projectAbilityForPlayer: mocks.projectAbilityForPlayer,
 }));
@@ -172,6 +174,9 @@ describe("能力 API 可见性", () => {
       { id: "god-player", name: "玩家神", isPlayer: true, abilities: [knownAbility, hiddenAbility] },
       { id: "god-major", name: "大敌神", isPlayer: false, abilities: [knownAbility, hiddenAbility] },
     ]);
+    mocks.projectAbilitiesForOwner.mockImplementation((abilities) =>
+      abilities.map((ability: typeof knownAbility) => ({ ...ability, visibility: "known" })),
+    );
     mocks.projectAbilitiesForPlayer.mockReturnValue([knownAbility]);
 
     const response = await GET(
@@ -182,10 +187,17 @@ describe("能力 API 可见性", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       gods: [
-        { id: "god-player", abilities: [knownAbility, hiddenAbility] },
+        {
+          id: "god-player",
+          abilities: [knownAbility, { ...hiddenAbility, visibility: "known" }],
+        },
         { id: "god-major", abilities: [knownAbility] },
       ],
     });
+    expect(mocks.projectAbilitiesForOwner).toHaveBeenCalledWith([
+      knownAbility,
+      hiddenAbility,
+    ]);
   });
 
   it("PATCH 已知能力的未锁字段成功并递增 version", async () => {

@@ -66,8 +66,11 @@ export function groupAbilities(
   kinds: readonly AbilityKind[] = ABILITY_KINDS,
   labels: Partial<Record<AbilityKind, string>> = {},
 ): AbilityGroup[] {
+  const displayable = abilities.filter(
+    (ability) => ability.visibility === "known" || ability.visibility === "rumored",
+  );
   return kinds.flatMap((kind) => {
-    const grouped = abilities.filter((ability) => ability.kind === kind);
+    const grouped = displayable.filter((ability) => ability.kind === kind);
     return grouped.length === 0
       ? []
       : [{ kind, label: labels[kind] ?? ABILITY_KIND_LABELS[kind], abilities: grouped }];
@@ -79,6 +82,7 @@ export function abilityDetailLines(ability: AbilityView): AbilityDetailLine[] {
   if (ability.visibility === "rumored") {
     return [{ label: "传闻", value: ability.rumorText || "此术详情尚不可考" }];
   }
+  if (ability.visibility !== "known") return [];
 
   return [
     { label: "效果", value: ability.effect },
