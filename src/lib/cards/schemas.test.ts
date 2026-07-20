@@ -3,6 +3,7 @@ import { validateDeckReferences } from "@/lib/abilities/validator";
 import {
   LegacyWorldDeckSchema,
   WorldDeckSchema,
+  isLegacyWorldDeck,
   normalizeLegacyWorldDeck,
   parsePersistedWorldDeck,
 } from "./schemas";
@@ -148,6 +149,27 @@ function completeDeck() {
   };
 }
 
+function completeLegacyDeck(): Record<string, unknown> {
+  const legacy = completeDeck() as Record<string, unknown>;
+  const playerGod = legacy.playerGod as Record<string, unknown>;
+  delete playerGod.ref;
+  delete playerGod.abilities;
+  for (const god of legacy.majorGods as Record<string, unknown>[]) {
+    delete god.ref;
+    delete god.abilities;
+  }
+  for (const faction of legacy.factions as Record<string, unknown>[]) {
+    delete faction.ref;
+    delete faction.keyCharacterRefs;
+  }
+  for (const race of legacy.races as Record<string, unknown>[]) {
+    delete race.ref;
+    delete race.abilities;
+  }
+  delete legacy.majorCharacters;
+  return legacy;
+}
+
 describe("WorldDeck 能力与主要人物引用", () => {
   it("接受包含嵌套稳定引用的完整卡组", () => {
     const deck = WorldDeckSchema.parse(completeDeck());
@@ -226,25 +248,10 @@ describe("WorldDeck 能力与主要人物引用", () => {
   });
 
   it("将旧草稿确定性归一化为可保存的新格式，不凭空生成角色或能力", () => {
-    const legacy = completeDeck() as Record<string, unknown>;
-    const playerGod = legacy.playerGod as Record<string, unknown>;
-    delete playerGod.ref;
-    delete playerGod.abilities;
-    for (const god of legacy.majorGods as Record<string, unknown>[]) {
-      delete god.ref;
-      delete god.abilities;
-    }
-    for (const faction of legacy.factions as Record<string, unknown>[]) {
-      delete faction.ref;
-      delete faction.keyCharacterRefs;
-    }
-    for (const race of legacy.races as Record<string, unknown>[]) {
-      delete race.ref;
-      delete race.abilities;
-    }
-    delete legacy.majorCharacters;
+    const legacy = completeLegacyDeck();
 
     expect(WorldDeckSchema.safeParse(legacy).success).toBe(false);
+    expect(isLegacyWorldDeck(legacy)).toBe(true);
     const normalized = normalizeLegacyWorldDeck(legacy);
     expect(LegacyWorldDeckSchema.safeParse(normalized).success).toBe(true);
     expect(WorldDeckSchema.safeParse(normalized).success).toBe(false);
@@ -262,6 +269,29 @@ describe("WorldDeck 能力与主要人物引用", () => {
     expect(normalized.factions.flatMap((faction) => faction.keyCharacterRefs)).toEqual([]);
     expect(normalizeLegacyWorldDeck(legacy)).toEqual(normalized);
     expect(() => validateDeckReferences(normalized)).not.toThrow();
+  });
+
+  it.each([
+    ["当前卡组只缺少 playerGod.abilities", () => {
+      const deck = completeDeck() as Record<string, unknown>;
+      delete (deck.playerGod as Record<string, unknown>).abilities;
+      return deck;
+    }],
+    ["旧草稿混入 playerGod.abilities", () => {
+      const deck = completeLegacyDeck();
+      (deck.playerGod as Record<string, unknown>).abilities = [];
+      return deck;
+    }],
+    ["旧草稿混入 majorCharacters", () => {
+      const deck = completeLegacyDeck();
+      deck.majorCharacters = [];
+      return deck;
+    }],
+  ])("不将%s误判为可归一化的旧草稿", (_label, createInvalidDeck) => {
+    const invalidDeck = createInvalidDeck();
+
+    expect(isLegacyWorldDeck(invalidDeck)).toBe(false);
+    expect(() => parsePersistedWorldDeck(invalidDeck)).toThrow();
   });
 
 });

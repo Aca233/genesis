@@ -392,6 +392,14 @@ function hasOwn(value: LooseRecord, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+function lacksOwnFields(value: unknown, fields: readonly string[]): boolean {
+  return isLooseRecord(value) && fields.every((field) => !hasOwn(value, field));
+}
+
+function allRecordsLackFields(value: unknown, fields: readonly string[]): boolean {
+  return Array.isArray(value) && value.every((record) => lacksOwnFields(record, fields));
+}
+
 function normalizeAbilities(value: unknown, prefix: string): unknown[] {
   if (!Array.isArray(value)) return [];
   return value.map((rawAbility, index) => {
@@ -425,30 +433,24 @@ function normalizeRacialOverrides(value: unknown, prefix: string): unknown[] {
   });
 }
 
-/** Returns true only when a persisted deck is missing fields introduced by the ability-card era. */
+/**
+ * Returns true only for a complete pre-ability-era fingerprint.
+ *
+ * Compatibility normalization may synthesize stable refs and empty collections, so
+ * it must never run for partially migrated or damaged current decks. A legacy
+ * draft therefore has no majorCharacters and no ability-era field on any entity.
+ */
 export function isLegacyWorldDeck(raw: unknown): boolean {
-  const deck = asLooseRecord(raw);
-  const playerGod = asLooseRecord(deck.playerGod);
-  const majorGods = Array.isArray(deck.majorGods) ? deck.majorGods : [];
-  const factions = Array.isArray(deck.factions) ? deck.factions : [];
-  const races = Array.isArray(deck.races) ? deck.races : [];
+  if (!isLooseRecord(raw)) {
+    return false;
+  }
 
   return (
-    !hasOwn(deck, "majorCharacters") ||
-    !hasOwn(playerGod, "ref") ||
-    !hasOwn(playerGod, "abilities") ||
-    majorGods.some((rawGod) => {
-      const god = asLooseRecord(rawGod);
-      return !hasOwn(god, "ref") || !hasOwn(god, "abilities");
-    }) ||
-    factions.some((rawFaction) => {
-      const faction = asLooseRecord(rawFaction);
-      return !hasOwn(faction, "ref") || !hasOwn(faction, "keyCharacterRefs");
-    }) ||
-    races.some((rawRace) => {
-      const race = asLooseRecord(rawRace);
-      return !hasOwn(race, "ref") || !hasOwn(race, "abilities");
-    })
+    !hasOwn(raw, "majorCharacters") &&
+    lacksOwnFields(raw.playerGod, ["ref", "abilities"]) &&
+    allRecordsLackFields(raw.majorGods, ["ref", "abilities"]) &&
+    allRecordsLackFields(raw.factions, ["ref", "keyCharacterRefs"]) &&
+    allRecordsLackFields(raw.races, ["ref", "abilities"])
   );
 }
 
