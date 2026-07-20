@@ -8,6 +8,7 @@ import {
   changeCharacterRace,
   firstRacialInnateAbilityRef,
   nextAvailableAbilityRef,
+  selectableRacialOverrideSourceRefs,
   traditionAbilityRefsForRace,
   visibleAbilityIndexes,
 } from "./deck-utils";
@@ -137,5 +138,25 @@ describe("创世人物引用工具", () => {
     });
 
     expect(nextAvailableAbilityRef("races.0.abilities", usedRefs)).toBe("races-0-abilities-ability-3");
+  });
+
+  it("为合法跨种族覆写保留当前来源选项，而不放宽新建来源范围", () => {
+    expect(
+      selectableRacialOverrideSourceRefs(
+        deck,
+        "race-human",
+        [],
+        { sourceAbilityRef: "dragon-breath", bloodlineJustification: "龙裔血脉" },
+      ),
+    ).toEqual(["human-inborn", "dragon-breath"]);
+
+    expect(
+      selectableRacialOverrideSourceRefs(
+        deck,
+        "race-human",
+        [],
+        { sourceAbilityRef: "dragon-breath", bloodlineJustification: null },
+      ),
+    ).toEqual(["human-inborn"]);
   });
 });

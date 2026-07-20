@@ -7,6 +7,7 @@ import {
   availableRacialInnateAbilityRefs,
   changeCharacterRace,
   isPathLocked,
+  selectableRacialOverrideSourceRefs,
   traditionAbilityRefsForRace,
 } from "./deck-utils";
 import { AbilityEditor, AbilitySection } from "./AbilityEditor";
@@ -95,12 +96,22 @@ export function MajorCharacterEditor({ deck, index, lockedPaths, onEdit }: Props
     usedInnateRefs,
   );
   const innateOptionsFor = (overrideIndex: number) => {
+    const override = character.racialOverrides[overrideIndex]!;
     const otherUsedRefs = character.racialOverrides
       .filter((_, index) => index !== overrideIndex)
       .map((override) => override.sourceAbilityRef);
-    return availableRacialInnateAbilityRefs(deck, character.raceRef, otherUsedRefs).map((ref) => {
-      const ability = currentRace?.abilities.find((entry) => entry.ref === ref);
-      return { value: ref, label: `${currentRace?.name ?? character.raceRef} · ${ability?.name ?? ref} · ${ref}` };
+    return selectableRacialOverrideSourceRefs(
+      deck,
+      character.raceRef,
+      otherUsedRefs,
+      override,
+    ).map((ref) => {
+      const sourceRace = deck.races.find((race) => race.abilities.some((ability) => ability.ref === ref));
+      const ability = sourceRace?.abilities.find((entry) => entry.ref === ref);
+      const bloodline = sourceRace?.ref !== character.raceRef
+        ? ` · 血脉依据：${override.bloodlineJustification}`
+        : "";
+      return { value: ref, label: `${sourceRace?.name ?? character.raceRef} · ${ability?.name ?? ref} · ${ref}${bloodline}` };
     });
   };
 

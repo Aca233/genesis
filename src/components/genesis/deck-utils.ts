@@ -191,6 +191,37 @@ export function availableRacialInnateAbilityRefs(
   return racialInnateAbilityRefsForRace(deck, raceRef).filter((ref) => !used.has(ref));
 }
 
+/**
+ * 既有且合法的跨种族覆写可保留其原始来源；新建项仍只能从当前种族可用模板中选取。
+ */
+export function selectableRacialOverrideSourceRefs(
+  deck: RaceAbilityDeck,
+  raceRef: string,
+  usedOtherSourceAbilityRefs: readonly string[],
+  currentOverride: { sourceAbilityRef: string; bloodlineJustification?: string | null },
+): string[] {
+  const currentRaceOptions = availableRacialInnateAbilityRefs(
+    deck,
+    raceRef,
+    usedOtherSourceAbilityRefs,
+  );
+  const sourceRace = deck.races.find((race) =>
+    race.abilities.some(
+      (ability) =>
+        ability.ref === currentOverride.sourceAbilityRef &&
+        ability.kind === "racial_innate",
+    ),
+  );
+  const preserveCrossRaceSource =
+    sourceRace !== undefined &&
+    sourceRace.ref !== raceRef &&
+    Boolean(currentOverride.bloodlineJustification?.trim());
+
+  return preserveCrossRaceSource
+    ? [...currentRaceOptions, currentOverride.sourceAbilityRef]
+    : currentRaceOptions;
+}
+
 /** 在封印状态过滤隐藏能力，避免暴露其名称、种类与位置。 */
 export function visibleAbilityIndexes(
   abilities: ReadonlyArray<{ kind: string; visibility: string }>,
