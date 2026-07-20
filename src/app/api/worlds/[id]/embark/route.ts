@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { WorldDeckSchema, type WorldDeck } from "@/lib/cards/schemas";
+import { normalizeWorldDeck, type WorldDeck } from "@/lib/cards/schemas";
+import { validateDeckReferences } from "@/lib/abilities/validator";
+import { factionSections } from "@/lib/cards/faction-sections";
 
 /**
  * POST /api/worlds/[id]/embark —— 开局：草稿卡组物化为时间线+诸神+百科实体+第一章
@@ -13,15 +15,6 @@ function emblemSeed(name: string): string {
   let h = 5381;
   for (const ch of name) h = ((h << 5) + h + ch.codePointAt(0)!) >>> 0;
   return h.toString(36);
-}
-
-function factionSections(f: WorldDeck["factions"][number]) {
-  return [
-    { key: "overview", content: { text: f.overview } },
-    { key: "territory", content: { text: f.territory } },
-    { key: "faith", content: { text: f.faith } },
-    { key: "keyFigures", content: { names: f.keyFigures } },
-  ];
 }
 
 function raceSections(r: WorldDeck["races"][number]) {
@@ -54,11 +47,13 @@ export async function POST(
     return NextResponse.json({ error: "该世界已开局" }, { status: 409 });
   }
 
-  const parsed = WorldDeckSchema.safeParse(world.draftDeck);
-  if (!parsed.success) {
+  let deck: WorldDeck;
+  try {
+    deck = normalizeWorldDeck(world.draftDeck);
+    validateDeckReferences(deck);
+  } catch {
     return NextResponse.json({ error: "草稿卡组已损坏" }, { status: 500 });
   }
-  const deck = parsed.data;
 
   const result = await prisma.$transaction(async (tx) => {
     const timeline = await tx.timeline.create({
@@ -133,7 +128,7 @@ export async function POST(
         name: f.name,
         aliases: f.aliases,
         summary: f.overview.slice(0, 120),
-        sections: factionSections(f) as {
+        sections: factionSections(f, deck.majorCharacters) as {
           key: string;
           content: Prisma.InputJsonValue;
         }[],
@@ -188,6 +183,7 @@ export async function POST(
       data: {
         status: "playing",
         activeTimelineId: timeline.id,
+        draftDeck: deck as unknown as Prisma.InputJsonValue,
       },
     });
 

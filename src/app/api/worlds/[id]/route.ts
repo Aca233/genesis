@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { WorldDeckSchema } from "@/lib/cards/schemas";
+import { normalizeWorldDeck } from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 
 /**
@@ -29,6 +29,13 @@ export async function GET(
     },
   });
   if (!world) return NextResponse.json({ error: "不存在" }, { status: 404 });
+  if (world.draftDeck) {
+    try {
+      return NextResponse.json({ world: { ...world, draftDeck: normalizeWorldDeck(world.draftDeck) } });
+    } catch {
+      return NextResponse.json({ error: "草稿卡组已损坏" }, { status: 500 });
+    }
+  }
   return NextResponse.json({ world });
 }
 
@@ -39,20 +46,14 @@ export async function PATCH(
   const { id } = await params;
   const body = PatchSchema.parse(await request.json());
 
-  const parsed = WorldDeckSchema.safeParse(body.deck);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "卡组校验失败", issues: parsed.error.issues.slice(0, 5) },
-      { status: 400 },
-    );
-  }
-
+  let deck;
   try {
-    validateDeckReferences(parsed.data);
+    deck = normalizeWorldDeck(body.deck);
+    validateDeckReferences(deck);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: "卡组引用校验失败", issues: [message] },
+      { error: "卡组校验失败", issues: [message] },
       { status: 400 },
     );
   }
@@ -61,8 +62,6 @@ export async function PATCH(
   if (!world) return NextResponse.json({ error: "不存在" }, { status: 404 });
 
   const lockedPaths = [...new Set([...world.lockedPaths, ...body.editedPaths])];
-  const deck = parsed.data;
-
   await prisma.world.update({
     where: { id },
     data: {

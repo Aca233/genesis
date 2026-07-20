@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { completeStructured } from "@/lib/llm/structured";
-import { WorldDeckSchema, DECK_CARD_KEYS, type WorldDeck } from "@/lib/cards/schemas";
+import { normalizeWorldDeck, WorldDeckSchema, DECK_CARD_KEYS, type WorldDeck } from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 import {
   GENESIS_SYSTEM,
@@ -86,6 +86,13 @@ export async function POST(
     return NextResponse.json({ error: "世界草稿不存在" }, { status: 404 });
   }
 
+  let currentDeck: WorldDeck;
+  try {
+    currentDeck = normalizeWorldDeck(world.draftDeck);
+  } catch {
+    return NextResponse.json({ error: "草稿卡组已损坏" }, { status: 500 });
+  }
+
   const lockedPaths = world.lockedPaths;
 
   let generated: WorldDeck;
@@ -96,7 +103,7 @@ export async function POST(
       user: rerollUserPrompt({
         decree: world.genesisInput,
         cardKey,
-        currentDeckJson: JSON.stringify(world.draftDeck),
+        currentDeckJson: JSON.stringify(currentDeck),
         lockedNote: lockedPaths.length ? lockedPaths.join(", ") : undefined,
         playerNote: note,
       }),
@@ -110,7 +117,7 @@ export async function POST(
 
   let deck: WorldDeck;
   try {
-    deck = applyLockedPaths(generated, world.draftDeck, lockedPaths);
+    deck = applyLockedPaths(generated, currentDeck, lockedPaths);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: `重掷结果与锁定字段无法组成有效卡组：${message}` }, { status: 502 });
@@ -130,7 +137,7 @@ export async function POST(
         schema: WorldDeckSchema,
         maxTokens: 16000,
       });
-      deck = applyLockedPaths(repaired, world.draftDeck, lockedPaths);
+      deck = applyLockedPaths(repaired, currentDeck, lockedPaths);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return NextResponse.json({ error: `重掷引用修复失败：${message}` }, { status: 502 });

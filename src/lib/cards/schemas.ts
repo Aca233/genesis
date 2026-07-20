@@ -47,11 +47,14 @@ export const RelationLabelSchema = z.enum([
 export const ScaleSchema = z.enum(["moment", "scene", "years", "era", "epoch"]);
 export type Scale = z.infer<typeof ScaleSchema>;
 
+/** Trimmed non-empty reference key used for all cross-card and ability identities. */
+export const StableRefSchema = z.string().trim().min(1, "ref 不能为空白");
+
 // ───────────────────────── 单卡 ─────────────────────────
 
 /** 卡组阶段使用的能力完整描述；ref 是草稿内的稳定关系键。 */
 export const DeckAbilitySchema = z.object({
-  ref: z.string().min(1).describe("稳定引用"),
+  ref: StableRefSchema.describe("稳定引用"),
   name: z.string(),
   kind: AbilityKindSchema,
   effect: z.string().describe("叙事中的实际效果"),
@@ -79,32 +82,35 @@ export const PersonalDeckAbilitySchema = DeckAbilitySchema.refine(
 );
 
 export const FactionMembershipSchema = z.object({
-  factionRef: z.string().min(1),
+  factionRef: StableRefSchema,
   role: z.string().describe("人物在势力中的职务"),
   isPrimary: z.boolean().describe("是否为主要归属"),
 });
 
-export const RacialOverrideSchema = z.object({
-  sourceAbilityRef: z.string().min(1),
-  bloodlineJustification: z.string().min(1).nullable().optional(),
-});
+export const RacialOverrideSchema = DeckAbilitySchema.extend({
+  sourceAbilityRef: StableRefSchema,
+  bloodlineJustification: z.string().min(1).nullable(),
+}).refine(
+  (ability) => ability.kind === "racial_innate",
+  "先天覆写只能是 racial_innate",
+);
 
 export const MajorCharacterCardSchema = z.object({
-  ref: z.string().min(1).describe("稳定引用"),
+  ref: StableRefSchema.describe("稳定引用"),
   name: z.string(),
   aliases: z.array(z.string()),
   identity: z.string().describe("身份与社会角色"),
   ageStage: z.string().describe("年龄阶段"),
-  raceRef: z.string().min(1).describe("主种族稳定引用"),
+  raceRef: StableRefSchema.describe("主种族稳定引用"),
   factionMemberships: z.array(FactionMembershipSchema),
   personality: z.string(),
   goals: z.string(),
   situation: z.string().describe("当前处境"),
   divineTies: z.string().describe("与诸神的关系"),
   conflictTies: z.string().describe("与时代冲突的关系"),
-  learnedTraditionRefs: z.array(z.object({ sourceAbilityRef: z.string().min(1) })),
+  learnedTraditionRefs: z.array(z.object({ sourceAbilityRef: StableRefSchema })),
   racialOverrides: z.array(RacialOverrideSchema),
-  abilities: z.array(PersonalDeckAbilitySchema).min(2).max(5).describe("个人技能"),
+  abilities: z.array(PersonalDeckAbilitySchema).max(5).describe("个人技能"),
 });
 
 export const CosmologyCardSchema = z.object({
@@ -140,7 +146,7 @@ export const GodAgendaSchema = z.object({
 });
 
 export const MajorGodCardSchema = z.object({
-  ref: z.string().min(1).describe("稳定引用，供跨卡关系与开局物化使用"),
+  ref: StableRefSchema.describe("稳定引用，供跨卡关系与开局物化使用"),
   name: z.string(),
   aliases: z.array(z.string()).describe("别名与称号"),
   domains: z.array(z.string()).describe("领域"),
@@ -153,7 +159,7 @@ export const MajorGodCardSchema = z.object({
     note: z.string(),
   }),
   faithScope: z.string().describe("信仰范围一句话"),
-  abilities: z.array(DivineDeckAbilitySchema).min(3).max(6).describe("神权能力"),
+  abilities: z.array(DivineDeckAbilitySchema).max(6).describe("神权能力"),
 });
 
 export const MinorGodSchema = z.object({
@@ -162,38 +168,38 @@ export const MinorGodSchema = z.object({
 });
 
 export const PlayerGodCardSchema = z.object({
-  ref: z.string().min(1).describe("稳定引用，供开局物化使用"),
+  ref: StableRefSchema.describe("稳定引用，供开局物化使用"),
   name: z.string(),
   origin: z.string().describe("出身：新神/既有神/转生神/篡位者等，从玩家输入推断"),
   domains: z.array(z.string()),
   rank: RankSchema,
   faithBase: z.string().describe("初始信仰势力"),
   situation: z.string().describe("开局处境与钩子"),
-  abilities: z.array(DivineDeckAbilitySchema).min(3).max(6).describe("玩家神权"),
+  abilities: z.array(DivineDeckAbilitySchema).max(6).describe("玩家神权"),
 });
 
 export const FactionCardSchema = z.object({
-  ref: z.string().min(1).describe("稳定引用"),
+  ref: StableRefSchema.describe("稳定引用"),
   name: z.string(),
   aliases: z.array(z.string()),
   kind: z.string().describe("国家/宗门/教团/军团等"),
   overview: z.string(),
   territory: z.string(),
   faith: z.string().describe("信仰归属与浓度"),
-  keyCharacterRefs: z.array(z.object({ ref: z.string().min(1) })).describe("关键人物稳定引用"),
+  keyCharacterRefs: z.array(z.object({ ref: StableRefSchema })).describe("关键人物稳定引用"),
   // 旧草稿兼容字段；新的运行时关系以 keyCharacterRefs 为准。
   keyFigures: z.array(z.string()).optional().default([]).describe("旧草稿关键人物名"),
 });
 
 export const RaceCardSchema = z.object({
-  ref: z.string().min(1).describe("稳定引用"),
+  ref: StableRefSchema.describe("稳定引用"),
   name: z.string(),
   aliases: z.array(z.string()),
   traits: z.string(),
   lifespan: z.string(),
   distribution: z.string(),
   divineTies: z.string().describe("与诸神的渊源"),
-  abilities: z.array(RaceDeckAbilitySchema).min(2).max(5).describe("先天能力与族群技艺"),
+  abilities: z.array(RaceDeckAbilitySchema).max(5).describe("先天能力与族群技艺"),
 });
 
 export const PlaceCardSchema = z.object({
@@ -235,7 +241,7 @@ export const ThemeCardSchema = z.object({
 
 // ───────────────────────── 卡组 ─────────────────────────
 
-export const WorldDeckSchema = z.object({
+const WorldDeckObjectSchema = z.object({
   worldName: z.string(),
   cosmology: CosmologyCardSchema,
   fusionAxiom: FusionAxiomCardSchema.nullable().describe("仅多IP融合时非空"),
@@ -244,16 +250,191 @@ export const WorldDeckSchema = z.object({
   minorGods: z.array(MinorGodSchema),
   factions: z.array(FactionCardSchema).min(2).max(8),
   races: z.array(RaceCardSchema),
-  majorCharacters: z.array(MajorCharacterCardSchema).min(6).max(12),
+  // 旧草稿没有人物名录；归一化后以空数组表示，创世生成规则由 prompt 保证 6–12 位。
+  majorCharacters: z.array(MajorCharacterCardSchema).max(12),
   places: z.array(PlaceCardSchema),
   epochConflict: EpochConflictCardSchema,
   style: StyleCardSchema,
   theme: ThemeCardSchema,
 });
 
+
+function addUniqueRef(
+  ctx: z.RefinementCtx,
+  seen: Map<string, (string | number)[]>,
+  ref: string,
+  path: (string | number)[],
+): void {
+  if (ref.trim() === "") return;
+  const firstPath = seen.get(ref);
+  if (firstPath !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path,
+      message: `稳定 ref "${ref}" 与 ${firstPath.join(".")} 重复`,
+    });
+    return;
+  }
+  seen.set(ref, path);
+}
+
+/**
+ * Strict schema for the normalized deck format. Every stable card ref and every
+ * DeckAbility / derived override ref shares one namespace so provenance stays
+ * unambiguous after a draft is saved or rerolled.
+ */
+export const WorldDeckSchema = WorldDeckObjectSchema.superRefine((deck, ctx) => {
+  const cardRefs = new Map<string, (string | number)[]>();
+  const abilityRefs = new Map<string, (string | number)[]>();
+  const addAbility = (ability: { ref: string }, path: (string | number)[]) =>
+    addUniqueRef(ctx, abilityRefs, ability.ref, path);
+
+  addUniqueRef(ctx, cardRefs, deck.playerGod.ref, ["playerGod", "ref"]);
+  deck.playerGod.abilities.forEach((ability, index) =>
+    addAbility(ability, ["playerGod", "abilities", index, "ref"]),
+  );
+  deck.majorGods.forEach((god, godIndex) => {
+    addUniqueRef(ctx, cardRefs, god.ref, ["majorGods", godIndex, "ref"]);
+    god.abilities.forEach((ability, abilityIndex) =>
+      addAbility(ability, ["majorGods", godIndex, "abilities", abilityIndex, "ref"]),
+    );
+  });
+  deck.races.forEach((race, raceIndex) => {
+    addUniqueRef(ctx, cardRefs, race.ref, ["races", raceIndex, "ref"]);
+    race.abilities.forEach((ability, abilityIndex) =>
+      addAbility(ability, ["races", raceIndex, "abilities", abilityIndex, "ref"]),
+    );
+  });
+  deck.factions.forEach((faction, index) =>
+    addUniqueRef(ctx, cardRefs, faction.ref, ["factions", index, "ref"]),
+  );
+  deck.majorCharacters.forEach((character, characterIndex) => {
+    addUniqueRef(ctx, cardRefs, character.ref, ["majorCharacters", characterIndex, "ref"]);
+    character.abilities.forEach((ability, abilityIndex) =>
+      addAbility(ability, ["majorCharacters", characterIndex, "abilities", abilityIndex, "ref"]),
+    );
+    character.racialOverrides.forEach((override, overrideIndex) =>
+      addAbility(override, ["majorCharacters", characterIndex, "racialOverrides", overrideIndex, "ref"]),
+    );
+  });
+});
+
 export type WorldDeck = z.infer<typeof WorldDeckSchema>;
 export type MajorGodCard = z.infer<typeof MajorGodCardSchema>;
+
 export type PlayerGodCard = z.infer<typeof PlayerGodCardSchema>;
+
+type LooseRecord = Record<string, unknown>;
+
+function isLooseRecord(value: unknown): value is LooseRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asLooseRecord(value: unknown): LooseRecord {
+  return isLooseRecord(value) ? value : {};
+}
+
+function hasOwn(value: LooseRecord, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function normalizeAbilities(value: unknown, prefix: string): unknown[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((rawAbility, index) => {
+    const ability = asLooseRecord(rawAbility);
+    return {
+      ...ability,
+      ...(hasOwn(ability, "ref") ? {} : { ref: `${prefix}-ability-${index + 1}` }),
+    };
+  });
+}
+
+function normalizeRacialOverrides(value: unknown, prefix: string): unknown[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((rawOverride, index) => {
+    const override = asLooseRecord(rawOverride);
+    return {
+      ...override,
+      ...(hasOwn(override, "ref") ? {} : { ref: `${prefix}-override-${index + 1}` }),
+      ...(hasOwn(override, "name") ? {} : { name: `先天覆写${index + 1}` }),
+      ...(hasOwn(override, "kind") ? {} : { kind: "racial_innate" }),
+      ...(hasOwn(override, "effect") ? {} : { effect: "沿用来源能力的效果" }),
+      ...(hasOwn(override, "trigger") ? {} : { trigger: "沿用来源能力的触发条件" }),
+      ...(hasOwn(override, "cost") ? {} : { cost: "沿用来源能力的代价" }),
+      ...(hasOwn(override, "limitations") ? {} : { limitations: "沿用来源能力的限制" }),
+      ...(hasOwn(override, "mastery") ? {} : { mastery: "adept" }),
+      ...(hasOwn(override, "state") ? {} : { state: "normal" }),
+      ...(hasOwn(override, "visibility") ? {} : { visibility: "known" }),
+      ...(hasOwn(override, "rumorText") ? {} : { rumorText: null }),
+      ...(hasOwn(override, "bloodlineJustification") ? {} : { bloodlineJustification: null }),
+    };
+  });
+}
+
+/**
+ * Migrates a persisted pre-ability draft into the strict current card format.
+ * It only supplies deterministic references and empty relationship/ability
+ * collections; it never creates characters or abilities that were absent.
+ */
+export function normalizeWorldDeck(raw: unknown): WorldDeck {
+  const deck = asLooseRecord(raw);
+  const playerGod = asLooseRecord(deck.playerGod);
+  const majorGods = Array.isArray(deck.majorGods) ? deck.majorGods : [];
+  const factions = Array.isArray(deck.factions) ? deck.factions : [];
+  const races = Array.isArray(deck.races) ? deck.races : [];
+  const majorCharacters = Array.isArray(deck.majorCharacters) ? deck.majorCharacters : [];
+
+  return WorldDeckSchema.parse({
+    ...deck,
+    playerGod: {
+      ...playerGod,
+      ...(hasOwn(playerGod, "ref") ? {} : { ref: "player-god-1" }),
+      ...(hasOwn(playerGod, "abilities") ? { abilities: normalizeAbilities(playerGod.abilities, "player-god-1") } : { abilities: [] }),
+    },
+    majorGods: majorGods.map((rawGod, index) => {
+      const god = asLooseRecord(rawGod);
+      const prefix = `major-god-${index + 1}`;
+      return {
+        ...god,
+        ...(hasOwn(god, "ref") ? {} : { ref: prefix }),
+        ...(hasOwn(god, "abilities") ? { abilities: normalizeAbilities(god.abilities, prefix) } : { abilities: [] }),
+      };
+    }),
+    factions: factions.map((rawFaction, index) => {
+      const faction = asLooseRecord(rawFaction);
+      return {
+        ...faction,
+        ...(hasOwn(faction, "ref") ? {} : { ref: `faction-${index + 1}` }),
+        ...(hasOwn(faction, "keyCharacterRefs") ? {} : { keyCharacterRefs: [] }),
+      };
+    }),
+    races: races.map((rawRace, index) => {
+      const race = asLooseRecord(rawRace);
+      const prefix = `race-${index + 1}`;
+      return {
+        ...race,
+        ...(hasOwn(race, "ref") ? {} : { ref: prefix }),
+        ...(hasOwn(race, "abilities") ? { abilities: normalizeAbilities(race.abilities, prefix) } : { abilities: [] }),
+      };
+    }),
+    majorCharacters: majorCharacters.map((rawCharacter, index) => {
+      const character = asLooseRecord(rawCharacter);
+      const prefix = `major-character-${index + 1}`;
+      return {
+        ...character,
+        ...(hasOwn(character, "ref") ? {} : { ref: prefix }),
+        ...(hasOwn(character, "factionMemberships") ? {} : { factionMemberships: [] }),
+        ...(hasOwn(character, "learnedTraditionRefs") ? {} : { learnedTraditionRefs: [] }),
+        ...(hasOwn(character, "racialOverrides")
+          ? { racialOverrides: normalizeRacialOverrides(character.racialOverrides, prefix) }
+          : { racialOverrides: [] }),
+        ...(hasOwn(character, "abilities")
+          ? { abilities: normalizeAbilities(character.abilities, prefix) }
+          : { abilities: [] }),
+      };
+    }),
+  });
+}
 
 /** 卡片键（重掷粒度） */
 export const DECK_CARD_KEYS = [

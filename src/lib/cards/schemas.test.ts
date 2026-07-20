@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateDeckReferences } from "@/lib/abilities/validator";
-import { WorldDeckSchema } from "./schemas";
+import { WorldDeckSchema, normalizeWorldDeck } from "./schemas";
 
 function ability(ref: string, kind: "racial_innate" | "racial_tradition" | "personal" | "divine") {
   return {
@@ -18,7 +18,8 @@ function ability(ref: string, kind: "racial_innate" | "racial_tradition" | "pers
   };
 }
 
-const characters = Array.from({ length: 6 }, (_, index) => ({
+function createCharacters() {
+  return Array.from({ length: 6 }, (_, index) => ({
   ref: `character-${index + 1}`,
   name: `人物${index + 1}`,
   aliases: [],
@@ -37,8 +38,10 @@ const characters = Array.from({ length: 6 }, (_, index) => ({
   racialOverrides: [],
   abilities: Array.from({ length: 2 }, (_, abilityIndex) => ability(`ability-character-${index + 1}-${abilityIndex + 1}`, "personal")),
 }));
+}
 
 function completeDeck() {
+  const characters = createCharacters();
   return {
     worldName: "测试界",
     cosmology: {
@@ -154,4 +157,91 @@ describe("WorldDeck 能力与主要人物引用", () => {
     const deck = WorldDeckSchema.parse(rawDeck);
     expect(() => validateDeckReferences(deck)).toThrow(/能力来源引用 .*missing-tradition.* 不存在/);
   });
+
+  it.each([
+    ["玩家神", (deck: ReturnType<typeof completeDeck>) => { deck.playerGod.ref = "   "; }],
+    ["主神", (deck: ReturnType<typeof completeDeck>) => { deck.majorGods[0]!.ref = deck.playerGod.ref; }],
+    ["种族", (deck: ReturnType<typeof completeDeck>) => { deck.races[0]!.ref = deck.factions[0]!.ref; }],
+    ["势力", (deck: ReturnType<typeof completeDeck>) => { deck.factions[0]!.ref = ""; }],
+    ["主要人物", (deck: ReturnType<typeof completeDeck>) => { deck.majorCharacters[0]!.ref = deck.races[0]!.ref; }],
+    ["能力", (deck: ReturnType<typeof completeDeck>) => { deck.playerGod.abilities[0]!.ref = deck.races[0]!.abilities[0]!.ref; }],
+  ])("拒绝重复或空白的%s稳定 ref", (_label, mutate) => {
+    const deck = completeDeck();
+    mutate(deck);
+    expect(WorldDeckSchema.safeParse(deck).success).toBe(false);
+  });
+
+  it("要求先天覆写携带完整的派生能力字段并参与能力 ref 去重", () => {
+    const deck = completeDeck();
+    const character = deck.majorCharacters[0] as unknown as {
+      racialOverrides: Array<Record<string, unknown>>;
+    };
+    character.racialOverrides = [{
+      ...ability("ability-character-override", "racial_innate"),
+      sourceAbilityRef: "ability-human-sight",
+      bloodlineJustification: null,
+    }];
+    expect(WorldDeckSchema.parse(deck).majorCharacters[0]!.racialOverrides[0]).toMatchObject({
+      ref: "ability-character-override",
+      kind: "racial_innate",
+      sourceAbilityRef: "ability-human-sight",
+      effect: "产生明确的叙事效果",
+    });
+
+    character.racialOverrides[0]!.ref = "ability-player-1";
+    expect(WorldDeckSchema.safeParse(deck).success).toBe(false);
+
+    const incomplete = completeDeck();
+    (incomplete.majorCharacters[0] as unknown as { racialOverrides: unknown[] }).racialOverrides = [{
+      ref: "ability-incomplete-override",
+      sourceAbilityRef: "ability-human-sight",
+    }];
+    expect(WorldDeckSchema.safeParse(incomplete).success).toBe(false);
+  });
+
+  it.each([
+    ["主神神权", (deck: ReturnType<typeof completeDeck>) => { deck.majorGods[0]!.abilities[0]!.ref = deck.playerGod.abilities[0]!.ref; }],
+    ["人物个人技能", (deck: ReturnType<typeof completeDeck>) => { deck.majorCharacters[0]!.abilities[0]!.ref = deck.races[0]!.abilities[0]!.ref; }],
+  ])("拒绝与其他能力重复的%s ref", (_label, mutate) => {
+    const deck = completeDeck();
+    mutate(deck);
+    expect(WorldDeckSchema.safeParse(deck).success).toBe(false);
+  });
+
+  it("将旧草稿确定性归一化为可保存的新格式，不凭空生成角色或能力", () => {
+    const legacy = completeDeck() as Record<string, unknown>;
+    const playerGod = legacy.playerGod as Record<string, unknown>;
+    delete playerGod.ref;
+    delete playerGod.abilities;
+    for (const god of legacy.majorGods as Record<string, unknown>[]) {
+      delete god.ref;
+      delete god.abilities;
+    }
+    for (const faction of legacy.factions as Record<string, unknown>[]) {
+      delete faction.ref;
+      delete faction.keyCharacterRefs;
+    }
+    for (const race of legacy.races as Record<string, unknown>[]) {
+      delete race.ref;
+      delete race.abilities;
+    }
+    delete legacy.majorCharacters;
+
+    expect(WorldDeckSchema.safeParse(legacy).success).toBe(false);
+    const normalized = normalizeWorldDeck(legacy);
+    expect(normalized.playerGod.ref).toBe("player-god-1");
+    expect(normalized.majorGods.map((god) => god.ref)).toEqual([
+      "major-god-1", "major-god-2", "major-god-3", "major-god-4",
+    ]);
+    expect(normalized.races[0]!.ref).toBe("race-1");
+    expect(normalized.factions[0]!.ref).toBe("faction-1");
+    expect(normalized.playerGod.abilities).toEqual([]);
+    expect(normalized.majorGods.flatMap((god) => god.abilities)).toEqual([]);
+    expect(normalized.races.flatMap((race) => race.abilities)).toEqual([]);
+    expect(normalized.majorCharacters).toEqual([]);
+    expect(normalized.factions.flatMap((faction) => faction.keyCharacterRefs)).toEqual([]);
+    expect(normalizeWorldDeck(legacy)).toEqual(normalized);
+    expect(() => validateDeckReferences(normalized)).not.toThrow();
+  });
+
 });
