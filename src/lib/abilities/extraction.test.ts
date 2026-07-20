@@ -95,7 +95,7 @@ function extractionFixture() {
     {
       id: "message-8",
       index: 8,
-      content: "山民长老见证阿岚走完断崖石阶，并正式授予她踏岩步的传承石符。",
+      content: "阿岚走完断崖石阶，并正式获授踏岩步的传承石符。",
       scale: "scene",
     },
   ];
@@ -130,6 +130,11 @@ function extractionFixture() {
         });
         abilities.set(created.id, created);
         return created;
+      },
+      delete: async ({ where }: { where: { id: string } }) => {
+        const ability = abilities.get(where.id)!;
+        abilities.delete(where.id);
+        return ability;
       },
       updateMany: async ({
         where,
@@ -172,6 +177,7 @@ function extractionFixture() {
   } satisfies AbilityMutationTx & {
     ability: AbilityMutationTx["ability"] & {
       create(args: { data: Omit<AbilityStoredRecord, "id" | "version"> }): Promise<AbilityStoredRecord>;
+      delete(args: { where: { id: string } }): Promise<AbilityStoredRecord>;
     };
   };
 
@@ -265,7 +271,7 @@ describe("applyAbilityExtraction", () => {
         type: "learned" as const,
         patch: { mastery: "novice" as const },
         evidenceMessageIndex: 8,
-        evidence: "山民长老见证阿岚走完断崖石阶，并正式授予她踏岩步的传承石符",
+        evidence: "阿岚走完断崖石阶，并正式获授踏岩步的传承石符",
       },
       {
         abilityId: "locked-personal",
@@ -289,7 +295,7 @@ describe("applyAbilityExtraction", () => {
         type: "learned" as const,
         patch: { mastery: "novice" as const },
         evidenceMessageIndex: 8,
-        evidence: "山民长老见证阿岚走完断崖石阶，并正式授予她踏岩步的传承石符",
+        evidence: "阿岚走完断崖石阶，并正式获授踏岩步的传承石符",
       },
       ],
     });
@@ -323,7 +329,7 @@ describe("applyAbilityExtraction", () => {
           messageId: "message-8",
           type: "learned",
           scale: "scene",
-          evidence: "山民长老见证阿岚走完断崖石阶，并正式授予她踏岩步的传承石符",
+          evidence: "阿岚走完断崖石阶，并正式获授踏岩步的传承石符",
         }),
       ]),
     );
@@ -441,6 +447,80 @@ it("拒绝师父行动而阿岚仅在旁观看，接受前句 owner 后句代词
     changes: [{ ownerName: "阿岚", sourceAbilityId: "tradition-native", type: "learned", patch: { mastery: "novice" }, evidenceMessageIndex: 12, evidence: "阿岚掌握诀窍。她施展踏岩步越过断崖" }],
   });
   expect(actor.applied).toHaveLength(1);
+});
+
+
+it("拒绝 owner 命令其他实体施展能力，接受 owner 主语的能力结果构式", async () => {
+  const commanded = extractionFixture();
+  commanded.messages.push({
+    id: "message-13",
+    index: 13,
+    scale: "scene",
+    content: "阿岚命令白石施展踏岩步越过断崖。",
+  });
+  const rejected = await applyAbilityExtraction(commanded.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: commanded.owners,
+    knownEntityNames: ["山民", "羽民", "阿岚", "白石"],
+    messages: commanded.messages,
+    changes: [{ ownerName: "阿岚", sourceAbilityId: "tradition-native", type: "learned", patch: { mastery: "novice" }, evidenceMessageIndex: 13, evidence: "阿岚命令白石施展踏岩步越过断崖" }],
+  });
+  expect(rejected.applied).toHaveLength(0);
+  expect(rejected.rejected[0]?.reason).toMatch(/行动者|命令|他人|主体/);
+
+  const demonstrated = extractionFixture();
+  demonstrated.messages.push({
+    id: "message-14",
+    index: 14,
+    scale: "years",
+    content: "阿岚持踏岩步秘卷反复试炼，今日已能独自越过断崖。",
+  });
+  const accepted = await applyAbilityExtraction(demonstrated.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: demonstrated.owners,
+    knownEntityNames: ["山民", "羽民", "阿岚", "白石"],
+    messages: demonstrated.messages,
+    changes: [{ ownerName: "阿岚", sourceAbilityId: "tradition-native", type: "learned", patch: { mastery: "novice" }, evidenceMessageIndex: 14, evidence: "阿岚持踏岩步秘卷反复试炼，今日已能独自越过断崖" }],
+  });
+  expect(accepted.applied).toHaveLength(1);
+});
+
+it("mutated 必须有与变更字段相连的明确变化结果，不能只复述 patch", async () => {
+  const unsupported = extractionFixture();
+  unsupported.messages.push({
+    id: "message-15",
+    index: 15,
+    scale: "scene",
+    content: "阿岚的凿阵术效果为隔空碎岩。",
+  });
+  const rejected = await applyAbilityExtraction(unsupported.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: unsupported.owners,
+    knownEntityNames: ["山民", "羽民", "阿岚"],
+    messages: unsupported.messages,
+    changes: [{ abilityId: "trainable-personal", ownerName: "阿岚", type: "mutated", patch: { effect: "隔空碎岩" }, evidenceMessageIndex: 15, evidence: "阿岚的凿阵术效果为隔空碎岩" }],
+  });
+  expect(rejected.applied).toHaveLength(0);
+
+  const explicit = extractionFixture();
+  explicit.messages.push({
+    id: "message-16",
+    index: 16,
+    scale: "scene",
+    content: "阿岚的凿阵术发生蜕变，效果变成隔空碎岩。",
+  });
+  const accepted = await applyAbilityExtraction(explicit.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: explicit.owners,
+    knownEntityNames: ["山民", "羽民", "阿岚"],
+    messages: explicit.messages,
+    changes: [{ abilityId: "trainable-personal", ownerName: "阿岚", type: "mutated", patch: { effect: "隔空碎岩" }, evidenceMessageIndex: 16, evidence: "阿岚的凿阵术发生蜕变，效果变成隔空碎岩" }],
+  });
+  expect(accepted.applied).toHaveLength(1);
 });
 
 it.each([

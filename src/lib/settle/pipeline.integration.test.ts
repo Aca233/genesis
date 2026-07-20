@@ -26,10 +26,10 @@ async function fixture() {
   const character = await prisma.entity.create({ data: { timelineId: timeline.id, type: "character", name: "阿岚", aliases: [], emblemSeed: "alan", summary: "山民学徒", lockedPaths: [], raceId: race.id } });
   const source = await prisma.ability.create({ data: { timelineId: timeline.id, entityId: race.id, name: "踏岩步", kind: "racial_tradition", effect: "稳行峭壁", trigger: "山路", cost: "体力", limitations: "仅适于岩地", mastery: "adept", state: "normal", visibility: "known", lockedFields: [] } });
   const chapter = await prisma.chapter.create({ data: { timelineId: timeline.id, index: 1 } });
-  const message = await prisma.message.create({ data: { chapterId: chapter.id, index: 7, role: "narrator", content: "山民长老见证阿岚走完断崖石阶，并正式授予她踏岩步的传承石符。", scale: "scene" } });
+  const message = await prisma.message.create({ data: { chapterId: chapter.id, index: 7, role: "narrator", content: "阿岚走完断崖石阶，并正式获授踏岩步的传承石符。", scale: "scene" } });
   responses.extract = {
     newEntities: [], entityUpdates: [], godUpdates: [], revealSections: [],
-    abilityChanges: [{ ownerName: "阿岚", sourceAbilityId: source.id, type: "learned", patch: { mastery: "novice" }, evidenceMessageIndex: 7, evidence: "山民长老见证阿岚走完断崖石阶，并正式授予她踏岩步的传承石符" }],
+    abilityChanges: [{ ownerName: "阿岚", sourceAbilityId: source.id, type: "learned", patch: { mastery: "novice" }, evidenceMessageIndex: 7, evidence: "阿岚走完断崖石阶，并正式获授踏岩步的传承石符" }],
   };
   return { world, timeline, character, source, chapter, message };
 }
@@ -103,6 +103,66 @@ it("多窗口会抽取早期消息与超长消息前缀中的能力变化", asyn
     expect(earlyAfter).toMatchObject({ mastery: "adept" });
     expect(prefixAfter).toMatchObject({ mastery: "adept" });
     expect(events.map((event) => event.messageId)).toEqual(expect.arrayContaining([early.id, long.id]));
+  } finally {
+    responses.extractHandler = undefined;
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it("extraction 中途数据库失败会回滚同阶段已写入实体并停留 extract", async () => {
+  const data = await fixture();
+  const suffix = crypto.randomUUID().replaceAll("-", "");
+  const functionName = `task11_fail_${suffix}`;
+  const triggerName = `task11_trigger_${suffix}`;
+  const firstName = `先写实体-${suffix}`;
+  const failingName = `触发失败-${suffix}`;
+  const emptyEntity = (name: string) => ({
+    type: "place", name, aliases: [], summary: `${name}摘要`, sections: [], isChosen: false,
+  });
+  responses.extractHandler = () => ({
+    newEntities: [emptyEntity(firstName), emptyEntity(failingName)],
+    entityUpdates: [], godUpdates: [], revealSections: [], abilityChanges: [],
+  });
+  await prisma.$executeRawUnsafe(`
+    CREATE FUNCTION "${functionName}"() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.timeline_id = '${data.timeline.id}' AND NEW.name = '${failingName}' THEN
+        RAISE EXCEPTION 'task11 injected failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER "${triggerName}" BEFORE INSERT ON entities
+    FOR EACH ROW EXECUTE FUNCTION "${functionName}"();
+  `);
+  try {
+    await expect(settle(data.chapter.id)).rejects.toThrow(/task11 injected failure/);
+    expect(await prisma.entity.count({ where: { timelineId: data.timeline.id, name: firstName } })).toBe(0);
+    expect((await prisma.chapter.findUnique({ where: { id: data.chapter.id } }))?.settleState).toBe("settling:extract");
+  } finally {
+    responses.extractHandler = undefined;
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON entities; DROP FUNCTION IF EXISTS "${functionName}"();`);
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it("多窗口重复返回同一新实体时只创建一次，重试仍不重复", async () => {
+  const data = await fixture();
+  const name = `回声谷-${crypto.randomUUID()}`;
+  await prisma.message.createMany({
+    data: Array.from({ length: 45 }, (_, offset) => ({
+      chapterId: data.chapter.id, index: 20 + offset, role: "narrator", content: `阿岚途经回声谷记录${offset}。`, scale: "scene",
+    })),
+  });
+  const duplicate = { type: "place", name, aliases: ["谷地"], summary: "回声环绕的谷地", sections: [], isChosen: false };
+  responses.extractHandler = () => ({
+    newEntities: [duplicate], entityUpdates: [], godUpdates: [], revealSections: [], abilityChanges: [],
+  });
+  try {
+    await settle(data.chapter.id);
+    await prisma.chapter.update({ where: { id: data.chapter.id }, data: { settleState: "settling:extract" } });
+    await settle(data.chapter.id);
+    expect(await prisma.entity.count({ where: { timelineId: data.timeline.id, name } })).toBe(1);
   } finally {
     responses.extractHandler = undefined;
     await prisma.world.delete({ where: { id: data.world.id } });

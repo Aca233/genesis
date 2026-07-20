@@ -2,8 +2,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { buildAbilityContext } from "@/lib/abilities/context";
 import {
-  applyAbilityExtraction,
-  type AbilityExtractionClient,
+  applyAbilityExtractionInTransaction,
+  type AbilityExtractionTx,
 } from "@/lib/abilities/extraction";
 import { completeStructured } from "@/lib/llm/structured";
 import {
@@ -456,7 +456,7 @@ async function runExtraction(
   const messageWindows = extractionMessageWindows(chapterText.messages);
   const [entityIndex, godIndex] = await Promise.all([
     prisma.entity.findMany({
-      where: { timelineId, type: { in: ["race", "character"] } },
+      where: { timelineId },
       select: { id: true, name: true, type: true, aliases: true, raceId: true },
     }),
     prisma.god.findMany({
@@ -558,145 +558,157 @@ async function runExtraction(
     extraction.abilityChanges.push(...windowExtraction.abilityChanges);
   }
 
-  const byName = new Map<string, (typeof entities)[number]>();
-  for (const e of entities) {
-    byName.set(e.name, e);
-    for (const a of e.aliases) byName.set(a, e);
-  }
+  await prisma.$transaction(async (tx) => {
+    const byName = new Map<string, (typeof entities)[number]>();
+    for (const e of entities) {
+      byName.set(e.name, e);
+      for (const a of e.aliases) byName.set(a, e);
+    }
 
-  // 新实体建卡
-  for (const ne of extraction.newEntities) {
-    if (byName.has(ne.name)) continue; // 防重复
-    const validKeys = new Set(SECTION_TEMPLATES[ne.type] ?? []);
-    await prisma.entity.create({
-      data: {
-        timelineId,
-        type: ne.type,
-        name: ne.name,
-        aliases: ne.aliases,
-        emblemSeed: emblemSeed(ne.name),
-        summary: ne.summary.slice(0, 200),
-        isChosen: ne.isChosen,
-        scenePresence: true,
-        sections: {
-          create: ne.sections
-            .filter((s) => validKeys.has(s.key))
-            .map((s) => ({
-              key: s.key,
-              content: { title: s.title, text: s.text } as Prisma.InputJsonValue,
-            })),
+    // 新实体建卡
+    for (const ne of extraction.newEntities) {
+      if (byName.has(ne.name)) continue; // 防重复
+      const validKeys = new Set(SECTION_TEMPLATES[ne.type] ?? []);
+      const created = await tx.entity.create({
+        data: {
+          timelineId,
+          type: ne.type,
+          name: ne.name,
+          aliases: ne.aliases,
+          emblemSeed: emblemSeed(ne.name),
+          summary: ne.summary.slice(0, 200),
+          isChosen: ne.isChosen,
+          scenePresence: true,
+          sections: {
+            create: ne.sections
+              .filter((s) => validKeys.has(s.key))
+              .map((s) => ({
+                key: s.key,
+                content: { title: s.title, text: s.text } as Prisma.InputJsonValue,
+              })),
+          },
         },
-      },
-    });
-  }
-
-  // 既有实体增量
-  for (const up of extraction.entityUpdates) {
-    const target = byName.get(up.name);
-    if (!target) continue;
-    const locked = new Set(target.lockedPaths);
-
-    await prisma.entity.update({
-      where: { id: target.id },
-      data: {
-        ...(up.summary && !locked.has("summary") ? { summary: up.summary.slice(0, 200) } : {}),
-        ...(up.newAliases?.length
-          ? { aliases: [...new Set([...target.aliases, ...up.newAliases])] }
-          : {}),
-        ...(up.becameChosen ? { isChosen: true } : {}),
-        scenePresence: up.scenePresent,
-        heat: "active", // 有更新即复活
-      },
-    });
-    for (const d of up.sectionDeltas) {
-      if (locked.has(d.key)) continue; // player_locked 保护
-      await prisma.entitySection.upsert({
-        where: { entityId_key: { entityId: target.id, key: d.key } },
-        create: {
-          entityId: target.id,
-          key: d.key,
-          content: { title: d.title, text: d.text } as Prisma.InputJsonValue,
+        select: {
+          id: true, name: true, type: true, aliases: true, summary: true,
+          lockedPaths: true, raceId: true,
         },
-        update: {
-          content: { title: d.title, text: d.text } as Prisma.InputJsonValue,
+      });
+      byName.set(created.name, created);
+      for (const alias of created.aliases) byName.set(alias, created);
+    }
+
+    // 既有实体增量
+    for (const up of extraction.entityUpdates) {
+      const target = byName.get(up.name);
+      if (!target) continue;
+      const locked = new Set(target.lockedPaths);
+
+      await tx.entity.update({
+        where: { id: target.id },
+        data: {
+          ...(up.summary && !locked.has("summary") ? { summary: up.summary.slice(0, 200) } : {}),
+          ...(up.newAliases?.length
+            ? { aliases: [...new Set([...target.aliases, ...up.newAliases])] }
+            : {}),
+          ...(up.becameChosen ? { isChosen: true } : {}),
+          scenePresence: up.scenePresent,
+          heat: "active", // 有更新即复活
+        },
+      });
+      for (const d of up.sectionDeltas) {
+        if (locked.has(d.key)) continue; // player_locked 保护
+        await tx.entitySection.upsert({
+          where: { entityId_key: { entityId: target.id, key: d.key } },
+          create: {
+            entityId: target.id,
+            key: d.key,
+            content: { title: d.title, text: d.text } as Prisma.InputJsonValue,
+          },
+          update: {
+            content: { title: d.title, text: d.text } as Prisma.InputJsonValue,
+          },
+        });
+      }
+    }
+
+    // 诸神状态
+    const godByName = new Map<string, (typeof gods)[number]>();
+    for (const g of gods) {
+      godByName.set(g.name, g);
+      for (const a of g.aliases) godByName.set(a, g);
+    }
+    for (const gu of extraction.godUpdates) {
+      const target = godByName.get(gu.name);
+      if (!target) continue;
+      const god = await tx.god.findUnique({ where: { id: target.id } });
+      if (!god) continue;
+      const relations = (god.relations ?? {}) as Record<string, unknown>;
+      for (const r of gu.relationChanges ?? []) {
+        relations[r.target] = { label: r.label, note: r.note };
+      }
+      await tx.god.update({
+        where: { id: target.id },
+        data: {
+          relations: relations as Prisma.InputJsonValue,
+          ...(gu.rankChange ? { rank: gu.rankChange.to } : {}),
+          ...(gu.faithScope ? { faithScope: gu.faithScope } : {}),
         },
       });
     }
-  }
 
-  // 诸神状态
-  const godByName = new Map<string, (typeof gods)[number]>();
-  for (const g of gods) {
-    godByName.set(g.name, g);
-    for (const a of g.aliases) godByName.set(a, g);
-  }
-  for (const gu of extraction.godUpdates) {
-    const target = godByName.get(gu.name);
-    if (!target) continue;
-    const god = await prisma.god.findUnique({ where: { id: target.id } });
-    if (!god) continue;
-    const relations = (god.relations ?? {}) as Record<string, unknown>;
-    for (const r of gu.relationChanges ?? []) {
-      relations[r.target] = { label: r.label, note: r.note };
+    // 迷雾揭示
+    for (const rv of extraction.revealSections) {
+      const target = byName.get(rv.entityName);
+      if (!target) continue;
+      await tx.entitySection.updateMany({
+        where: { entityId: target.id, key: rv.sectionKey },
+        data: { revealed: true },
+      });
     }
-    await prisma.god.update({
-      where: { id: target.id },
-      data: {
-        relations: relations as Prisma.InputJsonValue,
-        ...(gu.rankChange ? { rank: gu.rankChange.to } : {}),
-        ...(gu.faithScope ? { faithScope: gu.faithScope } : {}),
-      },
-    });
-  }
 
-  // 迷雾揭示
-  for (const rv of extraction.revealSections) {
-    const target = byName.get(rv.entityName);
-    if (!target) continue;
-    await prisma.entitySection.updateMany({
-      where: { entityId: target.id, key: rv.sectionKey },
-      data: { revealed: true },
-    });
-  }
-
-  const owners = [
-    ...entities
-      .filter((entity) => entity.type === "race" || entity.type === "character")
-      .map((entity) => ({
-        id: entity.id,
-        type: entity.type as "race" | "character",
-        name: entity.name,
-        aliases: entity.aliases,
-        raceId: entity.raceId,
+    const owners = [
+      ...entities
+        .filter((entity) => entity.type === "race" || entity.type === "character")
+        .map((entity) => ({
+          id: entity.id,
+          type: entity.type as "race" | "character",
+          name: entity.name,
+          aliases: entity.aliases,
+          raceId: entity.raceId,
+        })),
+      ...gods.map((god) => ({
+        id: god.id,
+        type: "god" as const,
+        name: god.name,
+        aliases: god.aliases,
+        raceId: null,
       })),
-    ...gods.map((god) => ({
-      id: god.id,
-      type: "god" as const,
-      name: god.name,
-      aliases: god.aliases,
-      raceId: null,
-    })),
-  ];
-  const result = await applyAbilityExtraction(
-    prisma as unknown as AbilityExtractionClient,
-    {
-      timelineId,
-      chapterId,
-      owners,
-      messages: chapterText.messages,
-      changes: extraction.abilityChanges,
-    },
-  );
-  for (const rejected of result.rejected) {
-    console.error("章末能力变化被拒绝", {
-      chapterId,
-      item: rejected.index,
-      ownerName: typeof rejected.change === "object" && rejected.change !== null && "ownerName" in rejected.change
-        ? String(rejected.change.ownerName)
-        : "未知",
-      reason: rejected.reason,
-    });
-  }
+    ];
+    const result = await applyAbilityExtractionInTransaction(
+      tx as unknown as AbilityExtractionTx,
+      {
+        timelineId,
+        chapterId,
+        owners,
+        knownEntityNames: [
+          ...entityIndex.flatMap((entity) => [entity.name, ...entity.aliases]),
+          ...godIndex.flatMap((god) => [god.name, ...god.aliases]),
+        ],
+        messages: chapterText.messages,
+        changes: extraction.abilityChanges,
+      },
+    );
+    for (const rejected of result.rejected) {
+      console.error("章末能力变化被拒绝", {
+        chapterId,
+        item: rejected.index,
+        ownerName: typeof rejected.change === "object" && rejected.change !== null && "ownerName" in rejected.change
+          ? String(rejected.change.ownerName)
+          : "未知",
+        reason: rejected.reason,
+      });
+    }
+  }, { timeout: 30_000 });
 }
 
 function emblemSeed(name: string): string {
