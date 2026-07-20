@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { WorldDeckSchema, type WorldDeck } from "@/lib/cards/schemas";
 import { materializeDeckAbilities } from "./embark";
-import { materializeEmbarkDeck } from "@/app/api/worlds/[id]/embark/route";
+import {
+  materializeEmbarkDeck,
+  runEmbarkTransaction,
+} from "@/app/api/worlds/[id]/embark/route";
 
 function ability(
   ref: string,
@@ -324,5 +327,91 @@ describe("materializeDeckAbilities", () => {
     });
     expect(memberships).toContainEqual(expect.objectContaining({ role: "执政官", isPrimary: true }));
     expect(abilities.filter((ability) => ability.godId !== null)).toHaveLength(15);
+  });
+
+  it("引用物化失败时事务不提交任何已暂存写入", async () => {
+    const deck = completeDeck();
+    deck.majorCharacters[0]!.learnedTraditionRefs = [{ sourceAbilityRef: "missing-tradition" }];
+    const committedWrites: string[] = [];
+
+    const transactionRunner = {
+      $transaction: async <T,>(callback: (tx: Prisma.TransactionClient) => Promise<T>) => {
+        const stagedWrites: string[] = [];
+        const entities = new Map<string, { id: string; timelineId: string; type: string; raceId: string | null }>();
+        const gods = new Map<string, { id: string; timelineId: string }>();
+        const abilities: StoredAbility[] = [];
+        let entityIndex = 0;
+        let godIndex = 0;
+
+        const tx = {
+          timeline: {
+            create: async () => {
+              stagedWrites.push("timeline");
+              return { id: "timeline-rollback" };
+            },
+          },
+          god: {
+            create: async ({ data }: { data: { timelineId: string } }) => {
+              const god = { id: `god-rollback-${++godIndex}`, timelineId: data.timelineId };
+              gods.set(god.id, god);
+              stagedWrites.push("god");
+              return god;
+            },
+            findUnique: async ({ where }: { where: { id: string } }) => gods.get(where.id) ?? null,
+          },
+          entity: {
+            create: async ({ data }: { data: { timelineId: string; type: string; raceId?: string | null } }) => {
+              const entity = {
+                id: `entity-rollback-${++entityIndex}`,
+                timelineId: data.timelineId,
+                type: data.type,
+                raceId: data.raceId ?? null,
+              };
+              entities.set(entity.id, entity);
+              stagedWrites.push(entity.type);
+              return entity;
+            },
+            findUnique: async ({ where }: { where: { id: string } }) => entities.get(where.id) ?? null,
+          },
+          ability: {
+            findUnique: async ({ where }: { where: { id: string } }) =>
+              abilities.find((ability) => ability.id === where.id) ?? null,
+            create: async ({ data }: { data: Omit<StoredAbility, "id"> }) => {
+              const ability = { ...data, id: `ability-rollback-${abilities.length + 1}` };
+              abilities.push(ability);
+              stagedWrites.push("ability");
+              return ability;
+            },
+          },
+          entityMembership: {
+            create: async () => {
+              stagedWrites.push("membership");
+              return { id: "membership-rollback" };
+            },
+          },
+          chapter: {
+            create: async () => {
+              stagedWrites.push("chapter");
+              return { id: "chapter-rollback" };
+            },
+          },
+          world: {
+            update: async () => {
+              stagedWrites.push("world-update");
+              return { id: "world-rollback" };
+            },
+          },
+        } as unknown as Prisma.TransactionClient;
+
+        const result = await callback(tx);
+        committedWrites.push(...stagedWrites);
+        return result;
+      },
+    };
+
+    await expect(runEmbarkTransaction(transactionRunner, "world-rollback", deck)).rejects.toThrow(
+      '无法解析能力引用 "missing-tradition"',
+    );
+    expect(committedWrites).toEqual([]);
   });
 });

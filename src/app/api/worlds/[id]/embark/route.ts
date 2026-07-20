@@ -212,6 +212,19 @@ export async function materializeEmbarkDeck(
   return { timelineId: timeline.id, chapterId: chapter.id };
 }
 
+/** Minimal transaction boundary used by the route and rollback-focused tests. */
+export interface EmbarkTransactionRunner {
+  $transaction<T>(callback: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+}
+
+export function runEmbarkTransaction(
+  runner: EmbarkTransactionRunner,
+  worldId: string,
+  deck: WorldDeck,
+): Promise<{ timelineId: string; chapterId: string }> {
+  return runner.$transaction((tx) => materializeEmbarkDeck(tx, worldId, deck));
+}
+
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -234,7 +247,7 @@ export async function POST(
   }
 
   try {
-    const result = await prisma.$transaction((tx) => materializeEmbarkDeck(tx, world.id, deck));
+    const result = await runEmbarkTransaction(prisma, world.id, deck);
     return NextResponse.json(result);
   } catch (error) {
     console.error("Failed to materialize embark deck", error);
