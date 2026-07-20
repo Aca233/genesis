@@ -400,13 +400,21 @@ async function applyAbilityChangeInTx(
   return { applied: true, ability: normalizePersistedAbility(updated), event };
 }
 
+/** Parses and applies a change inside a caller-owned transaction. */
+export async function applyAbilityChangeInTransaction(
+  tx: AbilityMutationTx,
+  input: unknown,
+): Promise<AppliedAbilityChange> {
+  const parsed = ApplyAbilityChangeSchema.parse(input);
+  return applyAbilityChangeInTx(tx, parsed);
+}
+
 /** Parses untrusted input before opening one transaction for ability and event writes. */
 export async function applyAbilityChange(
   client: AbilityMutationClient,
   input: unknown,
 ): Promise<AppliedAbilityChange> {
-  const parsed = ApplyAbilityChangeSchema.parse(input);
-  return client.$transaction((tx) => applyAbilityChangeInTx(tx, parsed));
+  return client.$transaction((tx) => applyAbilityChangeInTransaction(tx, input));
 }
 
 export interface RevealAbilityInput {

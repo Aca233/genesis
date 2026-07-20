@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
     chapter: { findUnique: vi.fn(), findFirst: vi.fn() },
     message: { findUnique: vi.fn() },
     timeline: { findUnique: vi.fn() },
-    ability: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), create: vi.fn(), delete: vi.fn() },
+    ability: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), create: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
     abilityEvent: { findUnique: vi.fn(), create: vi.fn(), findMany: vi.fn(), count: vi.fn() },
     $transaction: vi.fn(),
     chronicleEntry: { findMany: vi.fn() },
@@ -114,7 +114,11 @@ describe("能力 API 可见性", () => {
   });
 
   it("GET 人物详情返回解析后的有效能力、种族摘要、成员关系和可见事件", async () => {
-    const inherited = { ...knownAbility, id: "ability-inherited" };
+    const inherited = {
+      ...knownAbility,
+      id: "ability-inherited",
+      events: [{ id: "event-race-template", type: "awakened", createdAt: "2026-01-01" }],
+    };
     const personal = { ...knownAbility, id: "ability-personal", kind: "personal" };
     mocks.prisma.entity.findUnique.mockResolvedValue({
       id: "character-1",
@@ -138,6 +142,7 @@ describe("能力 API 可见性", () => {
         race: { id: "race-1", name: "晨裔" },
         memberships: [{ role: "守夜人", faction: { id: "faction-1", name: "晨钟会" } }],
         abilities: [{ id: "ability-inherited", inherited: true }, { id: "ability-personal", inherited: false }],
+        abilityEvents: [{ id: "event-race-template", type: "awakened" }],
       },
     });
   });
@@ -254,6 +259,91 @@ describe("能力 API 可见性", () => {
 
     expect(response.status).toBe(409);
     expect(mocks.prisma.ability.update).not.toHaveBeenCalled();
+  });
+
+  it("PATCH 隐藏能力返回 404 且不启动任何写事务", async () => {
+    const { PATCH } = await import("./route");
+    mocks.prisma.ability.findUnique.mockResolvedValue({
+      ...hiddenAbility,
+      timelineId: "timeline-1",
+      entityId: "character-1",
+      godId: null,
+    });
+    mocks.projectAbilityForPlayer.mockReturnValue(null);
+
+    const response = await PATCH(
+      new Request("http://localhost/api/abilities/ability-hidden", {
+        method: "PATCH",
+        body: JSON.stringify({
+          expectedVersion: 1,
+          patch: { name: "不应写入" },
+          event: {
+            type: "mutated",
+            chapterId: "chapter-1",
+            evidence: "不存在的证据",
+            scale: "scene",
+            dedupeKey: "ability-hidden:patch",
+          },
+        }),
+      }),
+      { params: Promise.resolve({ id: "ability-hidden" }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.prisma.ability.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.abilityEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("PATCH 响应使用传闻投影而不泄露原始能力字段", async () => {
+    const { PATCH } = await import("./route");
+    const stored = {
+      ...knownAbility,
+      kind: "personal",
+      visibility: "rumored",
+      rumorText: "据说她掌握晨光。",
+      timelineId: "timeline-1",
+      entityId: "character-1",
+      godId: null,
+    };
+    const rumorProjection = {
+      id: stored.id,
+      name: stored.name,
+      kind: stored.kind,
+      state: stored.state,
+      visibility: "rumored",
+      rumorText: stored.rumorText,
+    };
+    mocks.prisma.ability.findUnique.mockResolvedValue(stored);
+    mocks.prisma.ability.update.mockImplementation(async ({ data }) => ({
+      ...stored,
+      ...data,
+      version: stored.version + data.version.increment,
+    }));
+    mocks.projectAbilityForPlayer.mockReturnValue(rumorProjection);
+
+    const response = await PATCH(
+      new Request("http://localhost/api/abilities/ability-known", {
+        method: "PATCH",
+        body: JSON.stringify({
+          expectedVersion: 1,
+          patch: { name: "晨光感知" },
+          event: {
+            type: "mutated",
+            chapterId: "chapter-1",
+            evidence: "第 1 章的见证",
+            scale: "scene",
+            dedupeKey: "ability-known:rumor-response",
+          },
+        }),
+      }),
+      { params: Promise.resolve({ id: "ability-known" }) },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.ability).toEqual(rumorProjection);
+    expect(body.ability).not.toHaveProperty("effect");
   });
 
   it("PATCH expectedVersion 过期时返回 409", async () => {
@@ -382,7 +472,7 @@ describe("能力 API 可见性", () => {
       godId: null,
     });
     mocks.prisma.abilityEvent.count.mockResolvedValue(0);
-    mocks.prisma.ability.delete.mockResolvedValue({ id: "ability-known" });
+    mocks.prisma.ability.deleteMany.mockResolvedValue({ count: 1 });
 
     const response = await DELETE(
       new Request("http://localhost/api/abilities/ability-known", {
@@ -394,6 +484,101 @@ describe("能力 API 可见性", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ deleted: true, deprecated: false });
+  });
+
+  it("DELETE 隐藏能力返回 404 且不写入、计数或删除", async () => {
+    const { DELETE } = await import("./route");
+    mocks.prisma.ability.findUnique.mockResolvedValue({
+      ...hiddenAbility,
+      timelineId: "timeline-1",
+      entityId: "character-1",
+      godId: null,
+    });
+    mocks.projectAbilityForPlayer.mockReturnValue(null);
+
+    const response = await DELETE(
+      new Request("http://localhost/api/abilities/ability-hidden", {
+        method: "DELETE",
+        body: JSON.stringify({ expectedVersion: 1 }),
+      }),
+      { params: Promise.resolve({ id: "ability-hidden" }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.prisma.abilityEvent.count).not.toHaveBeenCalled();
+    expect(mocks.prisma.ability.delete).not.toHaveBeenCalled();
+    expect(mocks.prisma.ability.update).not.toHaveBeenCalled();
+  });
+
+  it("DELETE 在事务行锁发现并发版本变更时返回 409，且不会级联新事件", async () => {
+    const { DELETE } = await import("./route");
+    mocks.prisma.ability.findUnique.mockResolvedValue({
+      ...knownAbility,
+      kind: "personal",
+      timelineId: "timeline-1",
+      entityId: "character-1",
+      godId: null,
+    });
+    mocks.prisma.abilityEvent.count.mockResolvedValue(0);
+    mocks.prisma.ability.update.mockRejectedValue(new Error("concurrent update"));
+
+    const response = await DELETE(
+      new Request("http://localhost/api/abilities/ability-known", {
+        method: "DELETE",
+        body: JSON.stringify({ expectedVersion: 1 }),
+      }),
+      { params: Promise.resolve({ id: "ability-known" }) },
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.prisma.$transaction).toHaveBeenCalledOnce();
+    expect(mocks.prisma.ability.delete).not.toHaveBeenCalled();
+    expect(mocks.prisma.ability.deleteMany).not.toHaveBeenCalled();
+    expect(mocks.prisma.abilityEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("DELETE 对仍被派生能力引用的来源写入 deprecated 事件而不物理删除", async () => {
+    const { DELETE } = await import("./route");
+    const stored = {
+      ...knownAbility,
+      kind: "personal",
+      timelineId: "timeline-1",
+      entityId: "character-1",
+      godId: null,
+    };
+    mocks.prisma.ability.findUnique.mockResolvedValue(stored);
+    mocks.prisma.abilityEvent.count.mockResolvedValue(0);
+    mocks.prisma.ability.findFirst.mockResolvedValue({ id: "derived-ability" });
+    mocks.prisma.ability.update.mockImplementation(async ({ data }) => ({
+      ...stored,
+      ...data,
+      version: stored.version + data.version.increment,
+    }));
+
+    const response = await DELETE(
+      new Request("http://localhost/api/abilities/ability-known", {
+        method: "DELETE",
+        body: JSON.stringify({
+          expectedVersion: 1,
+          event: {
+            type: "mutated",
+            chapterId: "chapter-1",
+            evidence: "来源能力仍被后裔承继",
+            scale: "scene",
+            dedupeKey: "ability-known:retain-lineage",
+          },
+        }),
+      }),
+      { params: Promise.resolve({ id: "ability-known" }) },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      deprecated: true,
+      ability: { state: "deprecated" },
+    });
+    expect(mocks.prisma.ability.delete).not.toHaveBeenCalled();
   });
 
   it("DELETE 有沿革能力时将其废弃并写入 deprecated 事件", async () => {

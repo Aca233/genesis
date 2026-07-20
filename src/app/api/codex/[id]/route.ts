@@ -60,7 +60,7 @@ export async function GET(
           id: true,
           name: true,
           summary: true,
-          abilities: true,
+          abilities: { include: { events: { orderBy: { createdAt: "asc" } } } },
         },
       },
       memberships: {
@@ -91,12 +91,21 @@ export async function GET(
 
   const { abilities, race, memberships, ...entityFields } = entity;
   const ownAbilities = abilities.map(normalizePersistedAbility);
-  const characterAbilities = entity.type === "character"
+  const effectiveCharacterAbilities = entity.type === "character"
     ? resolveEffectiveAbilities({
       raceAbilities: (race?.abilities ?? []).map(normalizePersistedAbility),
       characterAbilities: ownAbilities,
     })
-    : ownAbilities;
+    : null;
+  const characterAbilities = effectiveCharacterAbilities ?? ownAbilities;
+  const inheritedRaceAbilityIds = new Set(
+    effectiveCharacterAbilities
+      ?.filter((ability) => ability.inherited)
+      .map((ability) => ability.id) ?? [],
+  );
+  const inheritedRaceAbilities = race?.abilities.filter((ability) =>
+    inheritedRaceAbilityIds.has(ability.id),
+  ) ?? [];
 
   return NextResponse.json({
     entity: {
@@ -106,7 +115,10 @@ export async function GET(
         ? {
           race: race === null ? null : { id: race.id, name: race.name, summary: race.summary },
           memberships,
-          abilityEvents: projectVisibleAbilityEvents(abilities),
+          abilityEvents: projectVisibleAbilityEvents([
+            ...abilities,
+            ...inheritedRaceAbilities,
+          ]),
         }
         : {}),
     },
