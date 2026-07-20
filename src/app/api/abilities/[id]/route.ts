@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   AbilityOptimisticConflictError,
@@ -14,7 +15,6 @@ import {
   AbilityKindSchema,
   AbilityMasterySchema,
   AbilityStateSchema,
-  AbilityVisibilitySchema,
   normalizePersistedAbility,
 } from "@/lib/abilities/types";
 import { projectAbilityForPlayer } from "@/lib/abilities/visibility";
@@ -28,7 +28,6 @@ const EditableAbilityFieldsSchema = z.object({
   limitations: z.string(),
   mastery: AbilityMasterySchema,
   state: AbilityStateSchema,
-  visibility: AbilityVisibilitySchema,
   rumorText: z.string().nullable(),
   bloodlineJustification: z.string().nullable(),
   sourceAbilityId: z.string().nullable(),
@@ -69,7 +68,10 @@ type DeleteAbilityTx = AbilityMutationTx & {
 };
 
 type DeleteAbilityClient = {
-  $transaction<T>(operation: (tx: DeleteAbilityTx) => Promise<T>): Promise<T>;
+  $transaction<T>(
+    operation: (tx: DeleteAbilityTx) => Promise<T>,
+    options: { isolationLevel: Prisma.TransactionIsolationLevel },
+  ): Promise<T>;
 };
 
 function errorResponse(error: unknown) {
@@ -96,29 +98,25 @@ async function visibleAbilityOrNotFound(id: string) {
   return projection === null ? null : { ability, projection };
 }
 
-async function deleteAbilityAtomically(
+function isSerializationConflict(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (
+    ("code" in error && error.code === "P2034") ||
+    ("message" in error && typeof error.message === "string" && /could not serialize/i.test(error.message))
+  );
+}
+
+async function deleteAbilityInSerializableTransaction(
   client: DeleteAbilityClient,
   id: string,
   expectedVersion: number,
   event: z.infer<typeof EventSchema> | undefined,
 ) {
-  return client.$transaction(async (tx) => {
+  const attempt = async () => client.$transaction(async (tx) => {
     const stored = await tx.ability.findUnique({ where: { id } });
     if (stored === null) {
       throw new AbilityOptimisticConflictError("能力已被删除，请刷新后重试");
     }
     if (stored.version !== expectedVersion) {
-      throw new AbilityOptimisticConflictError("能力已被其他变更更新，请刷新后重试");
-    }
-
-    try {
-      // PostgreSQL UPDATE acquires a row lock. Incrementing by zero keeps the
-      // optimistic-lock version stable while serializing descendant/event checks.
-      await tx.ability.update({
-        where: { id_version: { id, version: expectedVersion } },
-        data: { version: { increment: 0 } },
-      });
-    } catch {
       throw new AbilityOptimisticConflictError("能力已被其他变更更新，请刷新后重试");
     }
 
@@ -128,6 +126,20 @@ async function deleteAbilityAtomically(
         findFirst(args: { where: { sourceAbilityId: string } }): Promise<{ id: string } | null>;
       }).findFirst({ where: { sourceAbilityId: id } }),
     ]);
+
+    try {
+      // Keep the descendant query in the serializable transaction, then lock
+      // the source row before the delete/deprecate decision is materialized.
+      await tx.ability.update({
+        where: { id_version: { id, version: expectedVersion } },
+        data: { version: { increment: 0 } },
+      });
+    } catch (error) {
+      if (isSerializationConflict(error)) {
+        throw error;
+      }
+      throw new AbilityOptimisticConflictError("能力已被其他变更更新，请刷新后重试");
+    }
 
     if (eventCount === 0 && descendant === null) {
       const deleted = await tx.ability.deleteMany({
@@ -150,7 +162,22 @@ async function deleteAbilityAtomically(
       event: { ...event, type: "deprecated" },
     });
     return { deleted: false as const, deprecated: true as const, result };
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+  for (let retry = 0; retry < 3; retry += 1) {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!isSerializationConflict(error) || retry === 2) {
+        if (isSerializationConflict(error)) {
+          throw new AbilityOptimisticConflictError("能力并发变更冲突，请刷新后重试");
+        }
+        throw error;
+      }
+    }
+  }
+
+  throw new AbilityOptimisticConflictError("能力并发变更冲突，请刷新后重试");
 }
 
 /** PATCH /api/abilities/[id] —— 乐观锁下的能力更新与沿革记录。 */
@@ -201,7 +228,7 @@ export async function DELETE(
       return NextResponse.json({ error: "能力不存在" }, { status: 404 });
     }
 
-    const outcome = await deleteAbilityAtomically(
+    const outcome = await deleteAbilityInSerializableTransaction(
       prisma as unknown as DeleteAbilityClient,
       id,
       body.expectedVersion,

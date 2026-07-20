@@ -346,6 +346,42 @@ describe("能力 API 可见性", () => {
     expect(body.ability).not.toHaveProperty("effect");
   });
 
+  it.each(["hidden", "rumored", "known"] as const)(
+    "PATCH 不允许通过普通编辑路径将 visibility 设为 %s",
+    async (visibility) => {
+      const { PATCH } = await import("./route");
+      mocks.prisma.ability.findUnique.mockResolvedValue({
+        ...knownAbility,
+        kind: "personal",
+        timelineId: "timeline-1",
+        entityId: "character-1",
+        godId: null,
+      });
+
+      const response = await PATCH(
+        new Request("http://localhost/api/abilities/ability-known", {
+          method: "PATCH",
+          body: JSON.stringify({
+            expectedVersion: 1,
+            patch: { visibility },
+            event: {
+              type: "mutated",
+              chapterId: "chapter-1",
+              evidence: "普通编辑不得改变揭示状态",
+              scale: "scene",
+              dedupeKey: `ability-known:visibility-${visibility}`,
+            },
+          }),
+        }),
+        { params: Promise.resolve({ id: "ability-known" }) },
+      );
+
+      expect(response.status).toBe(400);
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+      expect(mocks.prisma.ability.update).not.toHaveBeenCalled();
+    },
+  );
+
   it("PATCH expectedVersion 过期时返回 409", async () => {
     const { PATCH } = await import("./route");
     mocks.prisma.ability.findUnique.mockResolvedValue({
