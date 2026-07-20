@@ -107,6 +107,9 @@ const CAUSATIVE = /(?:命令|让|令|指使|看着)/u;
 const PERSON_NOUN = /师父|师傅|长老|导师|老师|族长|首领|祭司|弟子|徒弟|同伴|侍从|守卫|父亲|母亲|兄长|弟弟|姐姐|妹妹/u;
 const CAPABILITY_RESULT = /(?:已能|终于能|可以|成功|独自)/u;
 const MUTATION_RESULT = /(?:发生|产生|出现|开始|已然|彻底)?.{0,8}(?:变异|异变|突变|蜕变|扭曲|变成|化作|转化为|改造成)/u;
+const EXTERNAL_EVENT_TYPES = new Set<AbilityExtractionChange["type"]>([
+  "sealed", "lost", "impaired", "deprecated", "revealed",
+]);
 
 function firstPatternIndex(sentence: string, patterns: readonly RegExp[]): number {
   let result = -1;
@@ -165,6 +168,53 @@ function changeResultIndex(text: string, change: AbilityExtractionChange): numbe
   return action;
 }
 
+function isNegatedResult(text: string, resultIndex: number): boolean {
+  const before = text.slice(Math.max(0, resultIndex - 10), resultIndex);
+  const after = text.slice(resultIndex, resultIndex + 18);
+  const negatedBefore = /(?:没有被|并未|从未|未能|并非|没有|未)(?:曾|被|真正|成功)?[^。！？!?；;，,]{0,3}$/u.test(before);
+  const failedAfter = /^[^。！？!?；;]{0,12}(?:失败|并非|没有成功|未能)/u.test(after);
+  return negatedBefore || failedAfter;
+}
+
+function ownerAbilityRelation(
+  text: string,
+  ownerNames: readonly string[],
+  abilityNames: readonly string[],
+  type: AbilityExtractionChange["type"],
+): boolean {
+  for (const ownerName of ownerNames) {
+    let ownerIndex = text.indexOf(ownerName);
+    while (ownerIndex >= 0) {
+      for (const abilityName of abilityNames) {
+        const abilityIndex = text.indexOf(abilityName, ownerIndex + ownerName.length);
+        if (abilityIndex < 0) continue;
+        const link = text.slice(ownerIndex + ownerName.length, abilityIndex);
+        if (/^的?$/u.test(link)) return true;
+        if (type === "revealed" && /^(?:确实|确有|拥有|身怀|掌握|会使用)$/u.test(link)) {
+          const prefix = text.slice(Math.max(0, ownerIndex - 12), ownerIndex);
+          if (/(?:确认|发现|查明|证实|揭示|识破)/u.test(prefix)) return true;
+        }
+      }
+      ownerIndex = text.indexOf(ownerName, ownerIndex + ownerName.length);
+    }
+  }
+  return false;
+}
+
+function externalEventSupported(
+  evidence: string,
+  change: AbilityExtractionChange,
+  ownerNames: readonly string[],
+  abilityNames: readonly string[],
+): boolean {
+  if (!EXTERNAL_EVENT_TYPES.has(change.type)) return false;
+  return evidence.split(SENTENCE_SPLIT).map((sentence) => sentence.trim()).filter(Boolean).some((sentence) => {
+    if (!ownerAbilityRelation(sentence, ownerNames, abilityNames, change.type)) return false;
+    const resultIndex = changeResultIndex(sentence, change);
+    return resultIndex >= 0 && !isNegatedResult(sentence, resultIndex);
+  });
+}
+
 function hasCompetingActor(
   textBeforeResult: string,
   ownerNames: readonly string[],
@@ -189,7 +239,7 @@ function assertRelevantEvidence(
   const abilityNames = [...new Set([ability.name, source?.name].filter((value): value is string => Boolean(value)))];
   const clauses = evidenceClauses(evidence);
   const ownerNames = identityNames(owner);
-  const valid = clauses.some((clause, start) => {
+  const ownerSubjectSupported = clauses.some((clause, start) => {
     if (!startsWithIdentity(clause.text, ownerNames)) return false;
 
     const chain: EvidenceClause[] = [clause];
@@ -203,14 +253,17 @@ function assertRelevantEvidence(
     const text = chain.map((part) => part.text).join("。");
     if (!abilityNames.some((name) => text.includes(name))) return false;
     const resultIndex = changeResultIndex(text, change);
-    if (resultIndex < 0) return false;
+    if (resultIndex < 0 || isNegatedResult(text, resultIndex)) return false;
     const beforeResult = text.slice(0, resultIndex);
     if (EXPLICIT_OBSERVER.test(beforeResult)) return false;
     if (hasCompetingActor(beforeResult, ownerNames, knownEntityNames)) return false;
     return true;
   });
+  const valid = ownerSubjectSupported || externalEventSupported(
+    evidence, change, ownerNames, abilityNames,
+  );
   if (!valid) {
-    throw new AbilityValidationError("正文证据必须以完整能力名和事件结果明确证明拥有者是行动主体，且不是命令者、旁观者或他人行动的见证者");
+    throw new AbilityValidationError("正文证据必须以非否定的完整能力事件证明拥有者是行动主体，或明确证明拥有者能力受到外部事件影响，不能把命令者或他人误作行动者");
   }
 }
 

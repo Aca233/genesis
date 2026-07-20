@@ -488,6 +488,57 @@ it("拒绝 owner 命令其他实体施展能力，接受 owner 主语的能力�
 });
 
 it.each([
+  ["lost", { state: "lost" }, "阿岚的凿阵术并未失去，只是谣言仍在流传"],
+  ["sealed", { state: "sealed" }, "阿岚的凿阵术没有被封印，依然可以正常施展"],
+  ["awakened", { mastery: "novice" }, "阿岚的凿阵术未能觉醒，这次试炼以失败告终"],
+] as const)("否定或失败语境不能证明 %s 事件", async (type, patch, evidence) => {
+  const fixture = extractionFixture();
+  if (type === "awakened") {
+    fixture.abilities.set("trainable-personal", { ...fixture.abilities.get("trainable-personal")!, mastery: "unawakened" });
+  }
+  fixture.messages.push({ id: `message-negated-${type}`, index: 29, scale: "scene", content: `${evidence}。` });
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ abilityId: "trainable-personal", ownerName: "阿岚", type, patch, evidenceMessageIndex: 29, evidence }],
+  });
+  expect(result.applied).toHaveLength(0);
+  expect(result.rejected[0]?.reason).toMatch(/否定|失败|事件|结果/);
+});
+
+it("owner 作为主语时仍可证明被动类型 lost", async () => {
+  const fixture = extractionFixture();
+  const evidence = "阿岚在崩塌中失去了凿阵术";
+  fixture.messages.push({ id: "message-owner-lost", index: 32, scale: "scene", content: `${evidence}。` });
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ abilityId: "trainable-personal", ownerName: "阿岚", type: "lost", patch: { state: "lost" }, evidenceMessageIndex: 32, evidence }],
+  });
+  expect(result.rejected).toHaveLength(0);
+  expect(result.applied).toHaveLength(1);
+});
+
+it.each([
+  ["sealed", { state: "sealed" }, "白石施法封印了阿岚的凿阵术"],
+  ["lost", { state: "lost" }, "白石施法废去了阿岚的凿阵术"],
+  ["impaired", { state: "impaired" }, "白石的重击令阿岚的凿阵术受损"],
+  ["deprecated", { state: "deprecated" }, "长老议会正式废弃了阿岚的凿阵术"],
+  ["revealed", { visibility: "known" }, "白石查验秘卷后确认阿岚拥有凿阵术"],
+] as const)("外部行动或确认可证明 owner 的被动 %s 事件", async (type, patch, evidence) => {
+  const fixture = extractionFixture();
+  if (type === "revealed") {
+    fixture.abilities.set("trainable-personal", { ...fixture.abilities.get("trainable-personal")!, visibility: "rumored" });
+  }
+  fixture.messages.push({ id: `message-external-${type}`, index: 31, scale: "scene", content: `${evidence}。` });
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners,
+    knownEntityNames: ["阿岚", "白石", "长老议会"], messages: fixture.messages,
+    changes: [{ abilityId: "trainable-personal", ownerName: "阿岚", type, patch, evidenceMessageIndex: 31, evidence }],
+  });
+  expect(result.rejected).toHaveLength(0);
+  expect(result.applied).toHaveLength(1);
+});
+
+it.each([
   ["awakened", { mastery: "adept" }, "adept"],
   ["learned", { mastery: "novice" }, "novice"],
   ["improved", { mastery: "adept" }, "adept"],
