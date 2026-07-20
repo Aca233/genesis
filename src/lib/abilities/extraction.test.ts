@@ -537,7 +537,7 @@ it("owner 作为主语时仍可证明被动类型 lost", async () => {
 it.each([
   ["sealed", { state: "sealed" }, "白石施法封印了阿岚的凿阵术"],
   ["lost", { state: "lost" }, "白石施法废去了阿岚的凿阵术"],
-  ["impaired", { state: "impaired" }, "白石的重击令阿岚的凿阵术受损"],
+  ["impaired", { state: "impaired" }, "白石施法重击了阿岚的凿阵术"],
   ["deprecated", { state: "deprecated" }, "长老议会正式废弃了阿岚的凿阵术"],
   ["revealed", { visibility: "known" }, "白石查验秘卷后确认阿岚拥有凿阵术"],
 ] as const)("外部行动或确认可证明 owner 的被动 %s 事件", async (type, patch, evidence) => {
@@ -550,6 +550,30 @@ it.each([
     timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners,
     knownEntityNames: ["阿岚", "白石", "长老议会"], messages: fixture.messages,
     changes: [{ abilityId: "trainable-personal", ownerName: "阿岚", type, patch, evidenceMessageIndex: 31, evidence }],
+  });
+  expect(result.rejected).toHaveLength(0);
+  expect(result.applied).toHaveLength(1);
+});
+
+it("外部主动动词后插入其他宾语再提 owner ability 时拒绝", async () => {
+  const fixture = extractionFixture();
+  const evidence = "白石封印石门后查看阿岚的凿阵术";
+  fixture.messages.push({ id: "message-direct-object", index: 35, scale: "scene", content: `${evidence}。` });
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ abilityId: "trainable-personal", ownerName: "阿岚", type: "sealed", patch: { state: "sealed" }, evidenceMessageIndex: 35, evidence }],
+  });
+  expect(result.applied).toHaveLength(0);
+});
+
+it("早期尝试失败不否定最终独立段明确成功", async () => {
+  const fixture = extractionFixture();
+  const evidence = "阿岚尝试唤醒凿阵术却失败，最终凿阵术成功觉醒";
+  fixture.abilities.set("trainable-personal", { ...fixture.abilities.get("trainable-personal")!, mastery: "unawakened" });
+  fixture.messages.push({ id: "message-final-success", index: 36, scale: "scene", content: `${evidence}。` });
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ abilityId: "trainable-personal", ownerName: "阿岚", type: "awakened", patch: { mastery: "novice" }, evidenceMessageIndex: 36, evidence }],
   });
   expect(result.rejected).toHaveLength(0);
   expect(result.applied).toHaveLength(1);

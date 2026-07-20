@@ -191,6 +191,22 @@ function alternatives(values: readonly string[]): string {
   return `(?:${values.map(escapeRegExp).join("|")})`;
 }
 
+const TEMPORAL_CONNECTOR = /(?=之后|以后|后|但|却|终于|最终|随后)/u;
+
+function hasAnyEventPattern(text: string): boolean {
+  return Object.values(TYPE_PATTERNS).some((patterns) => firstPatternIndex(text, patterns) >= 0);
+}
+
+function finalRelevantSegment(text: string, abilityNames: readonly string[]): string | null {
+  const relevant = text
+    .split(TEMPORAL_CONNECTOR)
+    .map((segment) => segment.trim())
+    .filter((segment) =>
+      abilityNames.some((name) => segment.includes(name)) || hasAnyEventPattern(segment),
+    );
+  return relevant.at(-1) ?? null;
+}
+
 function externalEventSupported(
   evidence: string,
   change: AbilityExtractionChange,
@@ -202,22 +218,27 @@ function externalEventSupported(
   const ability = alternatives(abilityNames);
   const ownedAbility = `${owner}的?${ability}`;
   return evidence.split(SENTENCE_SPLIT).map((sentence) => sentence.trim()).filter(Boolean).some((sentence) => {
-    if (INVALID_EVENT_CLAUSE.test(sentence)) return false;
+    const eventSegment = finalRelevantSegment(sentence, abilityNames);
+    if (eventSegment === null || INVALID_EVENT_CLAUSE.test(eventSegment)) return false;
     if (change.type === "revealed") {
       return new RegExp(
         `(?:确认|发现|查明|证实|揭示|识破)${RELATION_GAP}${owner}${RELATION_GAP}(?:拥有|会|掌握|身怀|会使用)${RELATION_GAP}${ability}`,
         "u",
-      ).test(sentence);
+      ).test(eventSegment);
     }
     const action = EXTERNAL_ACTION[change.type];
     const result = EXTERNAL_RESULT[change.type];
     if (action === undefined || result === undefined) return false;
-    const actionToAbility = new RegExp(`${action}${RELATION_GAP}${ownedAbility}`, "u");
-    const abilityToResult = new RegExp(
-      `${ownedAbility}${RELATION_GAP}(?:被|遭|受到|已)${RELATION_GAP}${result}`,
+    const particles = "(?:了|掉|彻底){0,3}";
+    const actionToAbility = new RegExp(
+      `${action}${particles}(?:被|将)?${ownedAbility}`,
       "u",
     );
-    return actionToAbility.test(sentence) || abilityToResult.test(sentence);
+    const abilityToResult = new RegExp(
+      `${ownedAbility}(?:被|遭|受到|已)${particles}${result}`,
+      "u",
+    );
+    return actionToAbility.test(eventSegment) || abilityToResult.test(eventSegment);
   });
 }
 
@@ -258,9 +279,12 @@ function assertRelevantEvidence(
     }
     const text = chain.map((part) => part.text).join("。");
     if (!abilityNames.some((name) => text.includes(name))) return false;
-    const resultIndex = changeResultIndex(text, change);
-    if (resultIndex < 0 || INVALID_EVENT_CLAUSE.test(text)) return false;
-    const beforeResult = text.slice(0, resultIndex);
+    const eventSegment = finalRelevantSegment(text, abilityNames);
+    if (eventSegment === null) return false;
+    const resultIndex = changeResultIndex(eventSegment, change);
+    if (resultIndex < 0 || INVALID_EVENT_CLAUSE.test(eventSegment)) return false;
+    const eventOffset = text.lastIndexOf(eventSegment);
+    const beforeResult = text.slice(0, Math.max(0, eventOffset) + resultIndex);
     if (EXPLICIT_OBSERVER.test(beforeResult)) return false;
     if (hasCompetingActor(beforeResult, ownerNames, knownEntityNames)) return false;
     return true;
