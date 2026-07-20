@@ -2,158 +2,258 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import {
+  AbilityEventTypeSchema,
+  AbilityKindSchema,
+  AbilityMasterySchema,
+  AbilityStateSchema,
+  AbilityVisibilitySchema,
+} from "@/lib/abilities/types";
 
 /**
- * POST /api/worlds/import —— 导入存档
- * body 为 GET /api/worlds/[id]/export 的导出格式：{ version: 1, exportedAt, world: {...} }
- * 在事务中重建 world 及全部子表：所有记录生成新 id，
- * 通过旧id→新id 映射修复 timelineId/chapterId/entityId/godId 外键引用，
- * 以及 world.activeTimelineId、timeline.parentId、god.codexEntityId、
- * chronicle.entityIds/godIds、omen.godId、god.relations 键。
- * 返回 { worldId }
+ * POST /api/worlds/import —— 导入 version 1 或 version 2 存档。
+ * 所有记录在单个事务中用新 ID 重建，任何失败都会回滚整个新世界。
  */
 
-// ───────────────────────── 导入格式校验（宽松：只取需要的字段） ─────────────────────────
+const MessageSchema = z
+  .object({
+    id: z.string().min(1),
+    chapterId: z.string().optional(),
+    index: z.number().int(),
+    role: z.string().min(1),
+    content: z.string(),
+    scale: z.string().default("scene"),
+    variants: z.unknown().optional(),
+    meta: z.unknown().optional(),
+    createdAt: z.coerce.date().optional(),
+  })
+  .strict();
 
-const MessageSchema = z.object({
-  index: z.number().int(),
-  role: z.string(),
-  content: z.string(),
-  scale: z.string().catch("scene"),
-  variants: z.unknown().optional(),
-  meta: z.unknown().optional(),
-  createdAt: z.coerce.date().optional(),
-});
+const ChapterSchema = z
+  .object({
+    id: z.string().min(1),
+    timelineId: z.string().optional(),
+    index: z.number().int(),
+    title: z.string().nullish(),
+    summary: z.string().nullish(),
+    settleState: z.string().default("open"),
+    snapshot: z.unknown().optional(),
+    messages: z.array(MessageSchema).default([]),
+    createdAt: z.coerce.date().optional(),
+  })
+  .strict();
 
-const ChapterSchema = z.object({
-  id: z.string(),
-  index: z.number().int(),
-  title: z.string().nullish(),
-  summary: z.string().nullish(),
-  settleState: z.string().catch("open"),
-  snapshot: z.unknown().optional(),
-  messages: z.array(MessageSchema).default([]),
-  createdAt: z.coerce.date().optional(),
-});
+const GodSchema = z
+  .object({
+    id: z.string().min(1),
+    timelineId: z.string().optional(),
+    name: z.string().min(1),
+    aliases: z.array(z.string()).default([]),
+    tier: z.string().min(1),
+    isPlayer: z.boolean().default(false),
+    rank: z.string().default("nascent"),
+    domains: z.array(z.string()).default([]),
+    persona: z.unknown().optional(),
+    voice: z.unknown().optional(),
+    agenda: z.unknown().optional(),
+    agendaRevealed: z.boolean().default(false),
+    relations: z.record(z.string(), z.unknown()).nullish(),
+    faithScope: z.string().nullish(),
+    codexEntityId: z.string().nullish(),
+    createdAt: z.coerce.date().optional(),
+    updatedAt: z.coerce.date().optional(),
+  })
+  .strict();
 
-const GodSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  aliases: z.array(z.string()).default([]),
-  tier: z.string(),
-  isPlayer: z.boolean().default(false),
-  rank: z.string().catch("nascent"),
-  domains: z.array(z.string()).default([]),
-  persona: z.unknown().optional(),
-  voice: z.unknown().optional(),
-  agenda: z.unknown().optional(),
-  agendaRevealed: z.boolean().default(false),
-  relations: z.record(z.string(), z.unknown()).nullish(),
-  faithScope: z.string().nullish(),
-  codexEntityId: z.string().nullish(),
-  createdAt: z.coerce.date().optional(),
-});
+const EntitySectionSchema = z
+  .object({
+    id: z.string().optional(),
+    entityId: z.string().optional(),
+    key: z.string().min(1),
+    content: z.unknown(),
+    revealed: z.boolean().default(true),
+    rumorText: z.string().nullish(),
+    playerLocked: z.boolean().default(false),
+  })
+  .strict();
 
-const EntitySectionSchema = z.object({
-  key: z.string(),
-  content: z.unknown(),
-  revealed: z.boolean().default(true),
-  rumorText: z.string().nullish(),
-  playerLocked: z.boolean().default(false),
-});
+const EntitySchema = z
+  .object({
+    id: z.string().min(1),
+    timelineId: z.string().optional(),
+    type: z.string().min(1),
+    name: z.string().min(1),
+    aliases: z.array(z.string()).default([]),
+    emblemSeed: z.string(),
+    imageUrl: z.string().nullish(),
+    starred: z.boolean().default(false),
+    isChosen: z.boolean().default(false),
+    isMajorCharacter: z.boolean().default(false),
+    raceId: z.string().nullish(),
+    heat: z.string().default("active"),
+    scenePresence: z.boolean().default(false),
+    summary: z.string(),
+    lockedPaths: z.array(z.string()).default([]),
+    sections: z.array(EntitySectionSchema).default([]),
+    createdAt: z.coerce.date().optional(),
+    updatedAt: z.coerce.date().optional(),
+  })
+  .strict();
 
-const EntitySchema = z.object({
-  id: z.string(),
-  type: z.string(),
-  name: z.string(),
-  aliases: z.array(z.string()).default([]),
-  emblemSeed: z.string(),
-  imageUrl: z.string().nullish(),
-  starred: z.boolean().default(false),
-  isChosen: z.boolean().default(false),
-  heat: z.string().catch("active"),
-  scenePresence: z.boolean().default(false),
-  summary: z.string(),
-  lockedPaths: z.array(z.string()).default([]),
-  sections: z.array(EntitySectionSchema).default([]),
-  createdAt: z.coerce.date().optional(),
-});
+const AbilitySchema = z
+  .object({
+    id: z.string().min(1),
+    timelineId: z.string().optional(),
+    entityId: z.string().nullish(),
+    godId: z.string().nullish(),
+    sourceAbilityId: z.string().nullish(),
+    name: z.string().min(1),
+    kind: AbilityKindSchema,
+    effect: z.string(),
+    trigger: z.string(),
+    cost: z.string(),
+    limitations: z.string(),
+    mastery: AbilityMasterySchema,
+    state: AbilityStateSchema.default("normal"),
+    visibility: AbilityVisibilitySchema.default("known"),
+    rumorText: z.string().nullish(),
+    bloodlineJustification: z.string().nullish(),
+    lockedFields: z.array(z.string()).default([]),
+    version: z.number().int().positive().default(1),
+    createdAt: z.coerce.date().optional(),
+    updatedAt: z.coerce.date().optional(),
+  })
+  .strict();
 
-const ChronicleSchema = z.object({
-  chapterIndex: z.number().int(),
-  yearLabel: z.string(),
-  text: z.string(),
-  entityIds: z.array(z.string()).default([]),
-  godIds: z.array(z.string()).default([]),
-  revealed: z.boolean().default(true),
-  revealedAtChapter: z.number().int().nullish(),
-  source: z.string().catch("narrative"),
-  createdAt: z.coerce.date().optional(),
-});
+const AbilityEventSchema = z
+  .object({
+    id: z.string().min(1),
+    abilityId: z.string().min(1),
+    chapterId: z.string().min(1),
+    messageId: z.string().nullish(),
+    type: AbilityEventTypeSchema,
+    before: z.unknown().optional(),
+    after: z.unknown().optional(),
+    evidence: z.string(),
+    scale: z.string().min(1),
+    dedupeKey: z.string().min(1),
+    createdAt: z.coerce.date().optional(),
+  })
+  .strict();
 
-const OmenSchema = z.object({
-  godId: z.string(),
-  text: z.string(),
-  consumed: z.boolean().default(false),
-  createdAt: z.coerce.date().optional(),
-});
+const MembershipSchema = z
+  .object({
+    id: z.string().min(1),
+    characterId: z.string().min(1),
+    factionId: z.string().min(1),
+    role: z.string(),
+    isPrimary: z.boolean().default(false),
+  })
+  .strict();
 
-const TimelineSchema = z.object({
-  id: z.string(),
-  parentId: z.string().nullish(),
-  forkChapter: z.number().int().nullish(),
-  chapters: z.array(ChapterSchema).default([]),
-  gods: z.array(GodSchema).default([]),
-  entities: z.array(EntitySchema).default([]),
-  chronicles: z.array(ChronicleSchema).default([]),
-  omens: z.array(OmenSchema).default([]),
-  createdAt: z.coerce.date().optional(),
-});
+const ChronicleSchema = z
+  .object({
+    id: z.string().optional(),
+    timelineId: z.string().optional(),
+    chapterIndex: z.number().int(),
+    yearLabel: z.string(),
+    text: z.string(),
+    entityIds: z.array(z.string()).default([]),
+    godIds: z.array(z.string()).default([]),
+    revealed: z.boolean().default(true),
+    revealedAtChapter: z.number().int().nullish(),
+    source: z.string().default("narrative"),
+    createdAt: z.coerce.date().optional(),
+  })
+  .strict();
 
-const LorebookEntrySchema = z.object({
-  keys: z.array(z.string()).default([]),
-  content: z.string(),
-  enabled: z.boolean().default(true),
-  stExtra: z.unknown().optional(),
-  source: z.string().catch("imported"),
-});
+const OmenSchema = z
+  .object({
+    id: z.string().optional(),
+    timelineId: z.string().optional(),
+    godId: z.string().min(1),
+    text: z.string(),
+    consumed: z.boolean().default(false),
+    createdAt: z.coerce.date().optional(),
+  })
+  .strict();
 
-const WorldSchema = z.object({
-  name: z.string(),
-  genesisInput: z.string(),
-  status: z.string().catch("draft"),
-  draftDeck: z.unknown().optional(),
-  lockedPaths: z.array(z.string()).default([]),
-  themeCard: z.unknown().optional(),
-  styleCard: z.unknown().optional(),
-  cosmology: z.unknown().optional(),
-  fusionAxiom: z.unknown().optional(),
-  activeTimelineId: z.string().nullish(),
-  timelines: z.array(TimelineSchema).default([]),
-  lorebookEntries: z.array(LorebookEntrySchema).default([]),
-  createdAt: z.coerce.date().optional(),
-});
+const TimelineSchema = z
+  .object({
+    id: z.string().min(1),
+    worldId: z.string().optional(),
+    parentId: z.string().nullish(),
+    forkChapter: z.number().int().nullish(),
+    chapters: z.array(ChapterSchema).default([]),
+    gods: z.array(GodSchema).default([]),
+    entities: z.array(EntitySchema).default([]),
+    abilities: z.array(AbilitySchema).default([]),
+    abilityEvents: z.array(AbilityEventSchema).default([]),
+    memberships: z.array(MembershipSchema).default([]),
+    chronicles: z.array(ChronicleSchema).default([]),
+    omens: z.array(OmenSchema).default([]),
+    createdAt: z.coerce.date().optional(),
+  })
+  .strict();
 
-const ImportSchema = z.object({
-  version: z.number(),
-  world: WorldSchema,
-});
+const LorebookEntrySchema = z
+  .object({
+    id: z.string().optional(),
+    worldId: z.string().optional(),
+    keys: z.array(z.string()).default([]),
+    content: z.string(),
+    enabled: z.boolean().default(true),
+    stExtra: z.unknown().optional(),
+    source: z.string().default("imported"),
+  })
+  .strict();
 
-// ───────────────────────── 工具 ─────────────────────────
+const WorldSchema = z
+  .object({
+    id: z.string().optional(),
+    userId: z.string().optional(),
+    name: z.string().min(1),
+    genesisInput: z.string(),
+    status: z.string().default("draft"),
+    draftDeck: z.unknown().optional(),
+    lockedPaths: z.array(z.string()).default([]),
+    themeCard: z.unknown().optional(),
+    styleCard: z.unknown().optional(),
+    cosmology: z.unknown().optional(),
+    fusionAxiom: z.unknown().optional(),
+    activeTimelineId: z.string().nullish(),
+    timelines: z.array(TimelineSchema).default([]),
+    lorebookEntries: z.array(LorebookEntrySchema).default([]),
+    createdAt: z.coerce.date().optional(),
+    updatedAt: z.coerce.date().optional(),
+  })
+  .strict();
 
-/** 可空 Json 字段：null/undefined → 不写（落库为默认 null） */
+const ImportSchema = z
+  .object({
+    version: z.union([z.literal(1), z.literal(2)]),
+    exportedAt: z.string().datetime().optional(),
+    world: WorldSchema,
+  })
+  .strict();
+
 function json(v: unknown): Prisma.InputJsonValue | undefined {
   return v == null ? undefined : (v as Prisma.InputJsonValue);
 }
 
-/** 必填 Json 字段：null/undefined → JSON null */
 function jsonRequired(v: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
   return v == null ? Prisma.JsonNull : (v as Prisma.InputJsonValue);
 }
 
-/** 旧 id → 新 id（映射缺失时保留原值，避免丢信息） */
-function remap(map: Map<string, string>, id: string): string {
-  return map.get(id) ?? id;
+function addMapping(map: Map<string, string>, oldId: string, label: string) {
+  if (map.has(oldId)) throw new Error(`重复的${label} ID：${oldId}`);
+  map.set(oldId, crypto.randomUUID());
+}
+
+function remapRequired(map: Map<string, string>, oldId: string, label: string) {
+  const newId = map.get(oldId);
+  if (!newId) throw new Error(`${label}引用不存在：${oldId}`);
+  return newId;
 }
 
 export async function POST(request: Request) {
@@ -164,14 +264,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "请求体不是有效 JSON" }, { status: 400 });
   }
 
-  // 版本门槛：仅支持 version 1
-  if (
-    typeof raw !== "object" ||
-    raw === null ||
-    (raw as { version?: unknown }).version !== 1
-  ) {
+  const rawVersion =
+    typeof raw === "object" && raw !== null
+      ? (raw as { version?: unknown }).version
+      : undefined;
+  if (rawVersion !== 1 && rawVersion !== 2) {
     return NextResponse.json(
-      { error: "存档版本不受支持：仅接受 version 为 1 的导出格式" },
+      { error: "存档版本不受支持：仅接受 version 1 或 version 2" },
       { status: 400 },
     );
   }
@@ -185,153 +284,241 @@ export async function POST(request: Request) {
   }
   const w = parsed.data.world;
 
-  // ── 预生成全部新 id 映射（旧id → 新id） ──
   const newWorldId = crypto.randomUUID();
   const timelineMap = new Map<string, string>();
   const chapterMap = new Map<string, string>();
+  const messageMap = new Map<string, string>();
   const godMap = new Map<string, string>();
   const entityMap = new Map<string, string>();
-  for (const tl of w.timelines) {
-    timelineMap.set(tl.id, crypto.randomUUID());
-    for (const ch of tl.chapters) chapterMap.set(ch.id, crypto.randomUUID());
-    for (const g of tl.gods) godMap.set(g.id, crypto.randomUUID());
-    for (const en of tl.entities) entityMap.set(en.id, crypto.randomUUID());
-  }
+  const abilityMap = new Map<string, string>();
+  const abilityEventMap = new Map<string, string>();
+  const membershipMap = new Map<string, string>();
 
-  // ── 组装批量写入数据（引用全部走映射修复） ──
-  const timelineRows: Prisma.TimelineCreateManyInput[] = [];
-  const chapterRows: Prisma.ChapterCreateManyInput[] = [];
-  const messageRows: Prisma.MessageCreateManyInput[] = [];
-  const godRows: Prisma.GodCreateManyInput[] = [];
-  const entityRows: Prisma.EntityCreateManyInput[] = [];
-  const sectionRows: Prisma.EntitySectionCreateManyInput[] = [];
-  const chronicleRows: Prisma.ChronicleEntryCreateManyInput[] = [];
-  const omenRows: Prisma.OmenQueueCreateManyInput[] = [];
-
-  for (const tl of w.timelines) {
-    const newTlId = timelineMap.get(tl.id)!;
-    timelineRows.push({
-      id: newTlId,
-      worldId: newWorldId,
-      parentId: tl.parentId ? remap(timelineMap, tl.parentId) : null,
-      forkChapter: tl.forkChapter ?? null,
-      createdAt: tl.createdAt,
-    });
-
-    for (const ch of tl.chapters) {
-      const newChId = chapterMap.get(ch.id)!;
-      chapterRows.push({
-        id: newChId,
-        timelineId: newTlId,
-        index: ch.index,
-        title: ch.title ?? null,
-        summary: ch.summary ?? null,
-        settleState: ch.settleState,
-        snapshot: json(ch.snapshot),
-        createdAt: ch.createdAt,
-      });
-      for (const m of ch.messages) {
-        messageRows.push({
-          chapterId: newChId,
-          index: m.index,
-          role: m.role,
-          content: m.content,
-          scale: m.scale,
-          variants: json(m.variants),
-          meta: json(m.meta),
-          createdAt: m.createdAt,
-        });
-      }
-    }
-
-    for (const en of tl.entities) {
-      const newEnId = entityMap.get(en.id)!;
-      entityRows.push({
-        id: newEnId,
-        timelineId: newTlId,
-        type: en.type,
-        name: en.name,
-        aliases: en.aliases,
-        emblemSeed: en.emblemSeed,
-        imageUrl: en.imageUrl ?? null,
-        starred: en.starred,
-        isChosen: en.isChosen,
-        heat: en.heat,
-        scenePresence: en.scenePresence,
-        summary: en.summary,
-        lockedPaths: en.lockedPaths,
-        createdAt: en.createdAt,
-      });
-      for (const s of en.sections) {
-        sectionRows.push({
-          entityId: newEnId,
-          key: s.key,
-          content: jsonRequired(s.content),
-          revealed: s.revealed,
-          rumorText: s.rumorText ?? null,
-          playerLocked: s.playerLocked,
-        });
-      }
-    }
-
-    for (const g of tl.gods) {
-      // relations 的键是其他神的旧 id → 换成新 id
-      let relations: Prisma.InputJsonValue | undefined;
-      if (g.relations) {
-        relations = Object.fromEntries(
-          Object.entries(g.relations).map(([k, v]) => [remap(godMap, k), v]),
-        ) as Prisma.InputJsonValue;
-      }
-      godRows.push({
-        id: godMap.get(g.id)!,
-        timelineId: newTlId,
-        name: g.name,
-        aliases: g.aliases,
-        tier: g.tier,
-        isPlayer: g.isPlayer,
-        rank: g.rank,
-        domains: g.domains,
-        persona: json(g.persona),
-        voice: json(g.voice),
-        agenda: json(g.agenda),
-        agendaRevealed: g.agendaRevealed,
-        relations,
-        faithScope: g.faithScope ?? null,
-        codexEntityId: g.codexEntityId ? remap(entityMap, g.codexEntityId) : null,
-        createdAt: g.createdAt,
-      });
-    }
-
-    for (const c of tl.chronicles) {
-      chronicleRows.push({
-        timelineId: newTlId,
-        chapterIndex: c.chapterIndex,
-        yearLabel: c.yearLabel,
-        text: c.text,
-        entityIds: c.entityIds.map((id) => remap(entityMap, id)),
-        godIds: c.godIds.map((id) => remap(godMap, id)),
-        revealed: c.revealed,
-        revealedAtChapter: c.revealedAtChapter ?? null,
-        source: c.source,
-        createdAt: c.createdAt,
-      });
-    }
-
-    for (const o of tl.omens) {
-      omenRows.push({
-        timelineId: newTlId,
-        godId: remap(godMap, o.godId),
-        text: o.text,
-        consumed: o.consumed,
-        createdAt: o.createdAt,
-      });
-    }
-  }
-
-  // ── 事务重建：world → timelines → chapters/entities → messages/sections/gods/… ──
   try {
-    await prisma.$transaction([
-      prisma.world.create({
+    for (const tl of w.timelines) {
+      addMapping(timelineMap, tl.id, "时间线");
+      for (const ch of tl.chapters) {
+        addMapping(chapterMap, ch.id, "章节");
+        for (const message of ch.messages) addMapping(messageMap, message.id, "消息");
+      }
+      for (const god of tl.gods) addMapping(godMap, god.id, "神明");
+      for (const entity of tl.entities) addMapping(entityMap, entity.id, "实体");
+      for (const ability of tl.abilities) addMapping(abilityMap, ability.id, "能力");
+      for (const event of tl.abilityEvents) {
+        addMapping(abilityEventMap, event.id, "能力事件");
+      }
+      for (const membership of tl.memberships) {
+        addMapping(membershipMap, membership.id, "成员关系");
+      }
+    }
+
+    const timelineRows: Prisma.TimelineCreateManyInput[] = [];
+    const chapterRows: Prisma.ChapterCreateManyInput[] = [];
+    const messageRows: Prisma.MessageCreateManyInput[] = [];
+    const godRows: Prisma.GodCreateManyInput[] = [];
+    const entityRows: Prisma.EntityCreateManyInput[] = [];
+    const sectionRows: Prisma.EntitySectionCreateManyInput[] = [];
+    const abilityRows: Prisma.AbilityCreateManyInput[] = [];
+    const membershipRows: Prisma.EntityMembershipCreateManyInput[] = [];
+    const eventRows: Prisma.AbilityEventCreateManyInput[] = [];
+    const chronicleRows: Prisma.ChronicleEntryCreateManyInput[] = [];
+    const omenRows: Prisma.OmenQueueCreateManyInput[] = [];
+
+    for (const tl of w.timelines) {
+      const newTlId = remapRequired(timelineMap, tl.id, "时间线");
+      timelineRows.push({
+        id: newTlId,
+        worldId: newWorldId,
+        parentId: tl.parentId
+          ? remapRequired(timelineMap, tl.parentId, "父时间线")
+          : null,
+        forkChapter: tl.forkChapter ?? null,
+        createdAt: tl.createdAt,
+      });
+
+      for (const ch of tl.chapters) {
+        const newChId = remapRequired(chapterMap, ch.id, "章节");
+        chapterRows.push({
+          id: newChId,
+          timelineId: newTlId,
+          index: ch.index,
+          title: ch.title ?? null,
+          summary: ch.summary ?? null,
+          settleState: ch.settleState,
+          snapshot: json(ch.snapshot),
+          createdAt: ch.createdAt,
+        });
+        for (const message of ch.messages) {
+          messageRows.push({
+            id: remapRequired(messageMap, message.id, "消息"),
+            chapterId: newChId,
+            index: message.index,
+            role: message.role,
+            content: message.content,
+            scale: message.scale,
+            variants: json(message.variants),
+            meta: json(message.meta),
+            createdAt: message.createdAt,
+          });
+        }
+      }
+
+      for (const entity of tl.entities) {
+        const newEntityId = remapRequired(entityMap, entity.id, "实体");
+        entityRows.push({
+          id: newEntityId,
+          timelineId: newTlId,
+          type: entity.type,
+          name: entity.name,
+          aliases: entity.aliases,
+          emblemSeed: entity.emblemSeed,
+          imageUrl: entity.imageUrl ?? null,
+          starred: entity.starred,
+          isChosen: entity.isChosen,
+          isMajorCharacter: entity.isMajorCharacter,
+          raceId: entity.raceId
+            ? remapRequired(entityMap, entity.raceId, "人物种族")
+            : null,
+          heat: entity.heat,
+          scenePresence: entity.scenePresence,
+          summary: entity.summary,
+          lockedPaths: entity.lockedPaths,
+          createdAt: entity.createdAt,
+        });
+        for (const section of entity.sections) {
+          sectionRows.push({
+            entityId: newEntityId,
+            key: section.key,
+            content: jsonRequired(section.content),
+            revealed: section.revealed,
+            rumorText: section.rumorText ?? null,
+            playerLocked: section.playerLocked,
+          });
+        }
+      }
+
+      for (const god of tl.gods) {
+        const relations = god.relations
+          ? (Object.fromEntries(
+              Object.entries(god.relations).map(([id, relation]) => [
+                remapRequired(godMap, id, "神明关系"),
+                relation,
+              ]),
+            ) as Prisma.InputJsonValue)
+          : undefined;
+        godRows.push({
+          id: remapRequired(godMap, god.id, "神明"),
+          timelineId: newTlId,
+          name: god.name,
+          aliases: god.aliases,
+          tier: god.tier,
+          isPlayer: god.isPlayer,
+          rank: god.rank,
+          domains: god.domains,
+          persona: json(god.persona),
+          voice: json(god.voice),
+          agenda: json(god.agenda),
+          agendaRevealed: god.agendaRevealed,
+          relations,
+          faithScope: god.faithScope ?? null,
+          codexEntityId: god.codexEntityId
+            ? remapRequired(entityMap, god.codexEntityId, "神明百科实体")
+            : null,
+          createdAt: god.createdAt,
+        });
+      }
+
+      for (const ability of tl.abilities) {
+        abilityRows.push({
+          id: remapRequired(abilityMap, ability.id, "能力"),
+          timelineId: newTlId,
+          entityId: ability.entityId
+            ? remapRequired(entityMap, ability.entityId, "能力实体")
+            : null,
+          godId: ability.godId
+            ? remapRequired(godMap, ability.godId, "能力神明")
+            : null,
+          sourceAbilityId: ability.sourceAbilityId
+            ? remapRequired(abilityMap, ability.sourceAbilityId, "来源能力")
+            : null,
+          name: ability.name,
+          kind: ability.kind,
+          effect: ability.effect,
+          trigger: ability.trigger,
+          cost: ability.cost,
+          limitations: ability.limitations,
+          mastery: ability.mastery,
+          state: ability.state,
+          visibility: ability.visibility,
+          rumorText: ability.rumorText ?? null,
+          bloodlineJustification: ability.bloodlineJustification ?? null,
+          lockedFields: ability.lockedFields,
+          version: ability.version,
+          createdAt: ability.createdAt,
+        });
+      }
+
+      for (const membership of tl.memberships) {
+        membershipRows.push({
+          id: remapRequired(membershipMap, membership.id, "成员关系"),
+          characterId: remapRequired(entityMap, membership.characterId, "成员人物"),
+          factionId: remapRequired(entityMap, membership.factionId, "成员势力"),
+          role: membership.role,
+          isPrimary: membership.isPrimary,
+        });
+      }
+
+      for (const event of tl.abilityEvents) {
+        const newEventId = remapRequired(abilityEventMap, event.id, "能力事件");
+        eventRows.push({
+          id: newEventId,
+          abilityId: remapRequired(abilityMap, event.abilityId, "事件能力"),
+          chapterId: remapRequired(chapterMap, event.chapterId, "事件章节"),
+          messageId: event.messageId
+            ? remapRequired(messageMap, event.messageId, "事件消息")
+            : null,
+          type: event.type,
+          before: json(event.before),
+          after: json(event.after),
+          evidence: event.evidence,
+          scale: event.scale,
+          dedupeKey: `import:${newEventId}:${event.dedupeKey}`,
+          createdAt: event.createdAt,
+        });
+      }
+
+      for (const chronicle of tl.chronicles) {
+        chronicleRows.push({
+          timelineId: newTlId,
+          chapterIndex: chronicle.chapterIndex,
+          yearLabel: chronicle.yearLabel,
+          text: chronicle.text,
+          entityIds: chronicle.entityIds.map((id) =>
+            remapRequired(entityMap, id, "编年史实体"),
+          ),
+          godIds: chronicle.godIds.map((id) =>
+            remapRequired(godMap, id, "编年史神明"),
+          ),
+          revealed: chronicle.revealed,
+          revealedAtChapter: chronicle.revealedAtChapter ?? null,
+          source: chronicle.source,
+          createdAt: chronicle.createdAt,
+        });
+      }
+
+      for (const omen of tl.omens) {
+        omenRows.push({
+          timelineId: newTlId,
+          godId: remapRequired(godMap, omen.godId, "征兆神明"),
+          text: omen.text,
+          consumed: omen.consumed,
+          createdAt: omen.createdAt,
+        });
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.world.create({
         data: {
           id: newWorldId,
           name: w.name,
@@ -344,31 +531,33 @@ export async function POST(request: Request) {
           cosmology: json(w.cosmology),
           fusionAxiom: json(w.fusionAxiom),
           activeTimelineId: w.activeTimelineId
-            ? remap(timelineMap, w.activeTimelineId)
+            ? remapRequired(timelineMap, w.activeTimelineId, "当前时间线")
             : null,
           lorebookEntries: {
-            create: w.lorebookEntries.map((e) => ({
-              keys: e.keys,
-              content: e.content,
-              enabled: e.enabled,
-              stExtra: json(e.stExtra),
-              source: e.source,
+            create: w.lorebookEntries.map((entry) => ({
+              keys: entry.keys,
+              content: entry.content,
+              enabled: entry.enabled,
+              stExtra: json(entry.stExtra),
+              source: entry.source,
             })),
           },
         },
-      }),
-      prisma.timeline.createMany({ data: timelineRows }),
-      prisma.chapter.createMany({ data: chapterRows }),
-      prisma.message.createMany({ data: messageRows }),
-      prisma.entity.createMany({ data: entityRows }),
-      prisma.entitySection.createMany({ data: sectionRows }),
-      prisma.god.createMany({ data: godRows }),
-      prisma.chronicleEntry.createMany({ data: chronicleRows }),
-      prisma.omenQueue.createMany({ data: omenRows }),
-    ]);
-  } catch (err) {
-    // 唯一约束冲突（章节序号/消息序号/栏目键重复）等数据问题一律按坏存档处理
-    const message = err instanceof Error ? err.message : String(err);
+      });
+      await tx.timeline.createMany({ data: timelineRows });
+      await tx.chapter.createMany({ data: chapterRows });
+      await tx.entity.createMany({ data: entityRows });
+      await tx.entitySection.createMany({ data: sectionRows });
+      await tx.god.createMany({ data: godRows });
+      await tx.message.createMany({ data: messageRows });
+      await tx.ability.createMany({ data: abilityRows });
+      await tx.entityMembership.createMany({ data: membershipRows });
+      await tx.abilityEvent.createMany({ data: eventRows });
+      await tx.chronicleEntry.createMany({ data: chronicleRows });
+      await tx.omenQueue.createMany({ data: omenRows });
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
       { error: `存档数据无法重建：${message}` },
       { status: 400 },
