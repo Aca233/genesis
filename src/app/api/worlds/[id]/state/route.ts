@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { normalizePersistedAbility } from "@/lib/abilities/types";
+import { projectAbilitiesForPlayer } from "@/lib/abilities/visibility";
 
 /**
  * GET /api/worlds/[id]/state —— 对局引导：一次拉取对局界面所需全量状态
@@ -33,6 +35,7 @@ export async function GET(
     prisma.god.findMany({
       where: { timelineId: world.activeTimelineId },
       orderBy: { createdAt: "asc" },
+      include: { abilities: true },
     }),
     prisma.chapter.findUnique({
       where: {
@@ -76,6 +79,9 @@ export async function GET(
       // 议程卡默认隐藏（迷雾的一部分）；玩家主动翻开后才下发
       agenda: g.agendaRevealed ? g.agenda : null,
       agendaRevealed: g.agendaRevealed,
+      abilities: g.isPlayer
+        ? g.abilities.map(normalizePersistedAbility)
+        : projectAbilitiesForPlayer(g.abilities.map(normalizePersistedAbility)),
     })),
     currentChapter: {
       id: currentChapter.id,

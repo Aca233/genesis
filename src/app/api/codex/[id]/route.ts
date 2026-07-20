@@ -2,6 +2,15 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import {
+  normalizePersistedAbility,
+  type PersistedAbilityRecord,
+} from "@/lib/abilities/types";
+import { resolveEffectiveAbilities } from "@/lib/abilities/resolver";
+import {
+  projectAbilitiesForPlayer,
+  projectAbilityForPlayer,
+} from "@/lib/abilities/visibility";
 
 /**
  * GET   /api/codex/[id] —— 实体详情（sections + 专属编年史）
@@ -17,6 +26,25 @@ const PatchSchema = z.object({
     .optional(),
 });
 
+type AbilityWithEvents = PersistedAbilityRecord & {
+  events?: Array<{ type: string; createdAt: unknown }>;
+};
+
+function projectVisibleAbilityEvents(abilities: readonly AbilityWithEvents[]) {
+  return abilities.flatMap<unknown>((ability) => {
+    const projection = projectAbilityForPlayer(normalizePersistedAbility(ability));
+    if (projection === null) return [];
+
+    const events = ability.events ?? [];
+    if (projection.visibility === "rumored") {
+      return events
+        .filter((event) => event.type === "revealed")
+        .map((event) => ({ revealedAt: event.createdAt, rumorText: projection.rumorText }));
+    }
+    return events;
+  });
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -24,7 +52,23 @@ export async function GET(
   const { id } = await params;
   const entity = await prisma.entity.findUnique({
     where: { id },
-    include: { sections: true },
+    include: {
+      sections: true,
+      abilities: { include: { events: { orderBy: { createdAt: "asc" } } } },
+      race: {
+        select: {
+          id: true,
+          name: true,
+          summary: true,
+          abilities: true,
+        },
+      },
+      memberships: {
+        include: {
+          faction: { select: { id: true, name: true, summary: true } },
+        },
+      },
+    },
   });
   if (!entity) return NextResponse.json({ error: "不存在" }, { status: 404 });
 
@@ -45,7 +89,29 @@ export async function GET(
     },
   });
 
-  return NextResponse.json({ entity, chronicle });
+  const { abilities, race, memberships, ...entityFields } = entity;
+  const ownAbilities = abilities.map(normalizePersistedAbility);
+  const characterAbilities = entity.type === "character"
+    ? resolveEffectiveAbilities({
+      raceAbilities: (race?.abilities ?? []).map(normalizePersistedAbility),
+      characterAbilities: ownAbilities,
+    })
+    : ownAbilities;
+
+  return NextResponse.json({
+    entity: {
+      ...entityFields,
+      abilities: projectAbilitiesForPlayer(characterAbilities),
+      ...(entity.type === "character"
+        ? {
+          race: race === null ? null : { id: race.id, name: race.name, summary: race.summary },
+          memberships,
+          abilityEvents: projectVisibleAbilityEvents(abilities),
+        }
+        : {}),
+    },
+    chronicle,
+  });
 }
 
 export async function PATCH(
