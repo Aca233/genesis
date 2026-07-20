@@ -10,6 +10,8 @@ import {
   type AbilityStoredRecord,
   type AppliedAbilityChange,
 } from "./mutations";
+import { z } from "zod";
+import { AbilityOptimisticConflictError } from "./mutations";
 import { AbilityValidationError } from "./validator";
 
 export type AbilityExtractionOwner = {
@@ -79,8 +81,12 @@ function assertEvidence(
 }
 
 const TYPE_PATTERNS: Record<AbilityExtractionChange["type"], readonly RegExp[]> = {
-  awakened: [/觉醒|苏醒|初(?:次|度).{0,4}(?:发动|显现)|终于能/],
-  learned: [/习得|学会|掌握|传授|授予|传承|教导|拜师/, /终于(?:能|可以|会)(?:以|用|施展)?/],
+  awakened: [/觉醒|苏醒|初(?:次|度).{0,6}(?:发动|显现)|终于(?:能|可以)/],
+  learned: [
+    /习得|学会|掌握|传授|授予|传承|教导|拜师/,
+    /终于(?:能|可以|会)(?:以|用|施展)?/,
+    /施展.{0,24}(?:越过|完成|成功|击败|抵达|救下|打开|穿过|登上)/,
+  ],
   improved: [/提升|精进|纯熟|熟练|突破|苦修|训练|演练|磨炼|臻于|更(?:快|强|稳|熟)/],
   mutated: [/变异|异变|突变|蜕变|扭曲|变成|化作/],
   impaired: [/受损|受伤|削弱|衰退|失灵|残缺|不再灵便/],
@@ -91,9 +97,18 @@ const TYPE_PATTERNS: Record<AbilityExtractionChange["type"], readonly RegExp[]> 
   deprecated: [/废弃|废止|淘汰|弃用|失传|不再传承/],
 };
 
-const CLAUSE_SPLIT = /[。！？!?；;\n]+/u;
-const OBSERVER_LINK = /(?:看见|看到|目睹|听说|发现|得知|见证).{0,16}(?:终于|已经|开始|能够|能以|学会|习得|掌握)/u;
-const PRONOUN_LINK = /^(?:他|她|其|本人|自己).{0,10}(?:终于|已经|开始|能够|能以|学会|习得|掌握|觉醒|失去|封印)/u;
+const SENTENCE_SPLIT = /[。！？!?；;\n]+/u;
+const EXPLICIT_OBSERVER = /(?:在旁|一旁|旁边).{0,6}(?:观看|观望|旁观|目睹|听闻)|(?:观看|观望|旁观|目睹|听闻).{0,6}(?:在旁|一旁|旁边)|(?:看见|看到|目睹|听闻|听说|见证).{0,20}(?:终于|已经|开始|能够|能以|学会|习得|掌握)/u;
+const SUBJECT_PRONOUN = /^(?:他|她|其|此人)(?=[，,]?).{0,12}/u;
+
+function firstPatternIndex(sentence: string, patterns: readonly RegExp[]): number {
+  let result = -1;
+  for (const pattern of patterns) {
+    const match = pattern.exec(sentence);
+    if (match && (result < 0 || match.index < result)) result = match.index;
+  }
+  return result;
+}
 
 function identityNames(owner: AbilityExtractionOwner): string[] {
   return [owner.name, ...owner.aliases].filter(Boolean);
@@ -107,22 +122,36 @@ function assertRelevantEvidence(
   source: AbilityStoredRecord | null,
 ): void {
   const abilityNames = [...new Set([ability.name, source?.name].filter((value): value is string => Boolean(value)))];
-  const clauses = evidence.split(CLAUSE_SPLIT).map((clause) => clause.trim()).filter(Boolean);
-  const valid = clauses.some((clause, index) => {
-    const fullAbility = abilityNames.some((name) => clause.includes(name));
-    const ownerMention = identityNames(owner).find((name) => clause.includes(name));
-    const previousOwnsPronoun = index > 0 && identityNames(owner).some((name) => clauses[index - 1]!.includes(name));
-    const actorLinked = ownerMention !== undefined
-      ? !OBSERVER_LINK.test(clause.slice(clause.indexOf(ownerMention) + ownerMention.length))
-      : previousOwnsPronoun && PRONOUN_LINK.test(clause);
-    const typeLinked = TYPE_PATTERNS[change.type].some((pattern) => pattern.test(clause));
-    const structuredClue = Object.values(change.patch).some((value) =>
-      typeof value === "string" && value.length >= 2 && clause.includes(value),
-    );
-    return fullAbility && actorLinked && (typeLinked || structuredClue);
+  const sentences = evidence.split(SENTENCE_SPLIT).map((sentence) => sentence.trim()).filter(Boolean);
+  const names = identityNames(owner);
+  const valid = sentences.some((sentence, index) => {
+    const abilityIndex = Math.min(...abilityNames.map((name) => {
+      const found = sentence.indexOf(name);
+      return found < 0 ? Number.POSITIVE_INFINITY : found;
+    }));
+    if (!Number.isFinite(abilityIndex)) return false;
+
+    const ownerPositions = names.map((name) => sentence.indexOf(name)).filter((position) => position >= 0);
+    const ownerIndex = ownerPositions.length ? Math.min(...ownerPositions) : -1;
+    if (ownerIndex >= 0 && EXPLICIT_OBSERVER.test(sentence.slice(ownerIndex))) return false;
+
+    const actionIndex = firstPatternIndex(sentence, TYPE_PATTERNS[change.type]);
+    const structuredIndex = Object.values(change.patch)
+      .filter((value): value is string => typeof value === "string" && value.length >= 2)
+      .map((value) => sentence.indexOf(value))
+      .filter((position) => position >= 0)
+      .sort((left, right) => left - right)[0] ?? -1;
+    const changeIndex = actionIndex >= 0 ? actionIndex : structuredIndex;
+    if (changeIndex < 0) return false;
+
+    const directActor = ownerIndex >= 0 && ownerIndex < changeIndex;
+    const antecedentOwner = index > 0 && names.some((name) => sentences[index - 1]!.includes(name));
+    const pronoun = SUBJECT_PRONOUN.exec(sentence);
+    const pronounActor = antecedentOwner && pronoun !== null && pronoun.index < changeIndex && pronoun.index < abilityIndex;
+    return directActor || pronounActor;
   });
   if (!valid) {
-    throw new AbilityValidationError("正文证据必须在同一子句明确连接拥有者行动、完整能力名与事件变化");
+    throw new AbilityValidationError("正文证据必须以完整能力名和事件结果明确证明拥有者是行动者，而非旁观者");
   }
 }
 
@@ -303,7 +332,15 @@ export async function applyAbilityExtraction(
       });
       applied.push(result);
     } catch (error) {
-      rejected.push({ index, change, reason: errorMessage(error) });
+      if (
+        error instanceof AbilityValidationError ||
+        error instanceof AbilityOptimisticConflictError ||
+        error instanceof z.ZodError
+      ) {
+        rejected.push({ index, change, reason: errorMessage(error) });
+        continue;
+      }
+      throw error;
     }
   }
 

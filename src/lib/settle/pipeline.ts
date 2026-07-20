@@ -10,7 +10,7 @@ import {
   EXTRACTION_MAX_ABILITIES,
   EXTRACTION_MAX_ENTITIES,
   EXTRACTION_MAX_OUTPUT_TOKENS,
-  boundExtractionMessages,
+  extractionMessageWindows,
   mentionedOwnerIds,
 } from "@/lib/settle/extraction-context";
 import {
@@ -20,6 +20,7 @@ import {
 } from "@/lib/prompts/pantheon";
 import {
   ExtractionSchema,
+  type Extraction,
   ChronicleSchema,
   extractorSystem,
   extractorUserPrompt,
@@ -452,7 +453,7 @@ async function runExtraction(
   chapterText: Awaited<ReturnType<typeof chapterProse>>,
   scaleNote: string,
 ) {
-  const messages = boundExtractionMessages(chapterText.messages);
+  const messageWindows = extractionMessageWindows(chapterText.messages);
   const [entityIndex, godIndex] = await Promise.all([
     prisma.entity.findMany({
       where: { timelineId, type: { in: ["race", "character"] } },
@@ -463,7 +464,7 @@ async function runExtraction(
       select: { id: true, name: true, aliases: true, rank: true, isPlayer: true },
     }),
   ]);
-  const relevantIds = mentionedOwnerIds(messages, [...entityIndex, ...godIndex.map((god) => ({
+  const relevantIds = mentionedOwnerIds(chapterText.messages, [...entityIndex, ...godIndex.map((god) => ({
     ...god, type: "god", raceId: null,
   }))]);
   const relevantGodIds = godIndex.filter((god) => relevantIds.has(god.id)).map((god) => god.id);
@@ -511,37 +512,51 @@ async function runExtraction(
     .flatMap((e) => e.lockedPaths.map((p) => `${e.name}.${p}`))
     .join(", ");
 
-  const extraction = await completeStructured("backstage", {
-    task: "extract",
-    system: extractorSystem(),
-    user: extractorUserPrompt({
-      chapterMessages: messages,
-      knownEntities: entities
-        .map((entity) => {
-          const race = entity.raceId
-            ? entities.find((candidate) => candidate.id === entity.raceId)?.name ?? entity.raceId
-            : "—";
-          return `${entity.name}(${entity.type}) race=${race} 别名[${entity.aliases.join("、")}]: ${entity.summary}`;
-        })
-        .join("\n"),
-      knownGods: gods
-        .map((g) => `${g.name}${g.isPlayer ? "（玩家神）" : ""} rank=${g.rank}`)
-        .join("\n"),
-      knownAbilities: abilities
-        .map((ability) => {
-          const owner = ability.entity?.name ?? ability.god?.name ?? "未知拥有者";
-          const source = ability.sourceAbility
-            ? `${ability.sourceAbility.name} [${ability.sourceAbilityId}]`
-            : "—";
-          return `[${ability.id}] ${owner}·${ability.name} kind=${ability.kind} mastery=${ability.mastery} state=${ability.state} source=${source} locked=[${ability.lockedFields.join(", ")}] version=${ability.version}`;
-        })
-        .join("\n"),
-      lockedPaths: lockedList,
-      scaleNote,
-    }),
-    schema: ExtractionSchema,
-    maxTokens: EXTRACTION_MAX_OUTPUT_TOKENS,
-  });
+  const extraction = {
+    newEntities: [] as Array<Extraction["newEntities"][number]>,
+    entityUpdates: [] as Array<Extraction["entityUpdates"][number]>,
+    godUpdates: [] as Array<Extraction["godUpdates"][number]>,
+    revealSections: [] as Array<Extraction["revealSections"][number]>,
+    abilityChanges: [] as unknown[],
+  };
+  for (const messages of messageWindows) {
+    const windowExtraction = await completeStructured("backstage", {
+      task: "extract",
+      system: extractorSystem(),
+      user: extractorUserPrompt({
+        chapterMessages: messages,
+        knownEntities: entities
+          .map((entity) => {
+            const race = entity.raceId
+              ? entities.find((candidate) => candidate.id === entity.raceId)?.name ?? entity.raceId
+              : "—";
+            return `${entity.name}(${entity.type}) race=${race} 别名[${entity.aliases.join("、")}]: ${entity.summary}`;
+          })
+          .join("\n"),
+        knownGods: gods
+          .map((g) => `${g.name}${g.isPlayer ? "（玩家神）" : ""} rank=${g.rank}`)
+          .join("\n"),
+        knownAbilities: abilities
+          .map((ability) => {
+            const owner = ability.entity?.name ?? ability.god?.name ?? "未知拥有者";
+            const source = ability.sourceAbility
+              ? `${ability.sourceAbility.name} [${ability.sourceAbilityId}]`
+              : "—";
+            return `[${ability.id}] ${owner}·${ability.name} kind=${ability.kind} mastery=${ability.mastery} state=${ability.state} source=${source} locked=[${ability.lockedFields.join(", ")}] version=${ability.version}`;
+          })
+          .join("\n"),
+        lockedPaths: lockedList,
+        scaleNote,
+      }),
+      schema: ExtractionSchema,
+      maxTokens: EXTRACTION_MAX_OUTPUT_TOKENS,
+    });
+    extraction.newEntities.push(...windowExtraction.newEntities);
+    extraction.entityUpdates.push(...windowExtraction.entityUpdates);
+    extraction.godUpdates.push(...windowExtraction.godUpdates);
+    extraction.revealSections.push(...windowExtraction.revealSections);
+    extraction.abilityChanges.push(...windowExtraction.abilityChanges);
+  }
 
   const byName = new Map<string, (typeof entities)[number]>();
   for (const e of entities) {
@@ -668,7 +683,7 @@ async function runExtraction(
       timelineId,
       chapterId,
       owners,
-      messages,
+      messages: chapterText.messages,
       changes: extraction.abilityChanges,
     },
   );

@@ -373,7 +373,7 @@ it("拒绝虽然来自正文但与 improved 能力和事件无关的长引用", 
   });
 
   expect(result.applied).toHaveLength(0);
-  expect(result.rejected[0]?.reason).toMatch(/相关|支撑|能力名|事件/);
+  expect(result.rejected[0]?.reason).toMatch(/相关|支撑|能力名|事件|行动者/);
 });
 
 it("逐项拒绝 malformed abilityChanges 且继续应用合法项", async () => {
@@ -421,4 +421,36 @@ it("拒绝观察者被误认成能力行动者，接受 owner 与完整能力名
     changes: [{ ownerName: "阿岚", sourceAbilityId: "tradition-native", type: "learned", patch: { mastery: "novice" }, evidenceMessageIndex: 10, evidence: "阿岚终于能以踏岩步稳稳越过断崖，长老颔首认可" }],
   });
   expect(valid.applied).toHaveLength(1);
+});
+
+it("拒绝师父行动而阿岚仅在旁观看，接受前句 owner 后句代词施展的 learned", async () => {
+  const fixture = extractionFixture();
+  fixture.messages.push(
+    { id: "message-11", index: 11, scale: "scene", content: "师父苦修踏岩步越过断崖，阿岚在旁观看。" },
+    { id: "message-12", index: 12, scale: "scene", content: "阿岚掌握诀窍。她施展踏岩步越过断崖。" },
+  );
+  const observer = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ ownerName: "阿岚", sourceAbilityId: "tradition-native", type: "learned", patch: { mastery: "novice" }, evidenceMessageIndex: 11, evidence: "师父苦修踏岩步越过断崖，阿岚在旁观看" }],
+  });
+  expect(observer.applied).toHaveLength(0);
+  expect(observer.rejected[0]?.reason).toMatch(/行动者|拥有者|旁观/);
+
+  const actor = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ ownerName: "阿岚", sourceAbilityId: "tradition-native", type: "learned", patch: { mastery: "novice" }, evidenceMessageIndex: 12, evidence: "阿岚掌握诀窍。她施展踏岩步越过断崖" }],
+  });
+  expect(actor.applied).toHaveLength(1);
+});
+
+it.each([
+  new Error("transaction unavailable"),
+  Object.assign(new Error("database unreachable"), { code: "P1001" }),
+])("基础设施错误 %s 透传而不是进入 rejected", async (failure) => {
+  const fixture = extractionFixture();
+  const client = { ...fixture.client, $transaction: async () => { throw failure; } } as AbilityExtractionClient;
+  await expect(applyAbilityExtraction(client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ abilityId: "trainable-personal", ownerName: "阿岚", type: "improved", patch: { mastery: "adept" }, evidenceMessageIndex: 4, evidence: "阿岚在三年苦修后独自凿成七重石阵，凿阵术由生涩臻于纯熟" }],
+  })).rejects.toBe(failure);
 });

@@ -15,6 +15,38 @@ export type ExtractionOwnerIndex = {
   raceId: string | null;
 };
 
+const EXTRACTION_CHUNK_OVERLAP = 200;
+
+function messageChunks<T extends ExtractorChapterMessage>(message: T): T[] {
+  if (message.content.length <= EXTRACTION_MAX_MESSAGE_CHARS) return [{ ...message }];
+  const chunks: T[] = [];
+  const step = EXTRACTION_MAX_MESSAGE_CHARS - EXTRACTION_CHUNK_OVERLAP;
+  for (let start = 0; start < message.content.length; start += step) {
+    chunks.push({ ...message, content: message.content.slice(start, start + EXTRACTION_MAX_MESSAGE_CHARS) });
+    if (start + EXTRACTION_MAX_MESSAGE_CHARS >= message.content.length) break;
+  }
+  return chunks;
+}
+
+/** Covers the entire chapter in bounded chronological windows without renumbering messages. */
+export function extractionMessageWindows<T extends ExtractorChapterMessage>(messages: readonly T[]): T[][] {
+  const chunks = messages.flatMap(messageChunks);
+  const windows: T[][] = [];
+  let window: T[] = [];
+  let chars = 0;
+  for (const chunk of chunks) {
+    if (window.length > 0 && (window.length >= EXTRACTION_MAX_MESSAGES || chars + chunk.content.length > EXTRACTION_MAX_TOTAL_CHARS)) {
+      windows.push(window);
+      window = [];
+      chars = 0;
+    }
+    window.push(chunk);
+    chars += chunk.content.length;
+  }
+  if (window.length > 0) windows.push(window);
+  return windows;
+}
+
 export function boundExtractionMessages<T extends ExtractorChapterMessage>(messages: readonly T[]): T[] {
   const newest = messages.slice(-EXTRACTION_MAX_MESSAGES);
   let remaining = EXTRACTION_MAX_TOTAL_CHARS;

@@ -1,9 +1,12 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-const responses = vi.hoisted(() => ({ extract: {} as Record<string, unknown> }));
+const responses = vi.hoisted(() => ({
+  extract: {} as Record<string, unknown>,
+  extractHandler: undefined as undefined | ((user: string) => Record<string, unknown>),
+}));
 vi.mock("@/lib/llm/structured", () => ({
-  completeStructured: vi.fn(async (_slot: string, request: { task: string }) => {
-    if (request.task === "extract") return responses.extract;
+  completeStructured: vi.fn(async (_slot: string, request: { task: string; user: string }) => {
+    if (request.task === "extract") return responses.extractHandler?.(request.user) ?? responses.extract;
     if (request.task === "chronicle") {
       return { entries: [{ yearLabel: "元年", text: "阿岚习得踏岩步。", entityNames: ["阿岚"], godNames: [] }], epilogue: "传承已续。", chapterTitle: "石阶传承" };
     }
@@ -68,6 +71,40 @@ it("整体 extraction 基础设施失败时停留 extract checkpoint 且不运�
       expect.anything(), expect.objectContaining({ task: "chronicle" }),
     );
   } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+
+it("多窗口会抽取早期消息与超长消息前缀中的能力变化", async () => {
+  const data = await fixture();
+  const earlyAbility = await prisma.ability.create({
+    data: { timelineId: data.timeline.id, entityId: data.character.id, name: "凿阵术", kind: "personal", effect: "开凿阵基", trigger: "施工", cost: "体力", limitations: "需要石材", mastery: "novice", state: "normal", visibility: "known", lockedFields: [] },
+  });
+  const prefixAbility = await prisma.ability.create({
+    data: { timelineId: data.timeline.id, entityId: data.character.id, name: "听石诀", kind: "personal", effect: "听辨岩层", trigger: "触石", cost: "专注", limitations: "嘈杂时失准", mastery: "novice", state: "normal", visibility: "known", lockedFields: [] },
+  });
+  const early = await prisma.message.create({ data: { chapterId: data.chapter.id, index: 20, role: "narrator", content: "阿岚苦修凿阵术，终于将凿阵术磨炼得更加纯熟。", scale: "years" } });
+  await prisma.message.createMany({ data: Array.from({ length: 45 }, (_, offset) => ({ chapterId: data.chapter.id, index: 21 + offset, role: "narrator", content: `中段行旅记录${offset}。`, scale: "scene" })) });
+  const long = await prisma.message.create({ data: { chapterId: data.chapter.id, index: 80, role: "narrator", content: "阿岚反复演练听石诀，听石诀变得更加纯熟。" + "山风掠过岩壁。".repeat(1200), scale: "years" } });
+  const empty = { newEntities: [], entityUpdates: [], godUpdates: [], revealSections: [], abilityChanges: [] };
+  responses.extractHandler = (user) => {
+    if (user.includes("阿岚苦修凿阵术")) return { ...empty, abilityChanges: [{ abilityId: earlyAbility.id, ownerName: "阿岚", type: "improved", patch: { mastery: "adept" }, evidenceMessageIndex: early.index, evidence: "阿岚苦修凿阵术，终于将凿阵术磨炼得更加纯熟" }] };
+    if (user.includes("阿岚反复演练听石诀")) return { ...empty, abilityChanges: [{ abilityId: prefixAbility.id, ownerName: "阿岚", type: "improved", patch: { mastery: "adept" }, evidenceMessageIndex: long.index, evidence: "阿岚反复演练听石诀，听石诀变得更加纯熟" }] };
+    return empty;
+  };
+  try {
+    await settle(data.chapter.id);
+    const [earlyAfter, prefixAfter, events] = await Promise.all([
+      prisma.ability.findUnique({ where: { id: earlyAbility.id } }),
+      prisma.ability.findUnique({ where: { id: prefixAbility.id } }),
+      prisma.abilityEvent.findMany({ where: { abilityId: { in: [earlyAbility.id, prefixAbility.id] } } }),
+    ]);
+    expect(earlyAfter).toMatchObject({ mastery: "adept" });
+    expect(prefixAfter).toMatchObject({ mastery: "adept" });
+    expect(events.map((event) => event.messageId)).toEqual(expect.arrayContaining([early.id, long.id]));
+  } finally {
+    responses.extractHandler = undefined;
     await prisma.world.delete({ where: { id: data.world.id } });
   }
 });
