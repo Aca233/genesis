@@ -162,8 +162,7 @@ function changeResultIndex(text: string, change: AbilityExtractionChange): numbe
     if (mutation === null || changedValue < mutation.index) return -1;
     return mutation.index;
   }
-  const structured = structuredValueIndex(text, change);
-  return action >= 0 ? action : structured;
+  return action;
 }
 
 function hasCompetingActor(

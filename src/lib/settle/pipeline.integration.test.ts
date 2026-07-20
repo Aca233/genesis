@@ -168,3 +168,44 @@ it("多窗口重复返回同一新实体时只创建一次，重试仍不重复"
     await prisma.world.delete({ where: { id: data.world.id } });
   }
 });
+
+
+it("多窗口实体更新会累积去重 aliases，标量 section 冲突按窗口顺序 latest wins", async () => {
+  const data = await fixture();
+  await prisma.message.createMany({
+    data: Array.from({ length: 45 }, (_, offset) => ({
+      chapterId: data.chapter.id,
+      index: 100 + offset,
+      role: "narrator",
+      content: `阿岚多窗口状态记录${offset}。`,
+      scale: "scene",
+    })),
+  });
+  let extractionCall = 0;
+  responses.extractHandler = () => {
+    extractionCall += 1;
+    const first = extractionCall === 1;
+    return {
+      newEntities: [], godUpdates: [], revealSections: [], abilityChanges: [],
+      entityUpdates: [{
+        name: "阿岚",
+        sectionDeltas: [{ key: "overview", title: "近况", text: first ? "第一窗口" : "第二窗口" }],
+        newAliases: first ? ["石行者", "共同别名"] : ["断崖客", "共同别名"],
+        scenePresent: true,
+      }],
+    };
+  };
+  try {
+    await settle(data.chapter.id);
+    const [entity, section] = await Promise.all([
+      prisma.entity.findUnique({ where: { id: data.character.id } }),
+      prisma.entitySection.findUnique({ where: { entityId_key: { entityId: data.character.id, key: "overview" } } }),
+    ]);
+    expect(entity?.aliases).toEqual(expect.arrayContaining(["石行者", "断崖客", "共同别名"]));
+    expect(entity?.aliases.filter((alias) => alias === "共同别名")).toHaveLength(1);
+    expect(section?.content).toMatchObject({ title: "近况", text: "第二窗口" });
+  } finally {
+    responses.extractHandler = undefined;
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});

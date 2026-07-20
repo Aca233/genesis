@@ -603,10 +603,11 @@ async function runExtraction(
       if (!target) continue;
       const locked = new Set(target.lockedPaths);
 
-      await tx.entity.update({
+      const updated = await tx.entity.update({
         where: { id: target.id },
         data: {
           ...(up.summary && !locked.has("summary") ? { summary: up.summary.slice(0, 200) } : {}),
+          // Aliases are list-like: preserve first-seen order and dedupe across windows.
           ...(up.newAliases?.length
             ? { aliases: [...new Set([...target.aliases, ...up.newAliases])] }
             : {}),
@@ -614,9 +615,16 @@ async function runExtraction(
           scenePresence: up.scenePresent,
           heat: "active", // 有更新即复活
         },
+        select: {
+          id: true, name: true, type: true, aliases: true, summary: true,
+          lockedPaths: true, raceId: true,
+        },
       });
+      byName.set(updated.name, updated);
+      for (const alias of updated.aliases) byName.set(alias, updated);
       for (const d of up.sectionDeltas) {
         if (locked.has(d.key)) continue; // player_locked 保护
+        // Section title/text are scalar snapshots: later chronological windows win.
         await tx.entitySection.upsert({
           where: { entityId_key: { entityId: target.id, key: d.key } },
           create: {

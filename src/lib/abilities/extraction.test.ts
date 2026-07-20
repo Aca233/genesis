@@ -487,6 +487,42 @@ it("拒绝 owner 命令其他实体施展能力，接受 owner 主语的能力�
   expect(accepted.applied).toHaveLength(1);
 });
 
+it.each([
+  ["awakened", { mastery: "adept" }, "adept"],
+  ["learned", { mastery: "novice" }, "novice"],
+  ["improved", { mastery: "adept" }, "adept"],
+  ["impaired", { effect: "隔空碎岩" }, "隔空碎岩"],
+  ["sealed", { state: "sealed" }, "sealed"],
+  ["restored", { state: "normal" }, "normal"],
+  ["lost", { state: "lost" }, "lost"],
+  ["revealed", { visibility: "known" }, "known"],
+  ["deprecated", { state: "deprecated" }, "deprecated"],
+] as const)("%s 不能仅靠证据复述 patch 字符串获得事件语义", async (type, patch, value) => {
+  const fixture = extractionFixture();
+  fixture.messages.push({
+    id: `message-patch-${type}`,
+    index: 30,
+    scale: "scene",
+    content: `阿岚的凿阵术档案字段写着${value}，除此之外没有发生任何事情。`,
+  });
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: fixture.owners,
+    messages: fixture.messages,
+    changes: [{
+      abilityId: "trainable-personal",
+      ownerName: "阿岚",
+      type,
+      patch,
+      evidenceMessageIndex: 30,
+      evidence: `阿岚的凿阵术档案字段写着${value}，除此之外没有发生任何事情`,
+    }],
+  });
+  expect(result.applied).toHaveLength(0);
+  expect(result.rejected[0]?.reason).toMatch(/事件|结果|行动/);
+});
+
 it("mutated 必须有与变更字段相连的明确变化结果，不能只复述 patch", async () => {
   const unsupported = extractionFixture();
   unsupported.messages.push({
