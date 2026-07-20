@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   projectAbilitiesForPlayer,
   projectAbilityForPlayer,
 } from "./visibility";
+import type { RumoredAbilityProjection } from "./types";
 
 const ability = {
   id: "night-sight",
@@ -33,7 +34,9 @@ describe("projectAbilityForPlayer", () => {
       rumorText: "据说她能看穿永夜。",
     };
 
-    expect(projectAbilityForPlayer(rumored)).toEqual({
+    const projection = projectAbilityForPlayer(rumored);
+
+    expect(projection).toEqual({
       id: "night-sight",
       name: "夜视",
       kind: "racial_innate",
@@ -41,6 +44,15 @@ describe("projectAbilityForPlayer", () => {
       rumorText: "据说她能看穿永夜。",
       state: "impaired",
     });
+
+    if (!projection || projection.visibility !== "rumored") {
+      throw new Error("应返回传闻投影");
+    }
+
+    expectTypeOf(projection).toEqualTypeOf<RumoredAbilityProjection>();
+    expect("effect" in projection).toBe(false);
+    expect("mastery" in projection).toBe(false);
+    expect("sourceAbilityId" in projection).toBe(false);
   });
 
   it("hidden 能力不会投影给玩家", () => {

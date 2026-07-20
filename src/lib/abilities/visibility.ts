@@ -1,6 +1,7 @@
 import type {
   AbilityInput,
   AbilityProjection,
+  KnownAbilityProjection,
   RumoredAbilityProjection,
 } from "./types";
 
@@ -15,7 +16,7 @@ export function projectAbilityForPlayer(
 ): AbilityProjection | null {
   switch (ability.visibility) {
     case "known":
-      return ability;
+      return toKnownProjection(ability);
     case "rumored":
       return toRumoredProjection(ability);
     case "hidden":
@@ -33,12 +34,16 @@ export function projectAbilitiesForPlayer(
   });
 }
 
+function toKnownProjection(ability: AbilityInput): KnownAbilityProjection {
+  return { ...ability, visibility: "known" };
+}
+
 function toRumoredProjection(ability: AbilityInput): RumoredAbilityProjection {
   return {
     id: ability.id,
     name: ability.name,
     kind: ability.kind,
-    visibility: ability.visibility,
+    visibility: "rumored",
     rumorText: ability.rumorText,
     state: ability.state,
   };
