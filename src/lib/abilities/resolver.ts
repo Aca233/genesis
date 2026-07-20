@@ -13,6 +13,27 @@ function isUsable(ability: AbilityInput): boolean {
   );
 }
 
+function assertUniqueDerivedSources(
+  characterAbilities: readonly AbilityInput[],
+): void {
+  const sourceIds = new Set<string>();
+
+  for (const ability of characterAbilities) {
+    if (
+      (ability.kind !== "racial_innate" && ability.kind !== "racial_tradition") ||
+      ability.sourceAbilityId === null
+    ) {
+      continue;
+    }
+
+    if (sourceIds.has(ability.sourceAbilityId)) {
+      throw new Error(`重复能力来源 "${ability.sourceAbilityId}"`);
+    }
+
+    sourceIds.add(ability.sourceAbilityId);
+  }
+}
+
 /**
  * Resolves a character's currently usable abilities without querying storage.
  * Inputs must already have passed through normalizePersistedAbility at the
@@ -22,6 +43,8 @@ export function resolveEffectiveAbilities({
   raceAbilities = [],
   characterAbilities = [],
 }: ResolveEffectiveAbilitiesInput): EffectiveAbility[] {
+  assertUniqueDerivedSources(characterAbilities);
+
   const innateTemplates = raceAbilities.filter(
     (ability) => ability.kind === "racial_innate",
   );
@@ -35,12 +58,6 @@ export function resolveEffectiveAbilities({
       !innateIds.has(ability.sourceAbilityId)
     ) {
       continue;
-    }
-
-    if (overridesBySourceId.has(ability.sourceAbilityId)) {
-      throw new Error(
-        `重复人物覆写主种族先天能力 "${ability.sourceAbilityId}"`,
-      );
     }
 
     overridesBySourceId.set(ability.sourceAbilityId, ability);

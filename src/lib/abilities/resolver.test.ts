@@ -132,6 +132,52 @@ describe("resolveEffectiveAbilities", () => {
     ).toThrow(/重复.*night-sight/);
   });
 
+  it("拒绝两条族群技艺引用同一能力来源", () => {
+    expect(() =>
+      resolveEffectiveAbilities({
+        characterAbilities: [
+          ability({
+            id: "shadow-step-novice",
+            sourceAbilityId: "shadow-step",
+            kind: "racial_tradition",
+            name: "影行",
+            mastery: "novice",
+          }),
+          ability({
+            id: "shadow-step-adept",
+            sourceAbilityId: "shadow-step",
+            kind: "racial_tradition",
+            name: "影行",
+          }),
+        ],
+      }),
+    ).toThrow(/重复能力来源.*shadow-step/);
+  });
+
+  it("拒绝两条特殊血脉能力引用同一非主种族来源", () => {
+    expect(() =>
+      resolveEffectiveAbilities({
+        raceAbilities: [
+          ability({ id: "night-sight", kind: "racial_innate", name: "夜视" }),
+        ],
+        characterAbilities: [
+          ability({
+            id: "celestial-bloodline-a",
+            sourceAbilityId: "celestial-spark",
+            kind: "racial_innate",
+            name: "星火血脉",
+          }),
+          ability({
+            id: "celestial-bloodline-b",
+            sourceAbilityId: "celestial-spark",
+            kind: "racial_innate",
+            name: "星火余烬",
+          }),
+        ],
+      }),
+    ).toThrow(/重复能力来源.*celestial-spark/);
+  });
+
   it("过滤未觉醒或不可用能力，但保留受损能力", () => {
     const result = resolveEffectiveAbilities({
       raceAbilities: [
