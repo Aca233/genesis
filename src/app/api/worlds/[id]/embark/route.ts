@@ -217,6 +217,28 @@ export interface EmbarkTransactionRunner {
   $transaction<T>(callback: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T>;
 }
 
+export class EmbarkConflictError extends Error {
+  override name = "EmbarkConflictError";
+}
+
+export class EmbarkDraftError extends Error {
+  override name = "EmbarkDraftError";
+}
+
+/** Atomically reserves a draft world until the enclosing transaction commits. */
+export async function claimDraftWorld(
+  tx: Prisma.TransactionClient,
+  worldId: string,
+): Promise<void> {
+  const { count } = await tx.world.updateMany({
+    where: { id: worldId, status: "draft" },
+    data: { status: "embarking" },
+  });
+  if (count !== 1) {
+    throw new EmbarkConflictError("该世界已开局");
+  }
+}
+
 export function runEmbarkTransaction(
   runner: EmbarkTransactionRunner,
   worldId: string,
@@ -225,31 +247,50 @@ export function runEmbarkTransaction(
   return runner.$transaction((tx) => materializeEmbarkDeck(tx, worldId, deck));
 }
 
+/**
+ * Claims the draft and materializes it in one database transaction. A rollback
+ * restores the temporary "embarking" status together with every created row.
+ */
+export function runClaimedEmbarkTransaction(
+  runner: EmbarkTransactionRunner,
+  worldId: string,
+  loadDeck: (tx: Prisma.TransactionClient) => Promise<WorldDeck>,
+): Promise<{ timelineId: string; chapterId: string }> {
+  return runner.$transaction(async (tx) => {
+    await claimDraftWorld(tx, worldId);
+    const deck = await loadDeck(tx);
+    return materializeEmbarkDeck(tx, worldId, deck);
+  });
+}
+
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const world = await prisma.world.findUnique({ where: { id } });
-  if (!world?.draftDeck) {
-    return NextResponse.json({ error: "世界草稿不存在" }, { status: 404 });
-  }
-  if (world.status !== "draft") {
-    return NextResponse.json({ error: "该世界已开局" }, { status: 409 });
-  }
-
-  let deck: WorldDeck;
   try {
-    deck = parsePersistedWorldDeck(world.draftDeck);
-    validateDeckReferences(deck);
-  } catch {
-    return NextResponse.json({ error: "草稿卡组已损坏" }, { status: 500 });
-  }
+    const result = await runClaimedEmbarkTransaction(prisma, id, async (tx) => {
+      const world = await tx.world.findUnique({ where: { id } });
+      if (!world?.draftDeck) {
+        throw new EmbarkDraftError("世界草稿不存在");
+      }
 
-  try {
-    const result = await runEmbarkTransaction(prisma, world.id, deck);
+      const deck = parsePersistedWorldDeck(world.draftDeck);
+      validateDeckReferences(deck);
+      return deck;
+    });
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof EmbarkConflictError) {
+      const world = await prisma.world.findUnique({ where: { id }, select: { id: true } });
+      return NextResponse.json(
+        { error: world === null ? "世界草稿不存在" : "该世界已开局" },
+        { status: world === null ? 404 : 409 },
+      );
+    }
+    if (error instanceof EmbarkDraftError) {
+      return NextResponse.json({ error: "世界草稿不存在" }, { status: 404 });
+    }
     console.error("Failed to materialize embark deck", error);
     return NextResponse.json({ error: "开局物化失败" }, { status: 500 });
   }
