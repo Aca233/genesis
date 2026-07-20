@@ -113,6 +113,28 @@ type CharacterTraditionRefs = {
   learnedTraditionRefs: Array<{ sourceAbilityRef: string }>;
 };
 
+/** 封印中的隐藏能力不能在未破封时改为公开可见。 */
+export function canEditAbilityVisibility(
+  visibility: string,
+  sensitiveFieldsRevealed: boolean,
+): boolean {
+  return visibility !== "hidden" || sensitiveFieldsRevealed;
+}
+
+/** 严格卡组数量下限：到达下限后不能再删除。 */
+export function canRemoveAbility(length: number, minItems: number): boolean {
+  return length > minItems;
+}
+
+/** 严格卡组数量上限与来源约束：不满足任一条件时不能新增。 */
+export function canAddAbility(
+  length: number,
+  maxItems: number,
+  sourceAvailable = true,
+): boolean {
+  return length < maxItems && sourceAvailable;
+}
+
 /** 返回某个种族可供人物学习的族群技艺稳定引用。 */
 export function traditionAbilityRefsForRace(
   deck: RaceAbilityDeck,
@@ -122,6 +144,16 @@ export function traditionAbilityRefsForRace(
     .find((race) => race.ref === raceRef)
     ?.abilities.filter((ability) => ability.kind === "racial_tradition")
     .map((ability) => ability.ref) ?? [];
+}
+
+/** 取得任一可引用的先天模板；没有时显式返回 undefined，绝不生成空 ref。 */
+export function firstRacialInnateAbilityRef(
+  deck: RaceAbilityDeck,
+): string | undefined {
+  return deck.races
+    .flatMap((race) => race.abilities)
+    .find((ability) => ability.kind === "racial_innate")
+    ?.ref;
 }
 
 /**

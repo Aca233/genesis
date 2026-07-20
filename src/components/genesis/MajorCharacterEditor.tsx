@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import type { WorldDeck } from "@/lib/cards/schemas";
-import { changeCharacterRace, isPathLocked, traditionAbilityRefsForRace } from "./deck-utils";
+import {
+  changeCharacterRace,
+  firstRacialInnateAbilityRef,
+  isPathLocked,
+  traditionAbilityRefsForRace,
+} from "./deck-utils";
 import { AbilityEditor, AbilitySection } from "./AbilityEditor";
 import { ListField, SelectField, TextAreaField, TextField } from "./fields";
 
@@ -90,6 +95,7 @@ export function MajorCharacterEditor({ deck, index, lockedPaths, onEdit }: Props
         label: `${race.name} · ${ability.name} · ${ability.ref}`,
       })),
   );
+  const firstInnateRef = firstRacialInnateAbilityRef(deck);
 
   const selectedTraditions = character.learnedTraditionRefs.map((reference) => reference.sourceAbilityRef);
 
@@ -194,22 +200,29 @@ export function MajorCharacterEditor({ deck, index, lockedPaths, onEdit }: Props
         allowedKinds={["racial_innate"]}
         lockedPaths={lockedPaths}
         onEdit={onEdit}
-        createAbility={(ref) => ({
-          ref,
-          name: "新先天覆写",
-          kind: "racial_innate",
-          effect: "",
-          trigger: "",
-          cost: "无",
-          limitations: "",
-          mastery: "novice",
-          state: "normal",
-          visibility: "known",
-          rumorText: null,
-          lockedFields: [],
-          sourceAbilityRef: currentRace?.abilities.find((ability) => ability.kind === "racial_innate")?.ref ?? "",
-          bloodlineJustification: null,
-        })}
+        canAdd={firstInnateRef !== undefined}
+        addDisabledMessage="没有可引用的先天模板，无法新增先天覆写"
+        createAbility={(ref) => {
+          if (firstInnateRef === undefined) {
+            throw new Error("新增先天覆写前必须存在可引用的先天模板");
+          }
+          return {
+            ref,
+            name: "新先天覆写",
+            kind: "racial_innate",
+            effect: "",
+            trigger: "",
+            cost: "无",
+            limitations: "",
+            mastery: "novice",
+            state: "normal",
+            visibility: "known",
+            rumorText: null,
+            lockedFields: [],
+            sourceAbilityRef: firstInnateRef,
+            bloodlineJustification: null,
+          };
+        }}
       />
 
       <AbilitySection title="个人技能" />
@@ -219,6 +232,8 @@ export function MajorCharacterEditor({ deck, index, lockedPaths, onEdit }: Props
         allowedKinds={["personal"]}
         lockedPaths={lockedPaths}
         onEdit={onEdit}
+        minItems={2}
+        maxItems={5}
       />
     </>
   );

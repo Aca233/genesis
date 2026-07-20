@@ -91,6 +91,8 @@ export function PlayerGodEditor({ deck, lockedPaths, onEdit }: EditorProps) {
         allowedKinds={["divine"]}
         lockedPaths={lockedPaths}
         onEdit={onEdit}
+        minItems={3}
+        maxItems={6}
       />
     </>
   );
@@ -153,6 +155,8 @@ export function MajorGodEditor({
         lockedPaths={lockedPaths}
         onEdit={onEdit}
         sensitiveFieldsRevealed={agendaRevealed}
+        minItems={3}
+        maxItems={6}
       />
 
       <Sect title="议程（天机）" />
@@ -323,6 +327,8 @@ export function RaceEditor({
         allowedKinds={["racial_innate"]}
         lockedPaths={lockedPaths}
         onEdit={onEdit}
+        minItems={2}
+        maxItems={5}
       />
       <AbilitySection title="族群技艺" />
       <AbilityEditor
@@ -331,6 +337,8 @@ export function RaceEditor({
         allowedKinds={["racial_tradition"]}
         lockedPaths={lockedPaths}
         onEdit={onEdit}
+        minItems={2}
+        maxItems={5}
       />
     </>
   );
