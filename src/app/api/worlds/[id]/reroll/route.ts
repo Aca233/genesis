@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { completeStructured } from "@/lib/llm/structured";
-import { normalizeWorldDeck, WorldDeckSchema, DECK_CARD_KEYS, type WorldDeck } from "@/lib/cards/schemas";
+import { parsePersistedWorldDeck, WorldDeckSchema, DECK_CARD_KEYS, type WorldDeck } from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 import {
   GENESIS_SYSTEM,
@@ -88,7 +88,7 @@ export async function POST(
 
   let currentDeck: WorldDeck;
   try {
-    currentDeck = normalizeWorldDeck(world.draftDeck);
+    currentDeck = parsePersistedWorldDeck(world.draftDeck);
   } catch {
     return NextResponse.json({ error: "草稿卡组已损坏" }, { status: 500 });
   }

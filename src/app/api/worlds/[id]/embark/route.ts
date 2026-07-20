@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { normalizeWorldDeck, type WorldDeck } from "@/lib/cards/schemas";
+import { parsePersistedWorldDeck, type WorldDeck } from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 import { factionSections } from "@/lib/cards/faction-sections";
 
@@ -49,7 +49,7 @@ export async function POST(
 
   let deck: WorldDeck;
   try {
-    deck = normalizeWorldDeck(world.draftDeck);
+    deck = parsePersistedWorldDeck(world.draftDeck);
     validateDeckReferences(deck);
   } catch {
     return NextResponse.json({ error: "草稿卡组已损坏" }, { status: 500 });
@@ -183,7 +183,6 @@ export async function POST(
       data: {
         status: "playing",
         activeTimelineId: timeline.id,
-        draftDeck: deck as unknown as Prisma.InputJsonValue,
       },
     });
 

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { validateDeckReferences } from "@/lib/abilities/validator";
-import { WorldDeckSchema, normalizeWorldDeck } from "./schemas";
+import {
+  LegacyWorldDeckSchema,
+  WorldDeckSchema,
+  normalizeLegacyWorldDeck,
+  parsePersistedWorldDeck,
+} from "./schemas";
 
 function ability(ref: string, kind: "racial_innate" | "racial_tradition" | "personal" | "divine") {
   return {
@@ -208,6 +213,18 @@ describe("WorldDeck 能力与主要人物引用", () => {
     expect(WorldDeckSchema.safeParse(deck).success).toBe(false);
   });
 
+  it.each([
+    ["种族能力", (deck: ReturnType<typeof completeDeck>) => { deck.races[0]!.abilities = deck.races[0]!.abilities.slice(0, 1); }],
+    ["玩家神权", (deck: ReturnType<typeof completeDeck>) => { deck.playerGod.abilities = deck.playerGod.abilities.slice(0, 2); }],
+    ["主神神权", (deck: ReturnType<typeof completeDeck>) => { deck.majorGods[0]!.abilities = deck.majorGods[0]!.abilities.slice(0, 2); }],
+    ["主要人物", (deck: ReturnType<typeof completeDeck>) => { deck.majorCharacters = deck.majorCharacters.slice(0, 5); }],
+    ["个人技能", (deck: ReturnType<typeof completeDeck>) => { deck.majorCharacters[0]!.abilities = deck.majorCharacters[0]!.abilities.slice(0, 1); }],
+  ])("严格的新创世卡组拒绝不足数量的%s", (_label, mutate) => {
+    const deck = completeDeck();
+    mutate(deck);
+    expect(WorldDeckSchema.safeParse(deck).success).toBe(false);
+  });
+
   it("将旧草稿确定性归一化为可保存的新格式，不凭空生成角色或能力", () => {
     const legacy = completeDeck() as Record<string, unknown>;
     const playerGod = legacy.playerGod as Record<string, unknown>;
@@ -228,7 +245,10 @@ describe("WorldDeck 能力与主要人物引用", () => {
     delete legacy.majorCharacters;
 
     expect(WorldDeckSchema.safeParse(legacy).success).toBe(false);
-    const normalized = normalizeWorldDeck(legacy);
+    const normalized = normalizeLegacyWorldDeck(legacy);
+    expect(LegacyWorldDeckSchema.safeParse(normalized).success).toBe(true);
+    expect(WorldDeckSchema.safeParse(normalized).success).toBe(false);
+    expect(parsePersistedWorldDeck(legacy)).toEqual(normalized);
     expect(normalized.playerGod.ref).toBe("player-god-1");
     expect(normalized.majorGods.map((god) => god.ref)).toEqual([
       "major-god-1", "major-god-2", "major-god-3", "major-god-4",
@@ -240,7 +260,7 @@ describe("WorldDeck 能力与主要人物引用", () => {
     expect(normalized.races.flatMap((race) => race.abilities)).toEqual([]);
     expect(normalized.majorCharacters).toEqual([]);
     expect(normalized.factions.flatMap((faction) => faction.keyCharacterRefs)).toEqual([]);
-    expect(normalizeWorldDeck(legacy)).toEqual(normalized);
+    expect(normalizeLegacyWorldDeck(legacy)).toEqual(normalized);
     expect(() => validateDeckReferences(normalized)).not.toThrow();
   });
 

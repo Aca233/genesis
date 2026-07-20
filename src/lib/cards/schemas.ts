@@ -110,7 +110,7 @@ export const MajorCharacterCardSchema = z.object({
   conflictTies: z.string().describe("与时代冲突的关系"),
   learnedTraditionRefs: z.array(z.object({ sourceAbilityRef: StableRefSchema })),
   racialOverrides: z.array(RacialOverrideSchema),
-  abilities: z.array(PersonalDeckAbilitySchema).max(5).describe("个人技能"),
+  abilities: z.array(PersonalDeckAbilitySchema).min(2).max(5).describe("个人技能"),
 });
 
 export const CosmologyCardSchema = z.object({
@@ -159,7 +159,7 @@ export const MajorGodCardSchema = z.object({
     note: z.string(),
   }),
   faithScope: z.string().describe("信仰范围一句话"),
-  abilities: z.array(DivineDeckAbilitySchema).max(6).describe("神权能力"),
+  abilities: z.array(DivineDeckAbilitySchema).min(3).max(6).describe("神权能力"),
 });
 
 export const MinorGodSchema = z.object({
@@ -175,7 +175,7 @@ export const PlayerGodCardSchema = z.object({
   rank: RankSchema,
   faithBase: z.string().describe("初始信仰势力"),
   situation: z.string().describe("开局处境与钩子"),
-  abilities: z.array(DivineDeckAbilitySchema).max(6).describe("玩家神权"),
+  abilities: z.array(DivineDeckAbilitySchema).min(3).max(6).describe("玩家神权"),
 });
 
 export const FactionCardSchema = z.object({
@@ -199,7 +199,7 @@ export const RaceCardSchema = z.object({
   lifespan: z.string(),
   distribution: z.string(),
   divineTies: z.string().describe("与诸神的渊源"),
-  abilities: z.array(RaceDeckAbilitySchema).max(5).describe("先天能力与族群技艺"),
+  abilities: z.array(RaceDeckAbilitySchema).min(2).max(5).describe("先天能力与族群技艺"),
 });
 
 export const PlaceCardSchema = z.object({
@@ -241,7 +241,7 @@ export const ThemeCardSchema = z.object({
 
 // ───────────────────────── 卡组 ─────────────────────────
 
-const WorldDeckObjectSchema = z.object({
+const StrictWorldDeckObjectSchema = z.object({
   worldName: z.string(),
   cosmology: CosmologyCardSchema,
   fusionAxiom: FusionAxiomCardSchema.nullable().describe("仅多IP融合时非空"),
@@ -250,14 +250,54 @@ const WorldDeckObjectSchema = z.object({
   minorGods: z.array(MinorGodSchema),
   factions: z.array(FactionCardSchema).min(2).max(8),
   races: z.array(RaceCardSchema),
-  // 旧草稿没有人物名录；归一化后以空数组表示，创世生成规则由 prompt 保证 6–12 位。
-  majorCharacters: z.array(MajorCharacterCardSchema).max(12),
+  majorCharacters: z.array(MajorCharacterCardSchema).min(6).max(12),
   places: z.array(PlaceCardSchema),
   epochConflict: EpochConflictCardSchema,
   style: StyleCardSchema,
   theme: ThemeCardSchema,
 });
 
+/** Compatibility-only cards used after a positively identified pre-ability draft. */
+const LegacyPlayerGodCardSchema = PlayerGodCardSchema.extend({
+  abilities: z.array(DivineDeckAbilitySchema).max(6),
+});
+const LegacyMajorGodCardSchema = MajorGodCardSchema.extend({
+  abilities: z.array(DivineDeckAbilitySchema).max(6),
+});
+const LegacyRaceCardSchema = RaceCardSchema.extend({
+  abilities: z.array(RaceDeckAbilitySchema).max(5),
+});
+const LegacyMajorCharacterCardSchema = MajorCharacterCardSchema.extend({
+  abilities: z.array(PersonalDeckAbilitySchema).max(5),
+});
+
+const LegacyWorldDeckObjectSchema = z.object({
+  worldName: z.string(),
+  cosmology: CosmologyCardSchema,
+  fusionAxiom: FusionAxiomCardSchema.nullable().describe("仅多IP融合时非空"),
+  playerGod: LegacyPlayerGodCardSchema,
+  majorGods: z.array(LegacyMajorGodCardSchema).min(4).max(10),
+  minorGods: z.array(MinorGodSchema),
+  factions: z.array(FactionCardSchema).min(2).max(8),
+  races: z.array(LegacyRaceCardSchema),
+  majorCharacters: z.array(LegacyMajorCharacterCardSchema).max(12),
+  places: z.array(PlaceCardSchema),
+  epochConflict: EpochConflictCardSchema,
+  style: StyleCardSchema,
+  theme: ThemeCardSchema,
+});
+
+type DeckReferenceGraph = {
+  playerGod: { ref: string; abilities: Array<{ ref: string }> };
+  majorGods: Array<{ ref: string; abilities: Array<{ ref: string }> }>;
+  races: Array<{ ref: string; abilities: Array<{ ref: string }> }>;
+  factions: Array<{ ref: string }>;
+  majorCharacters: Array<{
+    ref: string;
+    abilities: Array<{ ref: string }>;
+    racialOverrides: Array<{ ref: string }>;
+  }>;
+};
 
 function addUniqueRef(
   ctx: z.RefinementCtx,
@@ -279,11 +319,14 @@ function addUniqueRef(
 }
 
 /**
- * Strict schema for the normalized deck format. Every stable card ref and every
- * DeckAbility / derived override ref shares one namespace so provenance stays
+ * Every stable card ref and every DeckAbility / derived override ref shares one
+ * namespace so provenance stays
  * unambiguous after a draft is saved or rerolled.
  */
-export const WorldDeckSchema = WorldDeckObjectSchema.superRefine((deck, ctx) => {
+function validateDeckReferenceUniqueness(
+  deck: DeckReferenceGraph,
+  ctx: z.RefinementCtx,
+): void {
   const cardRefs = new Map<string, (string | number)[]>();
   const abilityRefs = new Map<string, (string | number)[]>();
   const addAbility = (ability: { ref: string }, path: (string | number)[]) =>
@@ -317,9 +360,20 @@ export const WorldDeckSchema = WorldDeckObjectSchema.superRefine((deck, ctx) => 
       addAbility(override, ["majorCharacters", characterIndex, "racialOverrides", overrideIndex, "ref"]),
     );
   });
-});
+}
+
+/** Strict contract for every newly created, patched, or rerolled WorldDeck. */
+export const WorldDeckSchema = StrictWorldDeckObjectSchema.superRefine(
+  validateDeckReferenceUniqueness,
+);
+
+/** Compatibility parser used only after isLegacyWorldDeck() positively identifies an old draft. */
+export const LegacyWorldDeckSchema = LegacyWorldDeckObjectSchema.superRefine(
+  validateDeckReferenceUniqueness,
+);
 
 export type WorldDeck = z.infer<typeof WorldDeckSchema>;
+export type LegacyWorldDeck = z.infer<typeof LegacyWorldDeckSchema>;
 export type MajorGodCard = z.infer<typeof MajorGodCardSchema>;
 
 export type PlayerGodCard = z.infer<typeof PlayerGodCardSchema>;
@@ -371,12 +425,52 @@ function normalizeRacialOverrides(value: unknown, prefix: string): unknown[] {
   });
 }
 
+/** Returns true only when a persisted deck is missing fields introduced by the ability-card era. */
+export function isLegacyWorldDeck(raw: unknown): boolean {
+  const deck = asLooseRecord(raw);
+  const playerGod = asLooseRecord(deck.playerGod);
+  const majorGods = Array.isArray(deck.majorGods) ? deck.majorGods : [];
+  const factions = Array.isArray(deck.factions) ? deck.factions : [];
+  const races = Array.isArray(deck.races) ? deck.races : [];
+
+  return (
+    !hasOwn(deck, "majorCharacters") ||
+    !hasOwn(playerGod, "ref") ||
+    !hasOwn(playerGod, "abilities") ||
+    majorGods.some((rawGod) => {
+      const god = asLooseRecord(rawGod);
+      return !hasOwn(god, "ref") || !hasOwn(god, "abilities");
+    }) ||
+    factions.some((rawFaction) => {
+      const faction = asLooseRecord(rawFaction);
+      return !hasOwn(faction, "ref") || !hasOwn(faction, "keyCharacterRefs");
+    }) ||
+    races.some((rawRace) => {
+      const race = asLooseRecord(rawRace);
+      return !hasOwn(race, "ref") || !hasOwn(race, "abilities");
+    })
+  );
+}
+
 /**
- * Migrates a persisted pre-ability draft into the strict current card format.
+ * Parses a persisted draft strictly unless its missing fields positively identify
+ * it as pre-ability legacy data.
+ */
+export function parsePersistedWorldDeck(raw: unknown): WorldDeck | LegacyWorldDeck {
+  return isLegacyWorldDeck(raw)
+    ? normalizeLegacyWorldDeck(raw)
+    : WorldDeckSchema.parse(raw);
+}
+
+/**
+ * Migrates a persisted pre-ability draft into the compatibility card format.
  * It only supplies deterministic references and empty relationship/ability
  * collections; it never creates characters or abilities that were absent.
  */
-export function normalizeWorldDeck(raw: unknown): WorldDeck {
+export function normalizeLegacyWorldDeck(raw: unknown): LegacyWorldDeck {
+  if (!isLegacyWorldDeck(raw)) {
+    throw new Error("草稿不属于旧版兼容格式");
+  }
   const deck = asLooseRecord(raw);
   const playerGod = asLooseRecord(deck.playerGod);
   const majorGods = Array.isArray(deck.majorGods) ? deck.majorGods : [];
@@ -384,7 +478,7 @@ export function normalizeWorldDeck(raw: unknown): WorldDeck {
   const races = Array.isArray(deck.races) ? deck.races : [];
   const majorCharacters = Array.isArray(deck.majorCharacters) ? deck.majorCharacters : [];
 
-  return WorldDeckSchema.parse({
+  return LegacyWorldDeckSchema.parse({
     ...deck,
     playerGod: {
       ...playerGod,

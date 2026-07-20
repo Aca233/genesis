@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { normalizeWorldDeck } from "@/lib/cards/schemas";
+import { parsePersistedWorldDeck, WorldDeckSchema } from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 
 /**
@@ -31,7 +31,7 @@ export async function GET(
   if (!world) return NextResponse.json({ error: "不存在" }, { status: 404 });
   if (world.draftDeck) {
     try {
-      return NextResponse.json({ world: { ...world, draftDeck: normalizeWorldDeck(world.draftDeck) } });
+      return NextResponse.json({ world: { ...world, draftDeck: parsePersistedWorldDeck(world.draftDeck) } });
     } catch {
       return NextResponse.json({ error: "草稿卡组已损坏" }, { status: 500 });
     }
@@ -48,7 +48,7 @@ export async function PATCH(
 
   let deck;
   try {
-    deck = normalizeWorldDeck(body.deck);
+    deck = WorldDeckSchema.parse(body.deck);
     validateDeckReferences(deck);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
