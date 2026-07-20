@@ -230,6 +230,7 @@ const extraction = {
   ],
   godUpdates: [],
   revealSections: [],
+  abilityChanges: [],
 };
 
 const chronicle = {

@@ -1,6 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { buildAbilityContext } from "@/lib/abilities/context";
+import {
+  applyAbilityExtraction,
+  type AbilityExtractionClient,
+} from "@/lib/abilities/extraction";
 import { completeStructured } from "@/lib/llm/structured";
 import {
   PantheonTurnSchema,
@@ -73,14 +77,19 @@ async function setState(chapterId: string, step: SettleStep) {
 }
 
 /** 组装本章正文（定稿内容，含玩家神谕） */
-async function chapterProse(chapterId: string): Promise<string> {
+async function chapterProse(chapterId: string) {
   const messages = await prisma.message.findMany({
     where: { chapterId },
     orderBy: { index: "asc" },
   });
-  return messages
-    .map((m) => (m.role === "player" ? `【玩家神谕】${m.content}` : m.content))
-    .join("\n\n");
+  return {
+    prose: messages
+      .map((message) =>
+        message.role === "player" ? `【玩家神谕】${message.content}` : message.content,
+      )
+      .join("\n\n"),
+    messages,
+  };
 }
 
 /** 结算主流程：AsyncGenerator 逐步产出进度（SSE 转发用） */
@@ -101,7 +110,8 @@ export async function* settleChapter(
   const world = timeline.world;
   const startStep = parseState(chapter.settleState);
   const startIdx = STEP_ORDER.indexOf(startStep);
-  const prose = await chapterProse(chapterId);
+  const chapterText = await chapterProse(chapterId);
+  const prose = chapterText.prose;
   const scaleNote = await dominantScale(chapterId);
 
   // ── 1. 诸神回合 ──
@@ -236,7 +246,7 @@ export async function* settleChapter(
   if (startIdx <= STEP_ORDER.indexOf("extract")) {
     yield { step: "extract" };
     try {
-      await runExtraction(timeline.id, chapterId, prose, scaleNote);
+      await runExtraction(timeline.id, chapterId, chapterText, scaleNote);
     } catch {
       // 抽取失败不阻塞：标记待重抽（meta 层面，M2 简化为跳过）
     }
@@ -436,17 +446,34 @@ async function godNameMap(timelineId: string): Promise<Map<string, string>> {
 async function runExtraction(
   timelineId: string,
   chapterId: string,
-  prose: string,
+  chapterText: Awaited<ReturnType<typeof chapterProse>>,
   scaleNote: string,
 ) {
-  const [entities, gods] = await Promise.all([
+  const [entities, gods, abilities] = await Promise.all([
     prisma.entity.findMany({
       where: { timelineId },
-      select: { id: true, name: true, type: true, aliases: true, summary: true, lockedPaths: true },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        aliases: true,
+        summary: true,
+        lockedPaths: true,
+        raceId: true,
+      },
     }),
     prisma.god.findMany({
       where: { timelineId },
       select: { id: true, name: true, aliases: true, rank: true, isPlayer: true },
+    }),
+    prisma.ability.findMany({
+      where: { timelineId },
+      include: {
+        entity: { select: { name: true, type: true } },
+        god: { select: { name: true } },
+        sourceAbility: { select: { name: true } },
+      },
+      orderBy: { createdAt: "asc" },
     }),
   ]);
 
@@ -458,12 +485,26 @@ async function runExtraction(
     task: "extract",
     system: extractorSystem(),
     user: extractorUserPrompt({
-      chapterProse: prose.slice(-20000),
+      chapterMessages: chapterText.messages,
       knownEntities: entities
-        .map((e) => `${e.name}(${e.type}) 别名[${e.aliases.join("、")}]: ${e.summary}`)
+        .map((entity) => {
+          const race = entity.raceId
+            ? entities.find((candidate) => candidate.id === entity.raceId)?.name ?? entity.raceId
+            : "—";
+          return `${entity.name}(${entity.type}) race=${race} 别名[${entity.aliases.join("、")}]: ${entity.summary}`;
+        })
         .join("\n"),
       knownGods: gods
         .map((g) => `${g.name}${g.isPlayer ? "（玩家神）" : ""} rank=${g.rank}`)
+        .join("\n"),
+      knownAbilities: abilities
+        .map((ability) => {
+          const owner = ability.entity?.name ?? ability.god?.name ?? "未知拥有者";
+          const source = ability.sourceAbility
+            ? `${ability.sourceAbility.name} [${ability.sourceAbilityId}]`
+            : "—";
+          return `[${ability.id}] ${owner}·${ability.name} kind=${ability.kind} mastery=${ability.mastery} state=${ability.state} source=${source} locked=[${ability.lockedFields.join(", ")}] version=${ability.version}`;
+        })
         .join("\n"),
       lockedPaths: lockedList,
       scaleNote,
@@ -570,6 +611,43 @@ async function runExtraction(
     await prisma.entitySection.updateMany({
       where: { entityId: target.id, key: rv.sectionKey },
       data: { revealed: true },
+    });
+  }
+
+  const owners = [
+    ...entities
+      .filter((entity) => entity.type === "race" || entity.type === "character")
+      .map((entity) => ({
+        id: entity.id,
+        type: entity.type as "race" | "character",
+        name: entity.name,
+        aliases: entity.aliases,
+        raceId: entity.raceId,
+      })),
+    ...gods.map((god) => ({
+      id: god.id,
+      type: "god" as const,
+      name: god.name,
+      aliases: god.aliases,
+      raceId: null,
+    })),
+  ];
+  const result = await applyAbilityExtraction(
+    prisma as unknown as AbilityExtractionClient,
+    {
+      timelineId,
+      chapterId,
+      owners,
+      messages: chapterText.messages,
+      changes: extraction.abilityChanges,
+    },
+  );
+  for (const rejected of result.rejected) {
+    console.error("章末能力变化被拒绝", {
+      chapterId,
+      item: rejected.index,
+      ownerName: rejected.change.ownerName,
+      reason: rejected.reason,
     });
   }
 }

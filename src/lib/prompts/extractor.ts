@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  AbilityEventTypeSchema,
+  AbilityMasterySchema,
+  AbilityStateSchema,
+  AbilityVisibilitySchema,
+} from "@/lib/abilities/types";
 
 /**
  * 状态抽取器（Extractor）提示词与输出契约（docs/04 §4）。
@@ -13,6 +19,40 @@ const EntityTypeSchema = z.enum([
   "artifact",
   "cult",
 ]);
+
+export const AbilityExtractionPatchSchema = z.object({
+  mastery: AbilityMasterySchema.optional(),
+  state: AbilityStateSchema.optional(),
+  visibility: AbilityVisibilitySchema.optional(),
+  rumorText: z.string().nullable().optional(),
+  effect: z.string().optional(),
+  trigger: z.string().optional(),
+  cost: z.string().optional(),
+  limitations: z.string().optional(),
+}).strict();
+
+export const AbilityExtractionChangeSchema = z.object({
+  abilityId: z.string().min(1).optional(),
+  ownerName: z.string().min(1),
+  sourceAbilityId: z.string().min(1).optional(),
+  type: AbilityEventTypeSchema,
+  patch: AbilityExtractionPatchSchema,
+  evidenceMessageIndex: z.number().int().nonnegative(),
+  evidence: z.string().trim().min(12),
+}).strict().refine(
+  (change) => change.abilityId !== undefined || change.sourceAbilityId !== undefined,
+  { message: "abilityId 与 sourceAbilityId 至少提供一项" },
+);
+
+export type AbilityExtractionChange = z.infer<typeof AbilityExtractionChangeSchema>;
+
+export type ExtractorChapterMessage = {
+  id: string;
+  index: number;
+  role: string;
+  content: string;
+  scale: string;
+};
 
 export const ExtractionSchema = z.object({
   newEntities: z
@@ -91,6 +131,9 @@ export const ExtractionSchema = z.object({
   revealSections: z
     .array(z.object({ entityName: z.string(), sectionKey: z.string() }))
     .describe("本章叙事已揭开迷雾的栏目"),
+  abilityChanges: z
+    .array(AbilityExtractionChangeSchema)
+    .describe("有逐消息正文证据支持的能力变化；没有变化时为空数组"),
 });
 
 export type Extraction = z.infer<typeof ExtractionSchema>;
@@ -130,35 +173,53 @@ ${Object.entries(SECTION_TEMPLATES)
 - Mortal lifespans: if the chapter spans years (era/epoch scale), reflect aging/succession in lifespan sections.
 - Rank changes require in-chapter justification (a god diminished by mass apostasy, exalted by a miracle witnessed by nations...).
 - scenePresent: true only for entities physically/narratively present at the chapter's end scene.
-- Locked sections (listed in input) must NOT appear in your deltas.
+- Locked sections and ability fields (listed in input) must NOT appear in your deltas.
+- ABILITY CHANGES: allowed event types are awakened, learned, improved, mutated, impaired, sealed, restored, lost, revealed, deprecated.
+- Every ability change must cite exactly one labelled chapter message by evidenceMessageIndex and copy a verbatim evidence excerpt of at least 12 Chinese characters from that message. Never infer an upgrade without explicit training, awakening, injury, sealing, restoration, loss, revelation or mutation in the prose.
+- For an existing ability, use its exact abilityId. For learning a racial tradition, use sourceAbilityId plus the character ownerName; never teach a racial_tradition from outside the character's primary race. Do not invent IDs.
+- Ability patches may only contain mastery, state, visibility, rumorText, effect, trigger, cost, or limitations. Never change a listed locked field. Ordinary training advances mastery by at most one rank.
 - Output ONLY a JSON object matching the schema. All user-facing strings in Chinese.
 
 ${extractionJsonSchema}`;
 }
 
 export function extractorUserPrompt(opts: {
-  chapterProse: string;
-  knownEntities: string; // 已入册实体（名+类型+别名+摘要）
+  chapterMessages: ExtractorChapterMessage[];
+  knownEntities: string; // 已入册实体（名+类型+别名+摘要+人物种族）
   knownGods: string;
+  knownAbilities: string; // 本章可演化能力（ID、所有者、来源、锁字段）
   lockedPaths: string; // 实体名.栏目 列表
-  scaleNote: string; // 本章主要尺度
+  scaleNote: string; // 本章主要尺度（仅辅助；能力证据使用逐消息 scale）
 }): string {
+  const labelledMessages = opts.chapterMessages
+    .map((message) => {
+      const content = message.role === "player"
+        ? `【玩家神谕】${message.content}`
+        : message.content;
+      return `[${message.id} | ${message.index} | ${message.scale}]
+${content}`;
+    })
+    .join("\n\n");
+
   return `== KNOWN ENTITIES (update these by exact name; do not re-create) ==
 ${opts.knownEntities || "—"}
 
 == GODS ==
 ${opts.knownGods}
 
+== ABILITIES (exact IDs, owners, sources and locked fields) ==
+${opts.knownAbilities || "—"}
+
 == PLAYER-LOCKED SECTIONS (never touch) ==
 ${opts.lockedPaths || "—"}
 
-== CHAPTER SCALE ==
+== CHAPTER DOMINANT SCALE (background only) ==
 ${opts.scaleNote}
 
-== CHAPTER PROSE ==
-${opts.chapterProse}
+== LABELLED CHAPTER MESSAGES ==
+${labelledMessages || "—"}
 
-Extract the deltas. Output the JSON now.`;
+For every ability change, set evidenceMessageIndex to the integer in the matching label and copy evidence verbatim from that same message. Extract the deltas. Output the JSON now.`;
 }
 
 // ───────────────────────── 编年史压缩 ─────────────────────────
