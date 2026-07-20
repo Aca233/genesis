@@ -8,7 +8,9 @@ import {
   RELATION_LABELS,
   STYLE_PRESET_LABELS,
   type Rank,
+  isPathLocked,
 } from "./deck-utils";
+import { AbilityEditor, AbilitySection } from "./AbilityEditor";
 import {
   TextField,
   TextAreaField,
@@ -82,6 +84,14 @@ export function PlayerGodEditor({ deck, lockedPaths, onEdit }: EditorProps) {
       <SelectField label="位阶" path="playerGod.rank" value={g.rank} options={RANK_OPTIONS} {...common} />
       <TextAreaField label="初始信仰势力" path="playerGod.faithBase" value={g.faithBase} rows={2} {...common} />
       <TextAreaField label="开局处境与钩子" path="playerGod.situation" value={g.situation} rows={4} {...common} />
+      <AbilitySection title="神权" />
+      <AbilityEditor
+        abilities={g.abilities}
+        basePath="playerGod.abilities"
+        allowedKinds={["divine"]}
+        lockedPaths={lockedPaths}
+        onEdit={onEdit}
+      />
     </>
   );
 }
@@ -133,6 +143,16 @@ export function MajorGodEditor({
         value={g.initialRelationToPlayer.note}
         rows={2}
         {...common}
+      />
+
+      <AbilitySection title="神权" />
+      <AbilityEditor
+        abilities={g.abilities}
+        basePath={`${base}.abilities`}
+        allowedKinds={["divine"]}
+        lockedPaths={lockedPaths}
+        onEdit={onEdit}
+        sensitiveFieldsRevealed={agendaRevealed}
       />
 
       <Sect title="议程（天机）" />
@@ -237,6 +257,8 @@ export function FactionEditor({
   if (!f) return null;
   const base = `factions.${index}`;
   const common = { lockedPaths, onEdit };
+  const selectedRefs = f.keyCharacterRefs.map((reference) => reference.ref);
+  const keyRefsPath = `${base}.keyCharacterRefs`;
   return (
     <>
       <TextField label="名号" path={`${base}.name`} value={f.name} {...common} />
@@ -245,7 +267,33 @@ export function FactionEditor({
       <TextAreaField label="概览" path={`${base}.overview`} value={f.overview} rows={4} {...common} />
       <TextAreaField label="疆域" path={`${base}.territory`} value={f.territory} rows={2} {...common} />
       <TextAreaField label="信仰归属与浓度" path={`${base}.faith`} value={f.faith} rows={2} {...common} />
-      <ListField label="关键人物" path={`${base}.keyFigures`} values={f.keyFigures} {...common} />
+      <fieldset className="grid gap-1">
+        <legend className="text-xs text-ink-faint">
+          关键人物（仅可引用人物名录）
+          {isPathLocked(lockedPaths, keyRefsPath) && <span className="ml-1 text-gilt/80" title="手改字段，重掷时保留">🔒</span>}
+        </legend>
+        <div className="grid gap-1.5 rounded-md border border-line bg-paper p-3">
+          {deck.majorCharacters.map((character) => {
+            const checked = selectedRefs.includes(character.ref);
+            return (
+              <label key={character.ref} className="flex cursor-pointer items-start gap-2 text-sm text-ink-soft">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => onEdit(
+                    keyRefsPath,
+                    checked
+                      ? f.keyCharacterRefs.filter((reference) => reference.ref !== character.ref)
+                      : [...f.keyCharacterRefs, { ref: character.ref }],
+                  )}
+                  className="mt-0.5 accent-gilt"
+                />
+                <span>{character.name} · {character.identity} · {character.ref}</span>
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
     </>
   );
 }
@@ -268,6 +316,22 @@ export function RaceEditor({
       <TextField label="寿命" path={`${base}.lifespan`} value={r.lifespan} {...common} />
       <TextAreaField label="分布" path={`${base}.distribution`} value={r.distribution} rows={2} {...common} />
       <TextAreaField label="与诸神的渊源" path={`${base}.divineTies`} value={r.divineTies} rows={2} {...common} />
+      <AbilitySection title="先天能力" />
+      <AbilityEditor
+        abilities={r.abilities}
+        basePath={`${base}.abilities`}
+        allowedKinds={["racial_innate"]}
+        lockedPaths={lockedPaths}
+        onEdit={onEdit}
+      />
+      <AbilitySection title="族群技艺" />
+      <AbilityEditor
+        abilities={r.abilities}
+        basePath={`${base}.abilities`}
+        allowedKinds={["racial_tradition"]}
+        lockedPaths={lockedPaths}
+        onEdit={onEdit}
+      />
     </>
   );
 }

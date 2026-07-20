@@ -29,6 +29,7 @@ import {
   StyleEditor,
   ThemeEditor,
 } from "@/components/genesis/card-editors";
+import { MajorCharacterEditor } from "@/components/genesis/MajorCharacterEditor";
 import { GenesisCeremony } from "@/components/genesis/GenesisCeremony";
 
 /**
@@ -38,7 +39,7 @@ import { GenesisCeremony } from "@/components/genesis/GenesisCeremony";
 
 type OpenCard =
   | { kind: "cosmology" | "fusionAxiom" | "playerGod" | "minorGods" | "epochConflict" | "style" | "theme" }
-  | { kind: "majorGod" | "faction" | "race" | "place"; index: number };
+  | { kind: "majorGod" | "faction" | "race" | "majorCharacter" | "place"; index: number };
 
 type EmbarkState =
   | { phase: "pending" }
@@ -423,6 +424,34 @@ export default function GenesisEditorPage({
         ))}
       </div>
 
+      {/* ── 主要人物 ── */}
+      <GroupHeader
+        title="主要人物"
+        cardKey="majorCharacters"
+        count={deck.majorCharacters.length}
+        warning="重掷将重生成全部主要人物（手改字段保留）"
+        rerolling={rerolling === "majorCharacters"}
+        disabled={busy}
+        onReroll={reroll}
+      />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {deck.majorCharacters.map((character, index) => {
+          const race = deck.races.find((entry) => entry.ref === character.raceRef);
+          const skillCount = character.learnedTraditionRefs.length + character.racialOverrides.length + character.abilities.length;
+          return (
+            <DeckCard
+              key={character.ref}
+              title={character.name}
+              subtitle={`${character.identity} · ${race?.name ?? character.raceRef}`}
+              lines={[clip(`目标：${character.goals}`), clip(`技能：${skillCount} 项`)]}
+              lockedCount={countLockedUnder(lockedPaths, `majorCharacters.${index}`)}
+              rerolling={rerolling === "majorCharacters"}
+              onOpen={() => setOpenCard({ kind: "majorCharacter", index })}
+            />
+          );
+        })}
+      </div>
+
       {/* ── 地理 ── */}
       <GroupHeader
         title="山河舆图"
@@ -528,6 +557,9 @@ export default function GenesisEditorPage({
         {openCard?.kind === "race" && (
           <RaceEditor deck={deck} index={openCard.index} lockedPaths={lockedPaths} onEdit={handleEdit} />
         )}
+        {openCard?.kind === "majorCharacter" && (
+          <MajorCharacterEditor deck={deck} index={openCard.index} lockedPaths={lockedPaths} onEdit={handleEdit} />
+        )}
         {openCard?.kind === "place" && (
           <PlaceEditor deck={deck} index={openCard.index} lockedPaths={lockedPaths} onEdit={handleEdit} />
         )}
@@ -623,6 +655,8 @@ function modalTitle(open: OpenCard | null, deck: WorldDeck): string {
       return `势力 · ${deck.factions[open.index]?.name ?? ""}`;
     case "race":
       return `种族 · ${deck.races[open.index]?.name ?? ""}`;
+    case "majorCharacter":
+      return `主要人物 · ${deck.majorCharacters[open.index]?.name ?? ""}`;
     case "place":
       return `地理 · ${deck.places[open.index]?.name ?? ""}`;
     case "epochConflict":

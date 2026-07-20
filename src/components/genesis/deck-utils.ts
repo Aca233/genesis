@@ -101,6 +101,52 @@ export function countLockedUnder(lockedPaths: string[], base: string): number {
     .length;
 }
 
+type RaceAbilityDeck = {
+  races: Array<{
+    ref: string;
+    abilities: Array<{ ref: string; kind: string }>;
+  }>;
+};
+
+type CharacterTraditionRefs = {
+  raceRef: string;
+  learnedTraditionRefs: Array<{ sourceAbilityRef: string }>;
+};
+
+/** 返回某个种族可供人物学习的族群技艺稳定引用。 */
+export function traditionAbilityRefsForRace(
+  deck: RaceAbilityDeck,
+  raceRef: string,
+): string[] {
+  return deck.races
+    .find((race) => race.ref === raceRef)
+    ?.abilities.filter((ability) => ability.kind === "racial_tradition")
+    .map((ability) => ability.ref) ?? [];
+}
+
+/**
+ * 切换人物主种族，并同步移除不再属于新种族的族群技艺引用。
+ * UI 用 removedTraditionRefs 决定是否向玩家展示清理提示。
+ */
+export function changeCharacterRace<T extends CharacterTraditionRefs>(
+  character: T,
+  raceRef: string,
+  deck: RaceAbilityDeck,
+): { character: T; removedTraditionRefs: string[] } {
+  const allowedRefs = new Set(traditionAbilityRefsForRace(deck, raceRef));
+  const learnedTraditionRefs = character.learnedTraditionRefs.filter((reference) =>
+    allowedRefs.has(reference.sourceAbilityRef),
+  );
+  const removedTraditionRefs = character.learnedTraditionRefs
+    .filter((reference) => !allowedRefs.has(reference.sourceAbilityRef))
+    .map((reference) => reference.sourceAbilityRef);
+
+  return {
+    character: { ...character, raceRef, learnedTraditionRefs } as T,
+    removedTraditionRefs,
+  };
+}
+
 const PLACEHOLDER = "（待补：可用重掷或手改完善）";
 
 /** 次要神升格为主神——占位模板确保过 WorldDeckSchema 校验 */
