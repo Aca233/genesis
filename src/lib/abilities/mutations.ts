@@ -26,6 +26,10 @@ export class AbilityOptimisticConflictError extends Error {
   override name = "AbilityOptimisticConflictError";
 }
 
+class AbilityDedupeKeyConflictError extends Error {
+  override name = "AbilityDedupeKeyConflictError";
+}
+
 export interface AbilityStoredRecord extends PersistedAbilityRecord {
   timelineId: string;
   entityId: string | null;
@@ -96,6 +100,9 @@ export interface AbilityMutationTx extends Omit<AbilityValidationTx, "ability"> 
 
 /** Minimal PrismaClient-like boundary: every public mutation runs in one transaction. */
 export interface AbilityMutationClient {
+  abilityEvent: {
+    findUnique(args: { where: { dedupeKey: string } }): Promise<AbilityEventRecord | null>;
+  };
   $transaction<T>(operation: (tx: AbilityMutationTx) => Promise<T>): Promise<T>;
 }
 
@@ -313,23 +320,66 @@ async function assertNoDuplicateDerivedSource(
   }
 }
 
-function isSourceUniquenessError(error: unknown): boolean {
+export function isDerivedSourceUniquenessError(error: unknown): boolean {
   if (typeof error !== "object" || error === null) {
     return false;
   }
   const candidate = error as { code?: unknown; meta?: { target?: unknown } };
-  if (candidate.code !== "P2002" || !Array.isArray(candidate.meta?.target)) {
+  if (candidate.code !== "P2002") {
     return false;
   }
-  const target = candidate.meta.target;
-  return (
-    target.includes("entity_id") &&
-    target.includes("source_ability_id")
-  );
+  const rawTarget = candidate.meta?.target;
+  const target = Array.isArray(rawTarget)
+    ? rawTarget
+    : typeof rawTarget === "string"
+      ? [rawTarget]
+      : [];
+  if (target.length === 0) {
+    return true;
+  }
+  return target.some((field) => typeof field === "string" && field.includes("entity_id")) &&
+    target.some((field) => typeof field === "string" && field.includes("source_ability_id"));
+}
+
+function isDedupeKeyUniquenessError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const candidate = error as { code?: unknown; meta?: { target?: unknown } };
+  return candidate.code === "P2002";
 }
 
 function throwConflict(): never {
   throw new AbilityOptimisticConflictError("能力已被其他变更更新，请刷新后重试");
+}
+
+function isSameOperation(
+  event: AbilityEventRecord,
+  input: ApplyAbilityChangeInput,
+): boolean {
+  const evidence = input.event.evidence.trim();
+  const expectedAfter = createAfter(event.before, input.patch);
+  return (
+    event.abilityId === input.abilityId &&
+    event.before.id === input.abilityId &&
+    event.before.version === input.version &&
+    event.type === input.event.type &&
+    event.chapterId === input.event.chapterId &&
+    event.messageId === (input.event.messageId ?? null) &&
+    event.evidence === evidence &&
+    event.scale === input.event.scale &&
+    sameValue(event.after, expectedAfter)
+  );
+}
+
+function idempotentResult(
+  event: AbilityEventRecord,
+  input: ApplyAbilityChangeInput,
+): AppliedAbilityChange {
+  if (!isSameOperation(event, input)) {
+    throwConflict();
+  }
+  return { applied: false, event };
 }
 
 /**
@@ -345,7 +395,7 @@ async function applyAbilityChangeInTx(
     where: { dedupeKey: input.event.dedupeKey },
   });
   if (existingEvent !== null) {
-    return { applied: false, event: existingEvent };
+    return idempotentResult(existingEvent, input);
   }
 
   const stored = await tx.ability.findUnique({ where: { id: input.abilityId } });
@@ -377,25 +427,33 @@ async function applyAbilityChangeInTx(
     if (error instanceof AbilityValidationError) {
       throw error;
     }
-    if (isSourceUniquenessError(error)) {
+    if (isDerivedSourceUniquenessError(error)) {
       throw new AbilityValidationError("同一人物不能拥有重复的活跃种族能力来源");
     }
     throwConflict();
   }
 
-  const event = await tx.abilityEvent.create({
-    data: {
-      abilityId: updated.id,
-      chapterId: input.event.chapterId,
-      messageId: input.event.messageId ?? null,
-      type: input.event.type,
-      before,
-      after: normalizePersistedAbility(updated),
-      evidence,
-      scale: input.event.scale,
-      dedupeKey: input.event.dedupeKey,
-    },
-  });
+  let event: AbilityEventRecord;
+  try {
+    event = await tx.abilityEvent.create({
+      data: {
+        abilityId: updated.id,
+        chapterId: input.event.chapterId,
+        messageId: input.event.messageId ?? null,
+        type: input.event.type,
+        before,
+        after: normalizePersistedAbility(updated),
+        evidence,
+        scale: input.event.scale,
+        dedupeKey: input.event.dedupeKey,
+      },
+    });
+  } catch (error) {
+    if (isDedupeKeyUniquenessError(error)) {
+      throw new AbilityDedupeKeyConflictError("能力事件去重键冲突");
+    }
+    throw error;
+  }
 
   return { applied: true, ability: normalizePersistedAbility(updated), event };
 }
@@ -414,7 +472,21 @@ export async function applyAbilityChange(
   client: AbilityMutationClient,
   input: unknown,
 ): Promise<AppliedAbilityChange> {
-  return client.$transaction((tx) => applyAbilityChangeInTransaction(tx, input));
+  const parsed = ApplyAbilityChangeSchema.parse(input);
+  try {
+    return await client.$transaction((tx) => applyAbilityChangeInTx(tx, parsed));
+  } catch (error) {
+    if (!(error instanceof AbilityDedupeKeyConflictError)) {
+      throw error;
+    }
+    const existingEvent = await client.abilityEvent.findUnique({
+      where: { dedupeKey: parsed.event.dedupeKey },
+    });
+    if (existingEvent === null) {
+      throwConflict();
+    }
+    return idempotentResult(existingEvent, parsed);
+  }
 }
 
 export interface RevealAbilityInput {
@@ -430,11 +502,20 @@ async function revealAbilityInTx(
   tx: AbilityMutationTx,
   input: RevealAbilityInput,
 ): Promise<AppliedAbilityChange> {
+  const change: ApplyAbilityChangeInput = {
+    abilityId: input.abilityId,
+    version: input.version,
+    patch: {
+      visibility: input.visibility,
+      ...(input.visibility === "rumored" ? { rumorText: input.rumorText ?? null } : {}),
+    },
+    event: { ...input.event, type: "revealed" },
+  };
   const existingEvent = await tx.abilityEvent.findUnique({
     where: { dedupeKey: input.event.dedupeKey },
   });
   if (existingEvent !== null) {
-    return { applied: false, event: existingEvent };
+    return idempotentResult(existingEvent, change);
   }
 
   if (
@@ -461,15 +542,7 @@ async function revealAbilityInTx(
     throw new AbilityValidationError("只有 hidden 或 rumored 能力可以变为 known");
   }
 
-  return applyAbilityChangeInTx(tx, {
-    abilityId: input.abilityId,
-    version: input.version,
-    patch: {
-      visibility: input.visibility,
-      ...(input.visibility === "rumored" ? { rumorText: input.rumorText ?? null } : {}),
-    },
-    event: { ...input.event, type: "revealed" },
-  });
+  return applyAbilityChangeInTx(tx, change);
 }
 
 /** Parses reveal requests and applies their ability/event mutation atomically. */
@@ -478,5 +551,27 @@ export async function revealAbility(
   input: unknown,
 ): Promise<AppliedAbilityChange> {
   const parsed = RevealAbilitySchema.parse(input);
-  return client.$transaction((tx) => revealAbilityInTx(tx, parsed));
+  const change: ApplyAbilityChangeInput = {
+    abilityId: parsed.abilityId,
+    version: parsed.version,
+    patch: {
+      visibility: parsed.visibility,
+      ...(parsed.visibility === "rumored" ? { rumorText: parsed.rumorText ?? null } : {}),
+    },
+    event: { ...parsed.event, type: "revealed" },
+  };
+  try {
+    return await client.$transaction((tx) => revealAbilityInTx(tx, parsed));
+  } catch (error) {
+    if (!(error instanceof AbilityDedupeKeyConflictError)) {
+      throw error;
+    }
+    const existingEvent = await client.abilityEvent.findUnique({
+      where: { dedupeKey: parsed.event.dedupeKey },
+    });
+    if (existingEvent === null) {
+      throwConflict();
+    }
+    return idempotentResult(existingEvent, change);
+  }
 }

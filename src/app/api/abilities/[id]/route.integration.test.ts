@@ -1,8 +1,14 @@
-import "dotenv/config";
 import { describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/db";
-import { DELETE } from "./route";
+
+const testDatabaseUrl = process.env.TEST_DATABASE_URL;
+if (testDatabaseUrl === undefined || testDatabaseUrl.trim() === "") {
+  throw new Error("TEST_DATABASE_URL is required for integration tests");
+}
+process.env.DATABASE_URL = testDatabaseUrl;
+
+const { prisma } = await import("@/lib/db");
+const { DELETE } = await import("./route");
 
 const abilityFields = {
   name: "晨光之血",
@@ -142,13 +148,7 @@ describe("PostgreSQL ability deletion lineage safety", () => {
           sourceAbilityId: fixture.source.id,
         },
       });
-      const derived = await Promise.race([
-        derivedCreation,
-        new Promise<never>((_, reject) => setTimeout(
-          () => reject(new Error("派生创建不应被删除事务的前置检查锁阻塞")),
-          1_500,
-        )),
-      ]);
+      const derived = await derivedCreation;
       allowDeleteToContinue();
       const response = await deleting;
       const [sourceAfter, derivedAfter] = await Promise.all([

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 import type { AbilityEventRecord, AbilityMutationTx, AbilityStoredRecord } from "./mutations";
-import { applyAbilityChange, revealAbility } from "./mutations";
+import {
+  AbilityOptimisticConflictError,
+  applyAbilityChange,
+  revealAbility,
+} from "./mutations";
+import { normalizePersistedAbility } from "./types";
 
 type ReviewMutationTx = AbilityMutationTx & {
   ability: AbilityMutationTx["ability"] & {
@@ -23,6 +28,7 @@ interface TransactionOptions {
   message?: { id: string; chapterId: string; scale: string } | null;
   updateError?: Error & { code?: string; meta?: { target?: string[] } };
   createError?: Error;
+  retryEvent?: AbilityEventRecord | null;
 }
 
 function ability(overrides: Partial<AbilityStoredRecord> = {}): AbilityStoredRecord {
@@ -113,6 +119,10 @@ function transaction(initialAbility = ability(), options: TransactionOptions = {
   };
 
   const client = {
+    abilityEvent: {
+      findUnique: async ({ where }: { where: { dedupeKey: string } }) =>
+        options.retryEvent?.dedupeKey === where.dedupeKey ? options.retryEvent : null,
+    },
     $transaction: async <T>(operation: (transaction: ReviewMutationTx) => Promise<T>) => {
       const abilityBefore = currentAbility;
       const eventsBefore = new Map(events);
@@ -155,6 +165,55 @@ describe("applyAbilityChange", () => {
     const second = await applyAbilityChange(client, change);
     expect(second.applied).toBe(false);
     expect(calls).toMatchObject({ abilityFind: 1, update: 1, create: 1, eventFind: 2 });
+  });
+
+  it("同一 dedupeKey 不能跨能力复用", async () => {
+    const fixture = transaction();
+    await applyAbilityChange(fixture.client, change);
+
+    await expect(
+      applyAbilityChange(fixture.client, { ...change, abilityId: "ability-2" }),
+    ).rejects.toBeInstanceOf(AbilityOptimisticConflictError);
+    expect(fixture.calls).toMatchObject({ update: 1, create: 1 });
+  });
+
+  it("同一能力的 dedupeKey 只能重试完全相同的操作", async () => {
+    const fixture = transaction();
+    await applyAbilityChange(fixture.client, change);
+
+    await expect(
+      applyAbilityChange(fixture.client, {
+        ...change,
+        event: { ...change.event, evidence: "另一项操作的证据" },
+      }),
+    ).rejects.toBeInstanceOf(AbilityOptimisticConflictError);
+    expect(fixture.calls).toMatchObject({ update: 1, create: 1 });
+  });
+
+  it("并发同一操作在事件唯一约束冲突后读取既有事件并幂等返回", async () => {
+    const before = normalizePersistedAbility(ability());
+    const concurrentEvent: AbilityEventRecord = {
+      id: "event-concurrent",
+      abilityId: change.abilityId,
+      chapterId: change.event.chapterId,
+      messageId: change.event.messageId,
+      type: change.event.type,
+      before,
+      after: { ...before, mastery: "expert", version: 2 },
+      evidence: change.event.evidence,
+      scale: change.event.scale,
+      dedupeKey: change.event.dedupeKey,
+    };
+    const duplicateKey = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+      meta: { target: ["dedupe_key"] },
+    });
+    const fixture = transaction(ability(), { createError: duplicateKey, retryEvent: concurrentEvent });
+
+    await expect(applyAbilityChange(fixture.client, change)).resolves.toMatchObject({
+      applied: false,
+      event: concurrentEvent,
+    });
   });
 });
 

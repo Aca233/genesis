@@ -498,6 +498,56 @@ describe("能力 API 可见性", () => {
     expect(mocks.prisma.ability.create).not.toHaveBeenCalled();
   });
 
+  it("POST 派生能力的数据库来源唯一约束冲突返回 409", async () => {
+    const { POST } = await import("../route");
+    mocks.prisma.ability.findUnique.mockImplementation(async ({ where }) => (
+      where.id === "race-template-1"
+        ? {
+          ...knownAbility,
+          id: "race-template-1",
+          timelineId: "timeline-1",
+          entityId: "race-1",
+          godId: null,
+          sourceAbilityId: null,
+        }
+        : null
+    ));
+    mocks.prisma.entity.findUnique.mockImplementation(async ({ where }) => (
+      where.id === "race-1"
+        ? { id: "race-1", timelineId: "timeline-1", type: "race", raceId: null }
+        : { id: "character-1", timelineId: "timeline-1", type: "character", raceId: "race-1" }
+    ));
+    mocks.prisma.ability.create.mockRejectedValue(Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+      meta: { target: ["entity_id", "source_ability_id"] },
+    }));
+
+    const response = await POST(new Request("http://localhost/api/abilities", {
+      method: "POST",
+      body: JSON.stringify({
+        timelineId: "timeline-1",
+        entityId: "character-1",
+        godId: null,
+        name: "重复的种族继承",
+        kind: "racial_innate",
+        effect: "晨光感知",
+        trigger: "日出",
+        cost: "无",
+        limitations: "无",
+        mastery: "novice",
+        state: "normal",
+        visibility: "known",
+        rumorText: null,
+        bloodlineJustification: null,
+        sourceAbilityId: "race-template-1",
+        lockedFields: [],
+      }),
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: expect.stringMatching(/重复.*来源/) });
+  });
+
   it("DELETE 无沿革能力时物理删除", async () => {
     const { DELETE } = await import("./route");
     mocks.prisma.ability.findUnique.mockResolvedValue({
