@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  AbilityKindSchema,
+  AbilityMasterySchema,
+  AbilityStateSchema,
+  AbilityVisibilitySchema,
+} from "@/lib/abilities/types";
 
 /**
  * 世界卡组 Schema —— 全项目的数据契约锚点（docs/01 §2.2）。
@@ -43,6 +49,64 @@ export type Scale = z.infer<typeof ScaleSchema>;
 
 // ───────────────────────── 单卡 ─────────────────────────
 
+/** 卡组阶段使用的能力完整描述；ref 是草稿内的稳定关系键。 */
+export const DeckAbilitySchema = z.object({
+  ref: z.string().min(1).describe("稳定引用"),
+  name: z.string(),
+  kind: AbilityKindSchema,
+  effect: z.string().describe("叙事中的实际效果"),
+  trigger: z.string().describe("被动生效或主动发动条件"),
+  cost: z.string().describe("代价；没有时写无"),
+  limitations: z.string().describe("边界、克制方式及不能做到的事"),
+  mastery: AbilityMasterySchema,
+  state: AbilityStateSchema,
+  visibility: AbilityVisibilitySchema,
+  rumorText: z.string().nullable(),
+  lockedFields: z.array(z.string()).default([]),
+});
+
+export const RaceDeckAbilitySchema = DeckAbilitySchema.refine(
+  (ability) => ability.kind === "racial_innate" || ability.kind === "racial_tradition",
+  "种族能力只能是 racial_innate 或 racial_tradition",
+);
+export const DivineDeckAbilitySchema = DeckAbilitySchema.refine(
+  (ability) => ability.kind === "divine",
+  "神权能力只能是 divine",
+);
+export const PersonalDeckAbilitySchema = DeckAbilitySchema.refine(
+  (ability) => ability.kind === "personal",
+  "人物个人技能只能是 personal",
+);
+
+export const FactionMembershipSchema = z.object({
+  factionRef: z.string().min(1),
+  role: z.string().describe("人物在势力中的职务"),
+  isPrimary: z.boolean().describe("是否为主要归属"),
+});
+
+export const RacialOverrideSchema = z.object({
+  sourceAbilityRef: z.string().min(1),
+  bloodlineJustification: z.string().min(1).nullable().optional(),
+});
+
+export const MajorCharacterCardSchema = z.object({
+  ref: z.string().min(1).describe("稳定引用"),
+  name: z.string(),
+  aliases: z.array(z.string()),
+  identity: z.string().describe("身份与社会角色"),
+  ageStage: z.string().describe("年龄阶段"),
+  raceRef: z.string().min(1).describe("主种族稳定引用"),
+  factionMemberships: z.array(FactionMembershipSchema),
+  personality: z.string(),
+  goals: z.string(),
+  situation: z.string().describe("当前处境"),
+  divineTies: z.string().describe("与诸神的关系"),
+  conflictTies: z.string().describe("与时代冲突的关系"),
+  learnedTraditionRefs: z.array(z.object({ sourceAbilityRef: z.string().min(1) })),
+  racialOverrides: z.array(RacialOverrideSchema),
+  abilities: z.array(PersonalDeckAbilitySchema).min(2).max(5).describe("个人技能"),
+});
+
 export const CosmologyCardSchema = z.object({
   origin: z.string().describe("世界起源"),
   powerSystem: z.string().describe("力量体系"),
@@ -76,6 +140,7 @@ export const GodAgendaSchema = z.object({
 });
 
 export const MajorGodCardSchema = z.object({
+  ref: z.string().min(1).describe("稳定引用，供跨卡关系与开局物化使用"),
   name: z.string(),
   aliases: z.array(z.string()).describe("别名与称号"),
   domains: z.array(z.string()).describe("领域"),
@@ -88,6 +153,7 @@ export const MajorGodCardSchema = z.object({
     note: z.string(),
   }),
   faithScope: z.string().describe("信仰范围一句话"),
+  abilities: z.array(DivineDeckAbilitySchema).min(3).max(6).describe("神权能力"),
 });
 
 export const MinorGodSchema = z.object({
@@ -96,31 +162,38 @@ export const MinorGodSchema = z.object({
 });
 
 export const PlayerGodCardSchema = z.object({
+  ref: z.string().min(1).describe("稳定引用，供开局物化使用"),
   name: z.string(),
   origin: z.string().describe("出身：新神/既有神/转生神/篡位者等，从玩家输入推断"),
   domains: z.array(z.string()),
   rank: RankSchema,
   faithBase: z.string().describe("初始信仰势力"),
   situation: z.string().describe("开局处境与钩子"),
+  abilities: z.array(DivineDeckAbilitySchema).min(3).max(6).describe("玩家神权"),
 });
 
 export const FactionCardSchema = z.object({
+  ref: z.string().min(1).describe("稳定引用"),
   name: z.string(),
   aliases: z.array(z.string()),
   kind: z.string().describe("国家/宗门/教团/军团等"),
   overview: z.string(),
   territory: z.string(),
   faith: z.string().describe("信仰归属与浓度"),
-  keyFigures: z.array(z.string()).describe("关键人物名"),
+  keyCharacterRefs: z.array(z.object({ ref: z.string().min(1) })).describe("关键人物稳定引用"),
+  // 旧草稿兼容字段；新的运行时关系以 keyCharacterRefs 为准。
+  keyFigures: z.array(z.string()).optional().default([]).describe("旧草稿关键人物名"),
 });
 
 export const RaceCardSchema = z.object({
+  ref: z.string().min(1).describe("稳定引用"),
   name: z.string(),
   aliases: z.array(z.string()),
   traits: z.string(),
   lifespan: z.string(),
   distribution: z.string(),
   divineTies: z.string().describe("与诸神的渊源"),
+  abilities: z.array(RaceDeckAbilitySchema).min(2).max(5).describe("先天能力与族群技艺"),
 });
 
 export const PlaceCardSchema = z.object({
@@ -171,6 +244,7 @@ export const WorldDeckSchema = z.object({
   minorGods: z.array(MinorGodSchema),
   factions: z.array(FactionCardSchema).min(2).max(8),
   races: z.array(RaceCardSchema),
+  majorCharacters: z.array(MajorCharacterCardSchema).min(6).max(12),
   places: z.array(PlaceCardSchema),
   epochConflict: EpochConflictCardSchema,
   style: StyleCardSchema,
@@ -190,6 +264,7 @@ export const DECK_CARD_KEYS = [
   "minorGods",
   "factions",
   "races",
+  "majorCharacters",
   "places",
   "epochConflict",
   "style",

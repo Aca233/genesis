@@ -3,8 +3,13 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { completeStructured } from "@/lib/llm/structured";
-import { WorldDeckSchema, DECK_CARD_KEYS } from "@/lib/cards/schemas";
-import { GENESIS_SYSTEM, rerollUserPrompt } from "@/lib/prompts/genesis";
+import { WorldDeckSchema, DECK_CARD_KEYS, type WorldDeck } from "@/lib/cards/schemas";
+import { validateDeckReferences } from "@/lib/abilities/validator";
+import {
+  GENESIS_SYSTEM,
+  rerollReferenceRepairPrompt,
+  rerollUserPrompt,
+} from "@/lib/prompts/genesis";
 
 /**
  * POST /api/worlds/[id]/reroll —— 单卡重掷（其余卡组为约束；player_locked 保留）
@@ -47,6 +52,28 @@ function setPath(obj: unknown, path: string, value: unknown) {
   }
 }
 
+function applyLockedPaths(
+  generated: WorldDeck,
+  currentDeck: unknown,
+  lockedPaths: string[],
+): WorldDeck {
+  const merged = JSON.parse(JSON.stringify(generated)) as Record<string, unknown>;
+  for (const path of lockedPaths) {
+    const oldValue = getPath(currentDeck, path);
+    if (oldValue !== undefined) setPath(merged, path, oldValue);
+  }
+  return WorldDeckSchema.parse(merged);
+}
+
+function referenceIssue(deck: WorldDeck): string | null {
+  try {
+    validateDeckReferences(deck);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -59,20 +86,18 @@ export async function POST(
     return NextResponse.json({ error: "世界草稿不存在" }, { status: 404 });
   }
 
-  const lockedInCard = world.lockedPaths.filter(
-    (p) => p === cardKey || p.startsWith(`${cardKey}.`),
-  );
+  const lockedPaths = world.lockedPaths;
 
-  let deck;
+  let generated: WorldDeck;
   try {
-    deck = await completeStructured("narrative", {
+    generated = await completeStructured("narrative", {
       task: "genesis",
       system: GENESIS_SYSTEM,
       user: rerollUserPrompt({
         decree: world.genesisInput,
         cardKey,
         currentDeckJson: JSON.stringify(world.draftDeck),
-        lockedNote: lockedInCard.length ? lockedInCard.join(", ") : undefined,
+        lockedNote: lockedPaths.length ? lockedPaths.join(", ") : undefined,
         playerNote: note,
       }),
       schema: WorldDeckSchema,
@@ -83,18 +108,48 @@ export async function POST(
     return NextResponse.json({ error: message }, { status: 502 });
   }
 
-  // 服务端强制：player_locked 路径以旧值覆写（不信任模型的「保留」承诺）
-  const merged = deck as unknown as Record<string, unknown>;
-  for (const path of lockedInCard) {
-    const oldValue = getPath(world.draftDeck, path);
-    if (oldValue !== undefined) setPath(merged, path, oldValue);
+  let deck: WorldDeck;
+  try {
+    deck = applyLockedPaths(generated, world.draftDeck, lockedPaths);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `重掷结果与锁定字段无法组成有效卡组：${message}` }, { status: 502 });
+  }
+
+  const firstReferenceIssue = referenceIssue(deck);
+  if (firstReferenceIssue !== null) {
+    try {
+      const repaired = await completeStructured("narrative", {
+        task: "genesis",
+        system: GENESIS_SYSTEM,
+        user: rerollReferenceRepairPrompt({
+          decree: world.genesisInput,
+          currentDeckJson: JSON.stringify(deck),
+          referenceIssue: firstReferenceIssue,
+        }),
+        schema: WorldDeckSchema,
+        maxTokens: 16000,
+      });
+      deck = applyLockedPaths(repaired, world.draftDeck, lockedPaths);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: `重掷引用修复失败：${message}` }, { status: 502 });
+    }
+
+    const repairedReferenceIssue = referenceIssue(deck);
+    if (repairedReferenceIssue !== null) {
+      return NextResponse.json(
+        { error: "重掷引用修复后仍无效", issues: [repairedReferenceIssue] },
+        { status: 502 },
+      );
+    }
   }
 
   await prisma.world.update({
     where: { id },
     data: {
       name: deck.worldName,
-      draftDeck: merged as Prisma.InputJsonValue,
+      draftDeck: deck as unknown as Prisma.InputJsonValue,
       themeCard: deck.theme as unknown as Prisma.InputJsonValue,
       styleCard: deck.style as unknown as Prisma.InputJsonValue,
       cosmology: deck.cosmology as unknown as Prisma.InputJsonValue,
@@ -104,5 +159,5 @@ export async function POST(
     },
   });
 
-  return NextResponse.json({ deck: merged });
+  return NextResponse.json({ deck });
 }

@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { completeStructured } from "@/lib/llm/structured";
 import { WorldDeckSchema } from "@/lib/cards/schemas";
+import { validateDeckReferences } from "@/lib/abilities/validator";
 import { GENESIS_SYSTEM, genesisUserPrompt } from "@/lib/prompts/genesis";
 import { parseStWorldbook, lorebookExcerpts } from "@/lib/lorebook/st-import";
 
@@ -50,6 +51,13 @@ export async function POST(request: Request) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 502 });
+  }
+
+  try {
+    validateDeckReferences(deck);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: "卡组引用校验失败", issues: [message] }, { status: 400 });
   }
 
   const world = await prisma.world.create({

@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { WorldDeckSchema } from "@/lib/cards/schemas";
+import { validateDeckReferences } from "@/lib/abilities/validator";
 
 /**
  * GET    /api/worlds/[id] —— 读取世界（含草稿卡组）
@@ -42,6 +43,16 @@ export async function PATCH(
   if (!parsed.success) {
     return NextResponse.json(
       { error: "卡组校验失败", issues: parsed.error.issues.slice(0, 5) },
+      { status: 400 },
+    );
+  }
+
+  try {
+    validateDeckReferences(parsed.data);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      { error: "卡组引用校验失败", issues: [message] },
       { status: 400 },
     );
   }

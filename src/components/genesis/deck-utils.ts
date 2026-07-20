@@ -50,6 +50,7 @@ export const CARD_KEY_LABELS: Record<DeckCardKey, string> = {
   minorGods: "次要神",
   factions: "势力",
   races: "种族",
+  majorCharacters: "主要人物",
   places: "地理",
   epochConflict: "纪元冲突",
   style: "叙事风格",
@@ -106,7 +107,9 @@ const PLACEHOLDER = "（待补：可用重掷或手改完善）";
 export function promoteMinorGod(
   minor: WorldDeck["minorGods"][number],
 ): MajorGodCard {
+  const ref = `god-${minor.name}`;
   return {
+    ref,
     name: minor.name,
     aliases: [],
     domains: [PLACEHOLDER],
@@ -127,6 +130,20 @@ export function promoteMinorGod(
     },
     initialRelationToPlayer: { label: "unknown", note: PLACEHOLDER },
     faithScope: PLACEHOLDER,
+    abilities: Array.from({ length: 3 }, (_, index) => ({
+      ref: `${ref}-ability-${index + 1}`,
+      name: `神权${index + 1}`,
+      kind: "divine" as const,
+      effect: PLACEHOLDER,
+      trigger: PLACEHOLDER,
+      cost: "无",
+      limitations: PLACEHOLDER,
+      mastery: "novice" as const,
+      state: "normal" as const,
+      visibility: "known" as const,
+      rumorText: null,
+      lockedFields: [],
+    })),
   };
 }
 
