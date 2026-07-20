@@ -149,9 +149,11 @@ export function traditionAbilityRefsForRace(
 /** 取得任一可引用的先天模板；没有时显式返回 undefined，绝不生成空 ref。 */
 export function firstRacialInnateAbilityRef(
   deck: RaceAbilityDeck,
+  raceRef: string,
 ): string | undefined {
   return deck.races
-    .flatMap((race) => race.abilities)
+    .find((race) => race.ref === raceRef)
+    ?.abilities
     .find((ability) => ability.kind === "racial_innate")
     ?.ref;
 }

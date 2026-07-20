@@ -87,15 +87,13 @@ export function MajorCharacterEditor({ deck, index, lockedPaths, onEdit }: Props
     const ability = currentRace?.abilities.find((entry) => entry.ref === ref);
     return { ref, label: `${ability?.name ?? ref} · ${ref}` };
   });
-  const innateOptions = deck.races.flatMap((race) =>
-    race.abilities
-      .filter((ability) => ability.kind === "racial_innate")
-      .map((ability) => ({
-        value: ability.ref,
-        label: `${race.name} · ${ability.name} · ${ability.ref}`,
-      })),
-  );
-  const firstInnateRef = firstRacialInnateAbilityRef(deck);
+  const innateOptions = currentRace?.abilities
+    .filter((ability) => ability.kind === "racial_innate")
+    .map((ability) => ({
+      value: ability.ref,
+      label: `${currentRace.name} · ${ability.name} · ${ability.ref}`,
+    })) ?? [];
+  const firstInnateRef = firstRacialInnateAbilityRef(deck, character.raceRef);
 
   const selectedTraditions = character.learnedTraditionRefs.map((reference) => reference.sourceAbilityRef);
 

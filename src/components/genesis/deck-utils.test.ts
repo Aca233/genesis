@@ -68,7 +68,19 @@ describe("创世人物引用工具", () => {
   });
 
   it("仅在存在种族先天模板时提供先天覆写来源", () => {
-    expect(firstRacialInnateAbilityRef(deck)).toBe("human-inborn");
-    expect(firstRacialInnateAbilityRef({ races: [{ ref: "race-empty", abilities: [] }] })).toBeUndefined();
+    expect(firstRacialInnateAbilityRef(deck, "race-human")).toBe("human-inborn");
+    expect(firstRacialInnateAbilityRef({ races: [{ ref: "race-empty", abilities: [] }] }, "race-empty")).toBeUndefined();
+  });
+
+  it("不以其他种族的先天模板作为新覆写来源", () => {
+    const deckWithOtherRaceOnly = {
+      races: [
+        { ref: "race-current", abilities: [] },
+        { ref: "race-other", abilities: [{ ref: "other-inborn", kind: "racial_innate" }] },
+      ],
+    };
+
+    expect(firstRacialInnateAbilityRef(deckWithOtherRaceOnly, "race-current")).toBeUndefined();
+    expect(firstRacialInnateAbilityRef(deckWithOtherRaceOnly, "race-other")).toBe("other-inborn");
   });
 });
