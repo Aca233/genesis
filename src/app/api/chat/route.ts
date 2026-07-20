@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { ScaleSchema } from "@/lib/cards/schemas";
 import { buildNarratorContext } from "@/lib/context/builder";
 import { narratorSSE } from "@/lib/context/sse";
 import {
-  revealAbility,
-  type AbilityMutationClient,
-} from "@/lib/abilities/mutations";
+  finalizeNarration,
+  type NarrationFinalizationClient,
+} from "@/lib/chat/finalize";
 
 /**
  * POST /api/chat —— 叙事主循环（SSE 流）
@@ -26,6 +25,7 @@ const BodySchema = z.object({
   scale: ScaleSchema,
   mode: z.enum(["say", "continue", "opening"]),
   directive: z.string().max(1000).optional(),
+  generationId: z.string().min(8).max(128).optional(),
 });
 
 export async function POST(request: Request) {
@@ -34,6 +34,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "请求体不合法" }, { status: 400 });
   }
   const { chapterId, content, scale, mode, directive } = parsed.data;
+  const generationId = parsed.data.generationId ?? crypto.randomUUID();
 
   const chapter = await prisma.chapter.findUnique({
     where: { id: chapterId },
@@ -89,72 +90,30 @@ export async function POST(request: Request) {
 
   return narratorSSE({
     messages,
-    onDone: async ({ prose, meta }) => {
-      const saved = await prisma.message.create({
-        data: {
+    signal: request.signal,
+    onDone: async ({ prose, meta, signal }) => {
+      const result = await finalizeNarration(
+        prisma as unknown as NarrationFinalizationClient,
+        {
+          generationId,
           chapterId,
-          index: narratorIndex,
-          role: "narrator",
-          content: prose,
+          chapterIndex: chapter.index,
+          timelineId: chapter.timeline.id,
+          narratorIndex,
+          prose,
+          meta,
           scale,
-          variants: [{ content: prose, meta, chosen: true }] as Prisma.InputJsonValue,
-          meta: meta as unknown as Prisma.InputJsonValue,
-        },
-      });
-      // 能力揭示逐条隔离：模型给出的 ID 必须属于当前时间线；
-      // 单项非法或并发冲突仅记录日志，不影响已保存的叙事消息。
-      for (const reveal of meta.abilityReveals ?? []) {
-        try {
-          const ability = await prisma.ability.findFirst({
-            where: { id: reveal.abilityId, timelineId: chapter.timeline.id },
-            select: { id: true, version: true, rumorText: true },
-          });
-          if (ability === null) {
+          signal,
+          logInvalidReveal: ({ abilityId }) => {
             console.warn("[chat] 跳过非法能力揭示", {
-              abilityId: reveal.abilityId,
+              abilityId,
               timelineId: chapter.timeline.id,
-              messageId: saved.id,
+              generationId,
             });
-            continue;
-          }
-
-          await revealAbility(prisma as unknown as AbilityMutationClient, {
-            abilityId: ability.id,
-            version: ability.version,
-            visibility: reveal.visibility,
-            ...(reveal.visibility === "rumored"
-              ? { rumorText: ability.rumorText ?? reveal.evidence }
-              : {}),
-            event: {
-              chapterId,
-              messageId: saved.id,
-              evidence: reveal.evidence,
-              scale,
-              dedupeKey: `narrator-reveal:${saved.id}:${ability.id}:${reveal.visibility}`,
-            },
-          });
-        } catch (error) {
-          console.warn("[chat] 应用能力揭示失败，已跳过", {
-            abilityId: reveal.abilityId,
-            timelineId: chapter.timeline.id,
-            messageId: saved.id,
-            error,
-          });
-        }
-      }
-
-      // 查探裁决回填：揭示的隐藏大事记翻转为可见，标注揭晓章
-      if (meta.revealedEventIds?.length) {
-        await prisma.chronicleEntry.updateMany({
-          where: {
-            id: { in: meta.revealedEventIds },
-            timelineId: chapter.timeline.id,
-            revealed: false,
           },
-          data: { revealed: true, revealedAtChapter: chapter.index },
-        });
-      }
-      return { messageId: saved.id };
+        },
+      );
+      return { messageId: result.messageId };
     },
   });
 }

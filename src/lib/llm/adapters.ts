@@ -12,12 +12,18 @@ import type {
 
 export interface ProviderAdapter {
   /** 非流式：返回完整文本 */
-  complete(slot: ModelSlot, req: CompletionRequest, apiKey: string): Promise<string>;
+  complete(
+    slot: ModelSlot,
+    req: CompletionRequest,
+    apiKey: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string>;
   /** 流式：产出文本增量 */
   stream(
     slot: ModelSlot,
     req: CompletionRequest,
     apiKey: string,
+    options?: { signal?: AbortSignal },
   ): AsyncGenerator<StreamChunk>;
   /** 获取该端点可用模型 id 列表 */
   listModels(baseUrl: string, apiKey: string): Promise<string[]>;
@@ -69,6 +75,7 @@ async function openaiFetch(
   slot: ModelSlot,
   apiKey: string,
   payload: unknown,
+  signal?: AbortSignal,
 ): Promise<Response> {
   const base = (baseUrlFix.get(slot.baseUrl) ?? slot.baseUrl).replace(/\/+$/, "");
   const doFetch = (b: string) =>
@@ -79,6 +86,7 @@ async function openaiFetch(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(payload),
+      signal,
     });
 
   let res = await doFetch(base);
@@ -96,14 +104,14 @@ async function openaiFetch(
 }
 
 const openaiAdapter: ProviderAdapter = {
-  async complete(slot, req, apiKey) {
+  async complete(slot, req, apiKey, options) {
     const res = await openaiFetch(slot, apiKey, {
       model: slot.model,
       messages: req.messages,
       temperature: req.temperature ?? slot.temperature,
       max_tokens: req.maxTokens ?? slot.maxTokens ?? DEFAULT_MAX_TOKENS,
       stream: false,
-    });
+    }, options?.signal);
     if (!res.ok) throw new Error(await readError(res));
     const json = await res.json();
     const text = json.choices?.[0]?.message?.content;
@@ -111,14 +119,14 @@ const openaiAdapter: ProviderAdapter = {
     return text;
   },
 
-  async *stream(slot, req, apiKey) {
+  async *stream(slot, req, apiKey, options) {
     const res = await openaiFetch(slot, apiKey, {
       model: slot.model,
       messages: req.messages,
       temperature: req.temperature ?? slot.temperature,
       max_tokens: req.maxTokens ?? slot.maxTokens ?? DEFAULT_MAX_TOKENS,
       stream: true,
-    });
+    }, options?.signal);
     if (!res.ok) throw new Error(await readError(res));
     for await (const data of sseData(res)) {
       try {
@@ -190,7 +198,7 @@ function toAnthropicBody(slot: ModelSlot, req: CompletionRequest, stream: boolea
 }
 
 const anthropicAdapter: ProviderAdapter = {
-  async complete(slot, req, apiKey) {
+  async complete(slot, req, apiKey, options) {
     const res = await fetch(joinUrl(slot.baseUrl, "/v1/messages"), {
       method: "POST",
       headers: {
@@ -199,6 +207,7 @@ const anthropicAdapter: ProviderAdapter = {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(toAnthropicBody(slot, req, false)),
+      signal: options?.signal,
     });
     if (!res.ok) throw new Error(await readError(res));
     const json = await res.json();
@@ -210,7 +219,7 @@ const anthropicAdapter: ProviderAdapter = {
     return text;
   },
 
-  async *stream(slot, req, apiKey) {
+  async *stream(slot, req, apiKey, options) {
     const res = await fetch(joinUrl(slot.baseUrl, "/v1/messages"), {
       method: "POST",
       headers: {
@@ -219,6 +228,7 @@ const anthropicAdapter: ProviderAdapter = {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(toAnthropicBody(slot, req, true)),
+      signal: options?.signal,
     });
     if (!res.ok) throw new Error(await readError(res));
     for await (const data of sseData(res)) {
@@ -275,7 +285,7 @@ function toGeminiBody(slot: ModelSlot, req: CompletionRequest) {
 }
 
 const geminiAdapter: ProviderAdapter = {
-  async complete(slot, req, apiKey) {
+  async complete(slot, req, apiKey, options) {
     const url = joinUrl(
       slot.baseUrl,
       `/v1beta/models/${slot.model}:generateContent`,
@@ -287,6 +297,7 @@ const geminiAdapter: ProviderAdapter = {
         "x-goog-api-key": apiKey,
       },
       body: JSON.stringify(toGeminiBody(slot, req)),
+      signal: options?.signal,
     });
     if (!res.ok) throw new Error(await readError(res));
     const json = await res.json();
@@ -299,7 +310,7 @@ const geminiAdapter: ProviderAdapter = {
     return text;
   },
 
-  async *stream(slot, req, apiKey) {
+  async *stream(slot, req, apiKey, options) {
     const url = joinUrl(
       slot.baseUrl,
       `/v1beta/models/${slot.model}:streamGenerateContent?alt=sse`,
@@ -311,6 +322,7 @@ const geminiAdapter: ProviderAdapter = {
         "x-goog-api-key": apiKey,
       },
       body: JSON.stringify(toGeminiBody(slot, req)),
+      signal: options?.signal,
     });
     if (!res.ok) throw new Error(await readError(res));
     for await (const data of sseData(res)) {

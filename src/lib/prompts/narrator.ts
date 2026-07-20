@@ -31,19 +31,16 @@ const EMPTY_META: NarratorMeta = { suggestions: [], chapterBreakHint: false };
  * META 缺失/损坏一律容忍 → 回退空 meta（suggestions:[]）。
  */
 export function splitMetaBlock(full: string): { prose: string; meta: NarratorMeta } {
-  const idx = full.indexOf(META_START);
-  if (idx === -1) return { prose: full.trim(), meta: EMPTY_META };
+  const framed = full.match(/(?:^|\n)<<<META\r?\n([\s\S]*?)\r?\nMETA>>>[ \t]*(?:\r?\n)*$/);
+  if (!framed || framed.index === undefined) {
+    return { prose: full.trim(), meta: EMPTY_META };
+  }
 
-  const prose = full.slice(0, idx).trim();
-  let block = full.slice(idx + META_START.length);
-  const endIdx = block.indexOf(META_END);
-  if (endIdx !== -1) block = block.slice(0, endIdx);
+  const prose = full.slice(0, framed.index).trim();
+  const block = framed[1];
 
   try {
-    const start = block.indexOf("{");
-    const end = block.lastIndexOf("}");
-    if (start === -1 || end <= start) return { prose, meta: EMPTY_META };
-    const json = JSON.parse(block.slice(start, end + 1)) as Record<string, unknown>;
+    const json = JSON.parse(block) as Record<string, unknown>;
     const suggestions = Array.isArray(json.suggestions)
       ? json.suggestions
           .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
@@ -81,7 +78,7 @@ export function splitMetaBlock(full: string): { prose: string; meta: NarratorMet
       },
     };
   } catch {
-    return { prose, meta: EMPTY_META };
+    return { prose: full.trim(), meta: EMPTY_META };
   }
 }
 

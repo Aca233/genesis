@@ -545,6 +545,15 @@ async function revealAbilityInTx(
   return applyAbilityChangeInTx(tx, change);
 }
 
+/** Parses and applies a reveal inside a caller-owned transaction. */
+export async function revealAbilityInTransaction(
+  tx: AbilityMutationTx,
+  input: unknown,
+): Promise<AppliedAbilityChange> {
+  const parsed = RevealAbilitySchema.parse(input);
+  return revealAbilityInTx(tx, parsed);
+}
+
 /** Parses reveal requests and applies their ability/event mutation atomically. */
 export async function revealAbility(
   client: AbilityMutationClient,

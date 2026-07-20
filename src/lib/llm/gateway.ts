@@ -158,15 +158,18 @@ export async function complete(
 export async function* stream(
   slotName: SlotName,
   req: CompletionRequest,
+  options?: { signal?: AbortSignal },
 ): AsyncGenerator<StreamChunk> {
   const { slot, apiKey, slotName: used } = await resolveSlot(slotName);
   const adapter = adapters[slot.provider];
   const startedAt = Date.now();
 
   try {
-    yield* adapter.stream(slot, req, apiKey);
+    yield* adapter.stream(slot, req, apiKey, options);
+    if (options?.signal?.aborted) return;
     await logCall(req.task, used, startedAt, true);
   } catch (err) {
+    if (options?.signal?.aborted) return;
     const message = err instanceof Error ? err.message : String(err);
     await logCall(req.task, used, startedAt, false, message);
     throw err;

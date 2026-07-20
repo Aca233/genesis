@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   prisma: {
     god: { findMany: vi.fn() },
     entity: { findMany: vi.fn() },
+    ability: { findMany: vi.fn() },
   },
 }));
 
@@ -104,6 +105,16 @@ const unrelatedCharacter = {
   race: null,
 };
 
+function owned(owner: { id: string; abilities: ReturnType<typeof ability>[] }, key: "godId" | "entityId") {
+  return owner.abilities.map((item) => ({
+    ...item,
+    godId: null,
+    entityId: null,
+    [key]: owner.id,
+  }));
+}
+
+
 describe("buildAbilityContext", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -116,6 +127,14 @@ describe("buildAbilityContext", () => {
       race,
       character,
       unrelatedCharacter,
+    ]);
+    mocks.prisma.ability.findMany.mockResolvedValue([
+      ...owned(playerGod, "godId"),
+      ...owned(actingGod, "godId"),
+      ...owned(unrelatedGod, "godId"),
+      ...owned(race, "entityId"),
+      ...owned(character, "entityId"),
+      ...owned(unrelatedCharacter, "entityId"),
     ]);
   });
 
@@ -176,15 +195,13 @@ describe("buildAbilityContext", () => {
       state: "deprecated",
     };
     mocks.prisma.entity.findMany.mockResolvedValue([
-      {
-        ...race,
-        abilities: [innate],
-      },
-      {
-        ...character,
-        abilities: [overridden, sealed, unawakened, lost, deprecated],
-        race: { id: race.id, name: race.name, abilities: [innate] },
-      },
+      { ...race, abilities: [innate] },
+      { ...character, abilities: [overridden, sealed, unawakened, lost, deprecated] },
+    ]);
+    mocks.prisma.ability.findMany.mockResolvedValue([
+      ...owned({ ...race, abilities: [innate] }, "entityId"),
+      ...owned({ ...character, abilities: [overridden, sealed, unawakened, lost, deprecated] }, "entityId"),
+      ...owned(playerGod, "godId"),
     ]);
 
     const context = await buildAbilityContext({
@@ -210,11 +227,11 @@ describe("buildAbilityContext", () => {
     };
     mocks.prisma.entity.findMany.mockResolvedValue([
       { ...race, abilities: [innate] },
-      {
-        ...character,
-        abilities: [],
-        race: { id: race.id, name: race.name, abilities: [innate] },
-      },
+      { ...character, abilities: [] },
+    ]);
+    mocks.prisma.ability.findMany.mockResolvedValue([
+      ...owned({ ...race, abilities: [innate] }, "entityId"),
+      ...owned(playerGod, "godId"),
     ]);
 
     const context = await buildAbilityContext({
@@ -246,6 +263,11 @@ describe("buildAbilityContext", () => {
     mocks.prisma.entity.findMany.mockResolvedValue([
       { ...race, abilities: [rumoredRace] },
     ]);
+    mocks.prisma.ability.findMany.mockResolvedValue([
+      ...owned(playerGod, "godId"),
+      ...owned({ ...actingGod, abilities: [rumoredGod] }, "godId"),
+      ...owned({ ...race, abilities: [rumoredRace] }, "entityId"),
+    ]);
 
     const context = await buildAbilityContext({
       timelineId: "timeline-1",
@@ -269,6 +291,40 @@ describe("buildAbilityContext", () => {
   });
 
 
+
+  it("先筛选相关 owner，再仅查询这些 owner 的能力且不嵌套重复种族能力", async () => {
+    mocks.prisma.god.findMany.mockResolvedValue([
+      { id: "god-player", name: "曦神", aliases: [], isPlayer: true },
+      { id: "god-acting", name: "潮神", aliases: [], isPlayer: false },
+      { id: "god-far", name: "远神", aliases: [], isPlayer: false },
+    ]);
+    mocks.prisma.entity.findMany.mockResolvedValue([
+      { id: race.id, type: "race", name: race.name, aliases: race.aliases, scenePresence: false, raceId: null },
+      { id: character.id, type: "character", name: character.name, aliases: [], scenePresence: true, raceId: race.id },
+      { id: "far-race", type: "race", name: "远族", aliases: [], scenePresence: false, raceId: null },
+    ]);
+    mocks.prisma.ability.findMany.mockResolvedValue([]);
+
+    await buildAbilityContext({
+      timelineId: "timeline-1",
+      viewer: "player",
+      searchText: "潮神与林霁",
+    });
+
+    expect(mocks.prisma.ability.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        timelineId: "timeline-1",
+        OR: [
+          { godId: { in: ["god-player", "god-acting"] } },
+          { entityId: { in: [race.id, character.id] } },
+        ],
+      },
+    }));
+    expect(mocks.prisma.entity.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.not.objectContaining({ race: expect.anything() }),
+    }));
+  });
+
   it("后台行动神获得自身 rumored 神权完整机制，非行动神仍仅见安全传闻", async () => {
     const subjectRumor = ability(
       "divine-acting-rumored",
@@ -283,6 +339,12 @@ describe("buildAbilityContext", () => {
     mocks.prisma.god.findMany.mockResolvedValue([
       { ...actingGod, abilities: [subjectRumor] },
       { ...unrelatedGod, abilities: [otherRumor] },
+    ]);
+    mocks.prisma.ability.findMany.mockResolvedValue([
+      ...owned({ ...actingGod, abilities: [subjectRumor] }, "godId"),
+      ...owned({ ...unrelatedGod, abilities: [otherRumor] }, "godId"),
+      ...owned(race, "entityId"),
+      ...owned(character, "entityId"),
     ]);
 
     const context = await buildAbilityContext({

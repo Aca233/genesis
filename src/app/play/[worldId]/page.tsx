@@ -137,11 +137,12 @@ export default function PlayPage({
       setGenError(null);
       setStreamingText("");
       const ac = new AbortController();
+      const requestBody = { ...body, generationId: crypto.randomUUID() };
       abortRef.current = ac;
       let acc = "";
       await streamNarration(
         "/api/chat",
-        body,
+        requestBody,
         {
           onText: (t) => {
             acc += t;

@@ -22,7 +22,7 @@ function asVariants(value: unknown): VariantItem[] {
 }
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
@@ -75,6 +75,7 @@ export async function POST(
 
   return narratorSSE({
     messages,
+    signal: request.signal,
     onDone: async ({ prose, meta }) => {
       // 重读最新 variants（避免并发覆盖），旧候选全部 chosen=false，新候选定稿
       const fresh = await prisma.message.findUniqueOrThrow({ where: { id } });
