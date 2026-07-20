@@ -505,6 +505,23 @@ it.each([
   expect(result.rejected[0]?.reason).toMatch(/否定|失败|事件|结果/);
 });
 
+it.each([
+  ["lost", { state: "lost" }, "阿岚的凿阵术失去了，但后来恢复，能力仍在"],
+  ["sealed", { state: "sealed" }, "阿岚尝试封印凿阵术，最终失败"],
+  ["awakened", { mastery: "novice" }, "误会传开称阿岚的凿阵术已经觉醒，后来证实并非如此"],
+] as const)("候选事件子句含尝试、纠正或恢复标记时拒绝 %s", async (type, patch, evidence) => {
+  const fixture = extractionFixture();
+  if (type === "awakened") {
+    fixture.abilities.set("trainable-personal", { ...fixture.abilities.get("trainable-personal")!, mastery: "unawakened" });
+  }
+  fixture.messages.push({ id: `message-corrected-${type}`, index: 33, scale: "scene", content: `${evidence}。` });
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ abilityId: "trainable-personal", ownerName: "阿岚", type, patch, evidenceMessageIndex: 33, evidence }],
+  });
+  expect(result.applied).toHaveLength(0);
+});
+
 it("owner 作为主语时仍可证明被动类型 lost", async () => {
   const fixture = extractionFixture();
   const evidence = "阿岚在崩塌中失去了凿阵术";
@@ -536,6 +553,25 @@ it.each([
   });
   expect(result.rejected).toHaveLength(0);
   expect(result.applied).toHaveLength(1);
+});
+
+it.each([
+  ["sealed", { state: "sealed" }, "白石封印石门，并查看阿岚的凿阵术"],
+  ["lost", { state: "lost" }, "白石遗失钥匙，并查看阿岚的凿阵术"],
+  ["impaired", { state: "impaired" }, "白石手臂受损，并查看阿岚的凿阵术"],
+  ["deprecated", { state: "deprecated" }, "议会废弃旧律，并查看阿岚的凿阵术"],
+  ["revealed", { visibility: "known" }, "白石确认石门关闭，并查看阿岚的凿阵术"],
+] as const)("独立事件词与 owner ability 未锚定时拒绝 %s", async (type, patch, evidence) => {
+  const fixture = extractionFixture();
+  if (type === "revealed") {
+    fixture.abilities.set("trainable-personal", { ...fixture.abilities.get("trainable-personal")!, visibility: "rumored" });
+  }
+  fixture.messages.push({ id: `message-unanchored-${type}`, index: 34, scale: "scene", content: `${evidence}。` });
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ abilityId: "trainable-personal", ownerName: "阿岚", type, patch, evidenceMessageIndex: 34, evidence }],
+  });
+  expect(result.applied).toHaveLength(0);
 });
 
 it.each([

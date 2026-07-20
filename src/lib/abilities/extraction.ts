@@ -168,37 +168,27 @@ function changeResultIndex(text: string, change: AbilityExtractionChange): numbe
   return action;
 }
 
-function isNegatedResult(text: string, resultIndex: number): boolean {
-  const before = text.slice(Math.max(0, resultIndex - 10), resultIndex);
-  const after = text.slice(resultIndex, resultIndex + 18);
-  const negatedBefore = /(?:没有被|并未|从未|未能|并非|没有|未)(?:曾|被|真正|成功)?[^。！？!?；;，,]{0,3}$/u.test(before);
-  const failedAfter = /^[^。！？!?；;]{0,12}(?:失败|并非|没有成功|未能)/u.test(after);
-  return negatedBefore || failedAfter;
+const INVALID_EVENT_CLAUSE = /(?:并没有|并未|从未|未能|没有|未(?!来)|失败|尝试|误会|证实[^，,。！？!?；;\n]{0,12}并非|后来[^，,。！？!?；;\n]{0,12}(?:恢复|仍在)|仍在)/u;
+const EXTERNAL_ACTION: Partial<Record<AbilityExtractionChange["type"], string>> = {
+  sealed: "(?:封印|封禁|禁锢|镇压)",
+  lost: "(?:废去|夺去|剥夺|摧毁|抹去)",
+  impaired: "(?:重击|重创|削弱|损伤|破坏)",
+  deprecated: "(?:废弃|废止|淘汰|弃用)",
+};
+const EXTERNAL_RESULT: Partial<Record<AbilityExtractionChange["type"], string>> = {
+  sealed: "(?:封印|封禁|禁锢|镇压|无法施展)",
+  lost: "(?:失去|遗失|丧失|忘却|废去|消散)",
+  impaired: "(?:受损|削弱|衰退|失灵|残缺)",
+  deprecated: "(?:废弃|废止|淘汰|弃用|失传)",
+};
+const RELATION_GAP = "[^，,。！？!?；;\\n]{0,12}";
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-function ownerAbilityRelation(
-  text: string,
-  ownerNames: readonly string[],
-  abilityNames: readonly string[],
-  type: AbilityExtractionChange["type"],
-): boolean {
-  for (const ownerName of ownerNames) {
-    let ownerIndex = text.indexOf(ownerName);
-    while (ownerIndex >= 0) {
-      for (const abilityName of abilityNames) {
-        const abilityIndex = text.indexOf(abilityName, ownerIndex + ownerName.length);
-        if (abilityIndex < 0) continue;
-        const link = text.slice(ownerIndex + ownerName.length, abilityIndex);
-        if (/^的?$/u.test(link)) return true;
-        if (type === "revealed" && /^(?:确实|确有|拥有|身怀|掌握|会使用)$/u.test(link)) {
-          const prefix = text.slice(Math.max(0, ownerIndex - 12), ownerIndex);
-          if (/(?:确认|发现|查明|证实|揭示|识破)/u.test(prefix)) return true;
-        }
-      }
-      ownerIndex = text.indexOf(ownerName, ownerIndex + ownerName.length);
-    }
-  }
-  return false;
+function alternatives(values: readonly string[]): string {
+  return `(?:${values.map(escapeRegExp).join("|")})`;
 }
 
 function externalEventSupported(
@@ -208,10 +198,26 @@ function externalEventSupported(
   abilityNames: readonly string[],
 ): boolean {
   if (!EXTERNAL_EVENT_TYPES.has(change.type)) return false;
+  const owner = alternatives(ownerNames);
+  const ability = alternatives(abilityNames);
+  const ownedAbility = `${owner}的?${ability}`;
   return evidence.split(SENTENCE_SPLIT).map((sentence) => sentence.trim()).filter(Boolean).some((sentence) => {
-    if (!ownerAbilityRelation(sentence, ownerNames, abilityNames, change.type)) return false;
-    const resultIndex = changeResultIndex(sentence, change);
-    return resultIndex >= 0 && !isNegatedResult(sentence, resultIndex);
+    if (INVALID_EVENT_CLAUSE.test(sentence)) return false;
+    if (change.type === "revealed") {
+      return new RegExp(
+        `(?:确认|发现|查明|证实|揭示|识破)${RELATION_GAP}${owner}${RELATION_GAP}(?:拥有|会|掌握|身怀|会使用)${RELATION_GAP}${ability}`,
+        "u",
+      ).test(sentence);
+    }
+    const action = EXTERNAL_ACTION[change.type];
+    const result = EXTERNAL_RESULT[change.type];
+    if (action === undefined || result === undefined) return false;
+    const actionToAbility = new RegExp(`${action}${RELATION_GAP}${ownedAbility}`, "u");
+    const abilityToResult = new RegExp(
+      `${ownedAbility}${RELATION_GAP}(?:被|遭|受到|已)${RELATION_GAP}${result}`,
+      "u",
+    );
+    return actionToAbility.test(sentence) || abilityToResult.test(sentence);
   });
 }
 
@@ -253,7 +259,7 @@ function assertRelevantEvidence(
     const text = chain.map((part) => part.text).join("。");
     if (!abilityNames.some((name) => text.includes(name))) return false;
     const resultIndex = changeResultIndex(text, change);
-    if (resultIndex < 0 || isNegatedResult(text, resultIndex)) return false;
+    if (resultIndex < 0 || INVALID_EVENT_CLAUSE.test(text)) return false;
     const beforeResult = text.slice(0, resultIndex);
     if (EXPLICIT_OBSERVER.test(beforeResult)) return false;
     if (hasCompetingActor(beforeResult, ownerNames, knownEntityNames)) return false;
