@@ -16,6 +16,12 @@ export type NarratorMeta = {
   chapterBreakHint: boolean;
   /** 查探裁决：本轮揭示的隐藏大事记 id */
   revealedEventIds?: string[];
+  /** 本轮由清楚见证或合理调查支持的能力可见性揭示 */
+  abilityReveals?: Array<{
+    abilityId: string;
+    visibility: "rumored" | "known";
+    evidence: string;
+  }>;
 };
 
 const EMPTY_META: NarratorMeta = { suggestions: [], chapterBreakHint: false };
@@ -46,12 +52,32 @@ export function splitMetaBlock(full: string): { prose: string; meta: NarratorMet
     const revealedEventIds = Array.isArray(json.revealed_event_ids)
       ? json.revealed_event_ids.filter((s): s is string => typeof s === "string")
       : undefined;
+    const abilityReveals = Array.isArray(json.ability_reveals)
+      ? json.ability_reveals.flatMap((item) => {
+          if (!item || typeof item !== "object") return [];
+          const reveal = item as Record<string, unknown>;
+          if (
+            typeof reveal.abilityId !== "string" ||
+            (reveal.visibility !== "rumored" && reveal.visibility !== "known") ||
+            typeof reveal.evidence !== "string" ||
+            reveal.evidence.trim().length === 0
+          ) {
+            return [];
+          }
+          return [{
+            abilityId: reveal.abilityId,
+            visibility: reveal.visibility as "rumored" | "known",
+            evidence: reveal.evidence.trim(),
+          }];
+        })
+      : undefined;
     return {
       prose,
       meta: {
         suggestions,
         chapterBreakHint: json.chapterBreakHint === true,
         ...(revealedEventIds?.length ? { revealedEventIds } : {}),
+        ...(abilityReveals?.length ? { abilityReveals } : {}),
       },
     };
   } catch {
@@ -81,6 +107,8 @@ CORE RULES:
 - VOICE CARDS ARE LAW: every god who speaks must be unmistakably identifiable by their voice card (verbal tics, forms of address, catchphrases, things they would never say). No two gods may sound alike.
 - The world does not orbit the player: NPCs and gods pursue their own ends; consequences unfold whether or not the player attends to them.
 - Honor the FUSION AXIOM on any cross-IP rules question, if one is provided.
+- ABILITY CONTEXT IS BINDING: effects, triggers, costs, limitations, states and mastery are hard narrative boundaries. Never grant an owner powers beyond those entries.
+- Never mention, imply, or offer as an action suggestion an ability absent from KNOWN ABILITIES. AUTHOR-ONLY entries may be portrayed only when their owner manifests them; do not expose their mechanics before that manifestation.
 - Dark themes are permitted to the full extent of the world's tone; follow the STYLE CARD in diction, pacing and mood.
 - Light Markdown only: *emphasis*, **bold**, and --- as a scene divider. No headings, no code blocks, no tables in narrative prose.
 - ALL narrative output must be written in Chinese.`;
@@ -100,10 +128,11 @@ function outputContract(): string {
   return `OUTPUT CONTRACT (strict):
 1) Write the narrative prose in Chinese.
 2) After the prose, on a NEW line, output exactly: ${META_START}
-3) Then output ONE JSON object: {"suggestions": ["…", "…"], "chapterBreakHint": false, "revealed_event_ids": []}
+3) Then output ONE JSON object: {"suggestions": ["…", "…"], "chapterBreakHint": false, "revealed_event_ids": [], "ability_reveals": []}
    - suggestions: 2-4 SHORT Chinese action options the player god might plausibly take next (in-fiction, first person optional).
    - chapterBreakHint: true ONLY when a major scene shift or large time jump makes this a natural chapter break; otherwise false.
    - revealed_event_ids: ids of hidden chronicle entries you revealed this reply (only when an INVESTIGATION ADJUDICATION block was provided; otherwise omit or []).
+   - ability_reveals: only abilities clearly witnessed in this prose or supported by a reasonable investigation. Each item is {"abilityId":"exact supplied id","visibility":"rumored|known","evidence":"concise Chinese evidence from this reply"}. Use rumored for indirect signs and known for clear manifestation; otherwise omit or [].
 4) Close with a final line: ${META_END}
 Nothing may follow ${META_END}. Never mention or explain this block inside the prose.`;
 }

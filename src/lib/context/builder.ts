@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import type { ChatMessage } from "@/lib/llm/types";
 import type { Scale } from "@/lib/cards/schemas";
 import { narratorSystem, openingDirective } from "@/lib/prompts/narrator";
+import { buildAbilityContext } from "@/lib/abilities/context";
 
 /**
  * Context Builder v1（docs/04 §2 组装顺序的 M1 裁剪版）：
@@ -341,9 +342,14 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
 
   // ── system 3：世界书 + 实体状态卡 + 相关编年史 ──
   const lore = lorebookBlock(world.lorebookEntries, searchText);
-  const [entityCards, chronicle] = await Promise.all([
+  const [entityCards, chronicle, abilityContext] = await Promise.all([
     entityCardsBlock(chapter.timelineId, searchText),
     chronicleBlock(chapter.timelineId, searchText),
+    buildAbilityContext({
+      timelineId: chapter.timelineId,
+      viewer: "player",
+      searchText,
+    }),
   ]);
 
   // ── 正文窗口 + 本轮输入，拼成单条 user（防中转站丢多轮） ──
@@ -365,6 +371,7 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
   const messages: ChatMessage[] = [{ role: "system", content: system1 }];
   messages.push({ role: "system", content: system2 });
   if (entityCards) messages.push({ role: "system", content: entityCards });
+  messages.push({ role: "system", content: abilityContext });
   if (lore) messages.push({ role: "system", content: lore });
   if (chronicle) messages.push({ role: "system", content: chronicle });
   messages.push({ role: "user", content: parts.join("\n\n") });

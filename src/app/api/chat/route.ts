@@ -5,6 +5,10 @@ import { prisma } from "@/lib/db";
 import { ScaleSchema } from "@/lib/cards/schemas";
 import { buildNarratorContext } from "@/lib/context/builder";
 import { narratorSSE } from "@/lib/context/sse";
+import {
+  revealAbility,
+  type AbilityMutationClient,
+} from "@/lib/abilities/mutations";
 
 /**
  * POST /api/chat —— 叙事主循环（SSE 流）
@@ -97,6 +101,48 @@ export async function POST(request: Request) {
           meta: meta as unknown as Prisma.InputJsonValue,
         },
       });
+      // 能力揭示逐条隔离：模型给出的 ID 必须属于当前时间线；
+      // 单项非法或并发冲突仅记录日志，不影响已保存的叙事消息。
+      for (const reveal of meta.abilityReveals ?? []) {
+        try {
+          const ability = await prisma.ability.findFirst({
+            where: { id: reveal.abilityId, timelineId: chapter.timeline.id },
+            select: { id: true, version: true, rumorText: true },
+          });
+          if (ability === null) {
+            console.warn("[chat] 跳过非法能力揭示", {
+              abilityId: reveal.abilityId,
+              timelineId: chapter.timeline.id,
+              messageId: saved.id,
+            });
+            continue;
+          }
+
+          await revealAbility(prisma as unknown as AbilityMutationClient, {
+            abilityId: ability.id,
+            version: ability.version,
+            visibility: reveal.visibility,
+            ...(reveal.visibility === "rumored"
+              ? { rumorText: ability.rumorText ?? reveal.evidence }
+              : {}),
+            event: {
+              chapterId,
+              messageId: saved.id,
+              evidence: reveal.evidence,
+              scale,
+              dedupeKey: `narrator-reveal:${saved.id}:${ability.id}:${reveal.visibility}`,
+            },
+          });
+        } catch (error) {
+          console.warn("[chat] 应用能力揭示失败，已跳过", {
+            abilityId: reveal.abilityId,
+            timelineId: chapter.timeline.id,
+            messageId: saved.id,
+            error,
+          });
+        }
+      }
+
       // 查探裁决回填：揭示的隐藏大事记翻转为可见，标注揭晓章
       if (meta.revealedEventIds?.length) {
         await prisma.chronicleEntry.updateMany({

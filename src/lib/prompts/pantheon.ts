@@ -54,6 +54,7 @@ Rules:
 - Your action may target the player god (dream-visit, envoy, miracle-challenge, council summons). If so, fill proactiveEvent — it becomes an onstage event next chapter.
 - OMEN: describe ONE subtle worldly sign of your action — a mortal-perceivable detail (a dimmed votive fire, a strange tide, a priest's uneasy dream). Never explanatory, never naming you.
 - You see the public aftermath of higher-ranked gods' turns this chapter (given below, if any); you may react to it.
+- YOUR ABILITIES ARE BINDING: obey every effect, trigger, cost, limitation, state and mastery boundary supplied below. Do not invent powers you do not possess.
 - Honor the fusion axiom on any cross-IP power question.
 - Output ONLY a JSON object matching the schema. All user-facing strings in Chinese.
 
@@ -64,6 +65,7 @@ export function pantheonUserPrompt(opts: {
   godCard: string; // 人格+声纹+议程+关系 JSON
   chapterChronicle: string; // 本章编年史/摘要
   relatedEntities: string; // 该神触及的实体卡
+  abilityContext: string; // 行动神自身能力（含仅该神可见的隐藏神权）
   fusionAxiom?: string;
   earlierTurnsPublic: string; // 本章先行诸神的公开后果（位阶更高者）
 }): string {
@@ -75,6 +77,9 @@ ${opts.chapterChronicle}
 
 == ENTITIES YOU TOUCH ==
 ${opts.relatedEntities || "—"}
+
+== YOUR ABILITY CONTEXT (binding; do not exceed it) ==
+${opts.abilityContext || "—"}
 ${opts.fusionAxiom ? `\n== FUSION AXIOM ==\n${opts.fusionAxiom}` : ""}
 ${
   opts.earlierTurnsPublic

@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { buildAbilityContext } from "@/lib/abilities/context";
 import { completeStructured } from "@/lib/llm/structured";
 import {
   PantheonTurnSchema,
@@ -131,6 +132,15 @@ export async function* settleChapter(
       if (actedGodIds.has(god.id)) continue;
 
       try {
+        const [relatedEntities, abilityContext] = await Promise.all([
+          entitiesTouchedBy(timeline.id, god.name),
+          buildAbilityContext({
+            timelineId: timeline.id,
+            viewer: "backstage",
+            subjectGodId: god.id,
+            searchText: `${god.name}\n${prose.slice(-6000)}`,
+          }),
+        ]);
         const turn = await completeStructured("backstage", {
           task: "pantheon",
           system: pantheonSystem(god.name),
@@ -145,7 +155,8 @@ export async function* settleChapter(
               faithScope: god.faithScope,
             }),
             chapterChronicle: prose.slice(-6000),
-            relatedEntities: await entitiesTouchedBy(timeline.id, god.name),
+            relatedEntities,
+            abilityContext,
             fusionAxiom: world.fusionAxiom
               ? JSON.stringify(world.fusionAxiom)
               : undefined,
