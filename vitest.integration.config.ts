@@ -8,6 +8,7 @@ export default defineConfig({
     clearMocks: true,
     fileParallelism: false,
     testTimeout: 15_000,
+    setupFiles: [path.resolve(__dirname, "src/test/require-test-database.ts")],
   },
   resolve: {
     alias: {
