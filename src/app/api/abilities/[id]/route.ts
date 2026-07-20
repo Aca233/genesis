@@ -130,10 +130,13 @@ async function deleteAbilityInSerializableTransaction(
     try {
       // Keep the descendant query in the serializable transaction, then lock
       // the source row before the delete/deprecate decision is materialized.
-      await tx.ability.update({
-        where: { id_version: { id, version: expectedVersion } },
+      const locked = await tx.ability.updateMany({
+        where: { id, version: expectedVersion },
         data: { version: { increment: 0 } },
       });
+      if (locked.count !== 1) {
+        throw new AbilityOptimisticConflictError("能力已被其他变更更新，请刷新后重试");
+      }
     } catch (error) {
       if (isSerializationConflict(error)) {
         throw error;

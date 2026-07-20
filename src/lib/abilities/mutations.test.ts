@@ -76,14 +76,14 @@ function transaction(initialAbility = ability(), options: TransactionOptions = {
         return where.id === sourceAbility?.id ? sourceAbility : currentAbility;
       },
       findFirst: async () => options.duplicateSource ?? null,
-      update: async ({ where, data }) => {
+      updateMany: async ({ where, data }) => {
         calls.update += 1;
         if (options.updateError !== undefined) {
           throw options.updateError;
         }
         if (
-          where.id_version.id !== currentAbility.id ||
-          where.id_version.version !== currentAbility.version
+          where.id !== currentAbility.id ||
+          where.version !== currentAbility.version
         ) {
           throw new Error("optimistic conflict");
         }
@@ -92,7 +92,7 @@ function transaction(initialAbility = ability(), options: TransactionOptions = {
           ...data,
           version: currentAbility.version + data.version.increment,
         };
-        return currentAbility;
+        return { count: 1 };
       },
     },
     chapter: {
@@ -160,11 +160,11 @@ describe("applyAbilityChange", () => {
 
     const first = await applyAbilityChange(client, change);
     expect(first.applied).toBe(true);
-    expect(calls).toMatchObject({ abilityFind: 1, update: 1, create: 1 });
+    expect(calls).toMatchObject({ abilityFind: 2, update: 1, create: 1 });
 
     const second = await applyAbilityChange(client, change);
     expect(second.applied).toBe(false);
-    expect(calls).toMatchObject({ abilityFind: 1, update: 1, create: 1, eventFind: 2 });
+    expect(calls).toMatchObject({ abilityFind: 2, update: 1, create: 1, eventFind: 2 });
   });
 
   it("同一 dedupeKey 不能跨能力复用", async () => {

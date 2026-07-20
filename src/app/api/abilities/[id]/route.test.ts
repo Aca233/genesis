@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
     chapter: { findUnique: vi.fn(), findFirst: vi.fn() },
     message: { findUnique: vi.fn() },
     timeline: { findUnique: vi.fn() },
-    ability: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), create: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
+    ability: { findUnique: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn(), create: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
     abilityEvent: { findUnique: vi.fn(), create: vi.fn(), findMany: vi.fn(), count: vi.fn() },
     $transaction: vi.fn(),
     chronicleEntry: { findMany: vi.fn() },
@@ -76,6 +76,7 @@ describe("能力 API 可见性", () => {
       scale: "scene",
     });
     mocks.prisma.ability.findFirst.mockResolvedValue(null);
+    mocks.prisma.ability.updateMany.mockResolvedValue({ count: 1 });
     mocks.prisma.timeline.findUnique.mockResolvedValue({
       id: "timeline-1",
       world: { activeTimelineId: "timeline-1" },
@@ -209,12 +210,12 @@ describe("能力 API 可见性", () => {
       entityId: "character-1",
       godId: null,
     };
-    mocks.prisma.ability.findUnique.mockResolvedValue(stored);
-    mocks.prisma.ability.update.mockImplementation(async ({ data }) => ({
-      ...stored,
-      ...data,
-      version: stored.version + data.version.increment,
-    }));
+    let current = stored;
+    mocks.prisma.ability.findUnique.mockImplementation(async () => current);
+    mocks.prisma.ability.updateMany.mockImplementation(async ({ data }) => {
+      current = { ...current, ...data, version: current.version + data.version.increment };
+      return { count: 1 };
+    });
 
     const response = await PATCH(
       new Request("http://localhost/api/abilities/ability-known", {
@@ -270,7 +271,7 @@ describe("能力 API 可见性", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.prisma.ability.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.ability.updateMany).not.toHaveBeenCalled();
   });
 
   it("PATCH 隐藏能力返回 404 且不启动任何写事务", async () => {
@@ -303,7 +304,7 @@ describe("能力 API 可见性", () => {
 
     expect(response.status).toBe(404);
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
-    expect(mocks.prisma.ability.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.ability.updateMany).not.toHaveBeenCalled();
     expect(mocks.prisma.abilityEvent.create).not.toHaveBeenCalled();
   });
 
@@ -326,12 +327,12 @@ describe("能力 API 可见性", () => {
       visibility: "rumored",
       rumorText: stored.rumorText,
     };
-    mocks.prisma.ability.findUnique.mockResolvedValue(stored);
-    mocks.prisma.ability.update.mockImplementation(async ({ data }) => ({
-      ...stored,
-      ...data,
-      version: stored.version + data.version.increment,
-    }));
+    let current = stored;
+    mocks.prisma.ability.findUnique.mockImplementation(async () => current);
+    mocks.prisma.ability.updateMany.mockImplementation(async ({ data }) => {
+      current = { ...current, ...data, version: current.version + data.version.increment };
+      return { count: 1 };
+    });
     mocks.projectAbilityForPlayer.mockReturnValue(rumorProjection);
 
     const response = await PATCH(
@@ -390,7 +391,7 @@ describe("能力 API 可见性", () => {
 
       expect(response.status).toBe(400);
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
-      expect(mocks.prisma.ability.update).not.toHaveBeenCalled();
+      expect(mocks.prisma.ability.updateMany).not.toHaveBeenCalled();
     },
   );
 
@@ -424,7 +425,7 @@ describe("能力 API 可见性", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.prisma.ability.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.ability.updateMany).not.toHaveBeenCalled();
   });
 
   it("history 不返回隐藏能力的沿革", async () => {
@@ -606,7 +607,7 @@ describe("能力 API 可见性", () => {
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.prisma.abilityEvent.count).not.toHaveBeenCalled();
     expect(mocks.prisma.ability.delete).not.toHaveBeenCalled();
-    expect(mocks.prisma.ability.update).not.toHaveBeenCalled();
+    expect(mocks.prisma.ability.updateMany).not.toHaveBeenCalled();
   });
 
   it("DELETE 在事务行锁发现并发版本变更时返回 409，且不会级联新事件", async () => {
@@ -619,7 +620,7 @@ describe("能力 API 可见性", () => {
       godId: null,
     });
     mocks.prisma.abilityEvent.count.mockResolvedValue(0);
-    mocks.prisma.ability.update.mockRejectedValue(new Error("concurrent update"));
+    mocks.prisma.ability.updateMany.mockResolvedValue({ count: 0 });
 
     const response = await DELETE(
       new Request("http://localhost/api/abilities/ability-known", {
@@ -645,14 +646,14 @@ describe("能力 API 可见性", () => {
       entityId: "character-1",
       godId: null,
     };
-    mocks.prisma.ability.findUnique.mockResolvedValue(stored);
+    let current = stored;
+    mocks.prisma.ability.findUnique.mockImplementation(async () => current);
     mocks.prisma.abilityEvent.count.mockResolvedValue(0);
     mocks.prisma.ability.findFirst.mockResolvedValue({ id: "derived-ability" });
-    mocks.prisma.ability.update.mockImplementation(async ({ data }) => ({
-      ...stored,
-      ...data,
-      version: stored.version + data.version.increment,
-    }));
+    mocks.prisma.ability.updateMany.mockImplementation(async ({ data }) => {
+      current = { ...current, ...data, version: current.version + data.version.increment };
+      return { count: 1 };
+    });
 
     const response = await DELETE(
       new Request("http://localhost/api/abilities/ability-known", {
@@ -688,13 +689,13 @@ describe("能力 API 可见性", () => {
       entityId: "character-1",
       godId: null,
     };
-    mocks.prisma.ability.findUnique.mockResolvedValue(stored);
+    let current = stored;
+    mocks.prisma.ability.findUnique.mockImplementation(async () => current);
     mocks.prisma.abilityEvent.count.mockResolvedValue(1);
-    mocks.prisma.ability.update.mockImplementation(async ({ data }) => ({
-      ...stored,
-      ...data,
-      version: stored.version + data.version.increment,
-    }));
+    mocks.prisma.ability.updateMany.mockImplementation(async ({ data }) => {
+      current = { ...current, ...data, version: current.version + data.version.increment };
+      return { count: 1 };
+    });
 
     const response = await DELETE(
       new Request("http://localhost/api/abilities/ability-known", {

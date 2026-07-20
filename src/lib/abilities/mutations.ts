@@ -79,10 +79,10 @@ export interface AbilityMutationTx extends Omit<AbilityValidationTx, "ability"> 
         id: { not: string };
       };
     }): Promise<AbilityStoredRecord | null>;
-    update(args: {
-      where: { id_version: { id: string; version: number } };
+    updateMany(args: {
+      where: { id: string; version: number };
       data: AbilityPatch & { version: { increment: number } };
-    }): Promise<AbilityStoredRecord>;
+    }): Promise<{ count: number }>;
   };
   chapter: {
     findUnique(args: { where: { id: string } }): Promise<{ id: string; timelineId: string } | null>;
@@ -194,6 +194,26 @@ function sameValue(left: unknown, right: unknown): boolean {
 
 function changedFields(before: AbilityInput, after: AbilityInput): string[] {
   return comparableFields.filter((field) => !sameValue(before[field], after[field]));
+}
+
+function canonicalAbilitySnapshot(ability: AbilityInput): AbilityInput {
+  return {
+    id: ability.id,
+    name: ability.name,
+    kind: ability.kind,
+    effect: ability.effect,
+    trigger: ability.trigger,
+    cost: ability.cost,
+    limitations: ability.limitations,
+    mastery: ability.mastery,
+    state: ability.state,
+    visibility: ability.visibility,
+    rumorText: ability.rumorText,
+    bloodlineJustification: ability.bloodlineJustification,
+    sourceAbilityId: ability.sourceAbilityId,
+    lockedFields: ability.lockedFields,
+    version: ability.version,
+  };
 }
 
 function assertMonotonicLocks(before: AbilityInput, patch: AbilityPatch): void {
@@ -368,7 +388,10 @@ function isSameOperation(
     event.messageId === (input.event.messageId ?? null) &&
     event.evidence === evidence &&
     event.scale === input.event.scale &&
-    sameValue(event.after, expectedAfter)
+    sameValue(
+      canonicalAbilitySnapshot(normalizePersistedAbility(event.after)),
+      canonicalAbilitySnapshot(expectedAfter),
+    )
   );
 }
 
@@ -419,12 +442,16 @@ async function applyAbilityChangeInTx(
 
   let updated: AbilityStoredRecord;
   try {
-    updated = await tx.ability.update({
-      where: { id_version: { id: input.abilityId, version: input.version } },
+    const write = await tx.ability.updateMany({
+      where: { id: input.abilityId, version: input.version },
       data: { ...input.patch, version: { increment: 1 } },
     });
+    if (write.count !== 1) throwConflict();
+    const persisted = await tx.ability.findUnique({ where: { id: input.abilityId } });
+    if (persisted === null || persisted.version !== input.version + 1) throwConflict();
+    updated = persisted;
   } catch (error) {
-    if (error instanceof AbilityValidationError) {
+    if (error instanceof AbilityValidationError || error instanceof AbilityOptimisticConflictError) {
       throw error;
     }
     if (isDerivedSourceUniquenessError(error)) {

@@ -85,7 +85,7 @@ function extractionFixture() {
     {
       id: "message-4",
       index: 4,
-      content: "阿岚在三年苦修后独自凿成七重石阵，凿阵术由生涩臻于纯熟。",
+      content: "阿岚在三年苦修后独自凿成七重石阵，凿阵术由生涩臻于纯熟。阿岚的听石心诀发生异变，仿佛能直接听见整座山脉的未来。",
       scale: "years",
     },
     {
@@ -127,19 +127,19 @@ function extractionFixture() {
         abilities.set(created.id, created);
         return created;
       },
-      update: async ({
+      updateMany: async ({
         where,
         data,
       }: {
-        where: { id_version: { id: string; version: number } };
-        data: Parameters<AbilityMutationTx["ability"]["update"]>[0]["data"];
+        where: { id: string; version: number };
+        data: Parameters<AbilityMutationTx["ability"]["updateMany"]>[0]["data"];
       }) => {
-        const current = abilities.get(where.id_version.id);
-        if (!current || current.version !== where.id_version.version) throw new Error("optimistic conflict");
+        const current = abilities.get(where.id);
+        if (!current || current.version !== where.version) throw new Error("optimistic conflict");
         const { version, ...patch } = data;
         const updated = { ...current, ...patch, version: current.version + version.increment };
         abilities.set(updated.id, updated);
-        return updated;
+        return { count: 1 };
       },
     },
     chapter: {
@@ -270,7 +270,7 @@ describe("applyAbilityExtraction", () => {
         type: "mutated" as const,
         patch: { effect: "直接听见整座山脉的未来" },
         evidenceMessageIndex: 4,
-        evidence: "阿岚在三年苦修后独自凿成七重石阵，凿阵术由生涩臻于纯熟",
+        evidence: "阿岚的听石心诀发生异变，仿佛能直接听见整座山脉的未来",
       },
       {
         abilityId: "trainable-personal",
@@ -348,4 +348,27 @@ describe("applyAbilityExtraction", () => {
       ),
     ).toMatchObject({ mastery: "novice", version: 2 });
   });
+});
+
+it("拒绝虽然来自正文但与 improved 能力和事件无关的长引用", async () => {
+  const fixture = extractionFixture();
+  fixture.messages[0]!.content += " 天边乌云散去，商队点起灯火后继续向北方城镇赶路。";
+
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: fixture.owners,
+    messages: fixture.messages,
+    changes: [{
+      abilityId: "trainable-personal",
+      ownerName: "阿岚",
+      type: "improved",
+      patch: { mastery: "adept" },
+      evidenceMessageIndex: 4,
+      evidence: "天边乌云散去，商队点起灯火后继续向北方城镇赶路",
+    }],
+  });
+
+  expect(result.applied).toHaveLength(0);
+  expect(result.rejected[0]?.reason).toMatch(/相关|支撑|能力名|事件/);
 });

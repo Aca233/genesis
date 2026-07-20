@@ -75,6 +75,50 @@ function assertEvidence(
   }
 }
 
+const EVENT_TERMS: Record<AbilityExtractionChange["type"], readonly string[]> = {
+  awakened: ["觉醒", "唤醒", "苏醒", "初次发动", "初次显现"],
+  learned: ["习得", "学会", "学习", "传授", "授予", "传承", "拜师", "教导", "掌握"],
+  improved: ["提升", "精进", "熟练", "纯熟", "突破", "苦修", "训练", "演练", "磨炼", "臻于"],
+  mutated: ["变异", "异变", "突变", "改变", "蜕变", "扭曲"],
+  impaired: ["受损", "受伤", "削弱", "衰退", "失灵", "残缺"],
+  sealed: ["封印", "封禁", "禁锢", "封住", "镇压"],
+  restored: ["恢复", "复原", "解封", "治愈", "重获", "修复"],
+  lost: ["失去", "遗失", "丧失", "忘却", "废去", "消散"],
+  revealed: ["揭示", "显露", "暴露", "目击", "确认", "识破", "真相"],
+  deprecated: ["废弃", "废止", "淘汰", "弃用", "失传"],
+};
+
+function semanticAnchors(value: string): string[] {
+  const compact = normalizedEvidence(value);
+  const chunks = compact.match(/[\p{Script=Han}A-Za-z0-9]{2,}/gu) ?? [];
+  return [...new Set(chunks.flatMap((chunk) =>
+    chunk.length <= 4
+      ? [chunk]
+      : Array.from({ length: chunk.length - 1 }, (_, index) => chunk.slice(index, index + 2)),
+  ))];
+}
+
+function assertRelevantEvidence(
+  evidence: string,
+  change: AbilityExtractionChange,
+  ability: AbilityStoredRecord,
+  source: AbilityStoredRecord | null,
+): void {
+  const compact = normalizedEvidence(evidence);
+  const abilityAnchors = [ability.name, source?.name]
+    .filter((value): value is string => Boolean(value))
+    .flatMap(semanticAnchors);
+  const patchAnchors = Object.values(change.patch)
+    .filter((value): value is string => typeof value === "string" && value.length > 1)
+    .flatMap(semanticAnchors);
+  const namesAbility = abilityAnchors.some((anchor) => compact.includes(anchor));
+  const namesPatch = patchAnchors.some((anchor) => compact.includes(anchor));
+  const supportsType = EVENT_TERMS[change.type].some((term) => compact.includes(term));
+  if (!(supportsType && (namesAbility || namesPatch))) {
+    throw new AbilityValidationError("正文证据与能力名称、patch 或事件类型缺少相关支撑");
+  }
+}
+
 function ownerMap(owners: readonly AbilityExtractionOwner[]) {
   const byName = new Map<string, AbilityExtractionOwner>();
   for (const owner of owners) {
@@ -215,6 +259,12 @@ export async function applyAbilityExtraction(
 
       const result = await client.$transaction(async (tx) => {
         const ability = await resolveAbility(tx, change, owner, input.timelineId);
+        const source = ability.sourceAbilityId
+          ? await tx.ability.findUnique({ where: { id: ability.sourceAbilityId } })
+          : change.sourceAbilityId
+            ? await tx.ability.findUnique({ where: { id: change.sourceAbilityId } })
+            : null;
+        assertRelevantEvidence(change.evidence, change, ability, source);
         const dedupeKey = [
           input.chapterId,
           ability.id,
