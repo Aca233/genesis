@@ -2,6 +2,25 @@ import { describe, expect, it } from "vitest";
 import type { AbilityEventRecord, AbilityMutationTx, AbilityStoredRecord } from "./mutations";
 import { applyAbilityChange, revealAbility } from "./mutations";
 
+type ReviewMutationTx = AbilityMutationTx & {
+  ability: AbilityMutationTx["ability"] & {
+    findFirst: (args: { where: unknown }) => Promise<AbilityStoredRecord | null>;
+  };
+  chapter: {
+    findUnique: (args: { where: { id: string } }) => Promise<{ id: string; timelineId: string } | null>;
+  };
+  message: {
+    findUnique: (args: { where: { id: string } }) => Promise<{ id: string; chapterId: string; scale: string } | null>;
+  };
+};
+
+interface TransactionOptions {
+  sourceAbility?: AbilityStoredRecord | null;
+  duplicateSource?: AbilityStoredRecord | null;
+  chapter?: { id: string; timelineId: string } | null;
+  message?: { id: string; chapterId: string; scale: string } | null;
+}
+
 function ability(overrides: Partial<AbilityStoredRecord> = {}): AbilityStoredRecord {
   return {
     id: "ability-1",
@@ -25,26 +44,26 @@ function ability(overrides: Partial<AbilityStoredRecord> = {}): AbilityStoredRec
   };
 }
 
-function transaction(initialAbility = ability()) {
+function transaction(initialAbility = ability(), options: TransactionOptions = {}) {
   let currentAbility = initialAbility;
+  const sourceAbility = options.sourceAbility ?? null;
   const events = new Map<string, AbilityEventRecord>();
   const calls = { abilityFind: 0, update: 0, eventFind: 0, create: 0 };
 
-  const tx: AbilityMutationTx = {
+  const tx: ReviewMutationTx = {
     entity: {
-      findUnique: async () => ({
-        id: "character-1",
-        timelineId: "timeline-1",
-        type: "character",
-        raceId: "race-1",
-      }),
+      findUnique: async ({ where }) =>
+        where.id === "race-1"
+          ? { id: "race-1", timelineId: "timeline-1", type: "race", raceId: null }
+          : { id: "character-1", timelineId: "timeline-1", type: "character", raceId: "race-1" },
     },
     god: { findUnique: async () => null },
     ability: {
-      findUnique: async () => {
+      findUnique: async ({ where }) => {
         calls.abilityFind += 1;
-        return currentAbility;
+        return where.id === sourceAbility?.id ? sourceAbility : currentAbility;
       },
+      findFirst: async () => options.duplicateSource ?? null,
       update: async ({ where, data }) => {
         calls.update += 1;
         if (
@@ -60,6 +79,12 @@ function transaction(initialAbility = ability()) {
         };
         return currentAbility;
       },
+    },
+    chapter: {
+      findUnique: async () => options.chapter ?? { id: "chapter-1", timelineId: "timeline-1" },
+    },
+    message: {
+      findUnique: async () => options.message ?? { id: "message-1", chapterId: "chapter-1", scale: "scene" },
     },
     abilityEvent: {
       findUnique: async ({ where }) => {
@@ -162,4 +187,102 @@ describe("revealAbility", () => {
       expect(result.ability).toMatchObject({ visibility: "known" });
     },
   );
+});
+
+describe("applyAbilityChange integrity guards", () => {
+  it("拒绝移除既有 lockedFields", async () => {
+    await expect(
+      applyAbilityChange(
+        transaction(ability({ lockedFields: ["effect"] })).tx,
+        {
+          ...change,
+          patch: { lockedFields: [] },
+          event: { ...change.event, type: "mutated", dedupeKey: "lock-removal" },
+        },
+      ),
+    ).rejects.toThrow(/lockedFields|锁定/);
+  });
+
+  it("拒绝同一人物同一来源的第二条活跃种族能力", async () => {
+    const source = ability({
+      id: "template-1",
+      entityId: "race-1",
+      kind: "racial_tradition",
+      sourceAbilityId: null,
+    });
+    const derived = ability({
+      id: "derived-1",
+      kind: "racial_tradition",
+      sourceAbilityId: "template-1",
+    });
+    const duplicate = ability({
+      id: "derived-2",
+      kind: "racial_tradition",
+      sourceAbilityId: "template-1",
+    });
+
+    await expect(
+      applyAbilityChange(transaction(derived, { sourceAbility: source, duplicateSource: duplicate }).tx, {
+        abilityId: "derived-1",
+        version: 1,
+        patch: { name: "新版影行" },
+        event: { ...change.event, type: "mutated", dedupeKey: "duplicate-source" },
+      }),
+    ).rejects.toThrow(/重复.*来源/);
+  });
+
+  it("拒绝跨时间线章节、错误消息归属和消息尺度不一致的证据", async () => {
+    const cases = [
+      transaction(ability(), { chapter: { id: "chapter-1", timelineId: "timeline-other" } }),
+      transaction(ability(), { message: { id: "message-1", chapterId: "chapter-other", scale: "scene" } }),
+      transaction(ability(), { message: { id: "message-1", chapterId: "chapter-1", scale: "era" } }),
+    ];
+
+    for (const { tx } of cases) {
+      await expect(applyAbilityChange(tx, change)).rejects.toThrow(/章节|消息|尺度/);
+    }
+  });
+
+  it("拒绝空白 evidence", async () => {
+    await expect(
+      applyAbilityChange(transaction().tx, {
+        ...change,
+        event: { ...change.event, evidence: "  ", dedupeKey: "empty-evidence" },
+      }),
+    ).rejects.toThrow(/evidence/);
+  });
+
+  it("improved 只能将 mastery 提升一阶且不能改变 state", async () => {
+    await expect(
+      applyAbilityChange(transaction().tx, {
+        ...change,
+        patch: { mastery: "master", state: "enhanced" },
+        event: { ...change.event, dedupeKey: "jump-to-master" },
+      }),
+    ).rejects.toThrow(/improved/);
+  });
+
+  it("lost、sealed 与 restored 必须匹配目标状态", async () => {
+    await expect(
+      applyAbilityChange(transaction().tx, {
+        ...change,
+        patch: { state: "normal" },
+        event: { ...change.event, type: "lost", dedupeKey: "lost-not-lost" },
+      }),
+    ).rejects.toThrow(/lost/);
+    await expect(
+      applyAbilityChange(transaction(ability({ state: "lost" })).tx, {
+        ...change,
+        patch: { state: "enhanced" },
+        event: { ...change.event, type: "restored", dedupeKey: "restored-not-normal" },
+      }),
+    ).rejects.toThrow(/restored/);
+    await expect(
+      applyAbilityChange(transaction().tx, {
+        ...change,
+        patch: { state: "normal" },
+        event: { ...change.event, type: "sealed", dedupeKey: "sealed-not-sealed" },
+      }),
+    ).rejects.toThrow(/sealed/);
+  });
 });

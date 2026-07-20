@@ -54,15 +54,32 @@ export interface ApplyAbilityChangeInput {
   version: number;
   patch: AbilityPatch;
   event: AbilityChangeEventInput;
+  /** Required only for an explicitly justified cross-race racial_innate ability. */
+  bloodlineJustification?: string | null;
 }
 
 export interface AbilityMutationTx extends Omit<AbilityValidationTx, "ability"> {
   ability: {
     findUnique(args: { where: { id: string } }): Promise<AbilityStoredRecord | null>;
+    findFirst(args: {
+      where: {
+        entityId: string;
+        sourceAbilityId: string;
+        kind: { in: readonly ["racial_innate", "racial_tradition"] };
+        state: { notIn: readonly ["lost", "deprecated"] };
+        id: { not: string };
+      };
+    }): Promise<AbilityStoredRecord | null>;
     update(args: {
       where: { id_version: { id: string; version: number } };
       data: AbilityPatch & { version: { increment: number } };
     }): Promise<AbilityStoredRecord>;
+  };
+  chapter: {
+    findUnique(args: { where: { id: string } }): Promise<{ id: string; timelineId: string } | null>;
+  };
+  message: {
+    findUnique(args: { where: { id: string } }): Promise<{ id: string; chapterId: string; scale: string } | null>;
   };
   abilityEvent: {
     findUnique(args: { where: { dedupeKey: string } }): Promise<AbilityEventRecord | null>;
@@ -81,6 +98,7 @@ export interface AppliedAbilityChange {
 function ownershipInput(
   ability: AbilityStoredRecord,
   normalized: AbilityInput,
+  bloodlineJustification?: string | null,
 ): AbilityOwnershipInput {
   return {
     id: ability.id,
@@ -89,6 +107,7 @@ function ownershipInput(
     godId: ability.godId,
     sourceAbilityId: normalized.sourceAbilityId,
     kind: normalized.kind,
+    bloodlineJustification,
   };
 }
 
@@ -105,6 +124,144 @@ function createAfter(ability: AbilityInput, patch: AbilityPatch): AbilityInput {
     ...patch,
     version: ability.version + 1,
   };
+}
+
+const masteryRanks = ["unawakened", "novice", "adept", "expert", "master"] as const;
+const comparableFields: readonly (keyof Omit<AbilityInput, "id" | "version">)[] = [
+  "name", "kind", "effect", "trigger", "cost", "limitations", "mastery", "state",
+  "visibility", "rumorText", "sourceAbilityId", "lockedFields",
+];
+
+function sameValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function changedFields(before: AbilityInput, after: AbilityInput): string[] {
+  return comparableFields.filter((field) => !sameValue(before[field], after[field]));
+}
+
+function assertMonotonicLocks(before: AbilityInput, patch: AbilityPatch): void {
+  if (patch.lockedFields === undefined) {
+    return;
+  }
+  if (!before.lockedFields.every((field) => patch.lockedFields!.includes(field))) {
+    throw new AbilityValidationError("lockedFields 只能追加，不能移除或改写既有锁定字段");
+  }
+}
+
+function assertEventTransition(
+  before: AbilityInput,
+  after: AbilityInput,
+  type: AbilityEventType,
+): void {
+  const changes = changedFields(before, after);
+  const requireState = (state: AbilityInput["state"]) => {
+    if (after.state !== state) {
+      throw new AbilityValidationError(`${type} 事件必须将 state 设为 ${state}`);
+    }
+  };
+
+  switch (type) {
+    case "improved": {
+      const beforeRank = masteryRanks.indexOf(before.mastery);
+      const afterRank = masteryRanks.indexOf(after.mastery);
+      if (afterRank !== beforeRank + 1 || before.state !== after.state || changes.length !== 1 || changes[0] !== "mastery") {
+        throw new AbilityValidationError("improved 事件只能将 mastery 提升一阶，且不能改变其他字段或 state");
+      }
+      return;
+    }
+    case "lost":
+      requireState("lost");
+      return;
+    case "sealed":
+      requireState("sealed");
+      return;
+    case "restored":
+      if ((before.state !== "lost" && before.state !== "sealed") || after.state !== "normal") {
+        throw new AbilityValidationError("restored 事件只能将 lost 或 sealed 能力恢复为 normal");
+      }
+      return;
+    case "impaired":
+      requireState("impaired");
+      return;
+    case "deprecated":
+      requireState("deprecated");
+      return;
+    case "awakened":
+      if (before.mastery !== "unawakened" || after.mastery !== "novice" || before.state !== after.state) {
+        throw new AbilityValidationError("awakened 事件必须将 unawakened 提升为 novice，且不能改变 state");
+      }
+      return;
+    case "learned":
+      if (after.mastery === "unawakened" || before.state !== after.state) {
+        throw new AbilityValidationError("learned 事件必须拥有已觉醒 mastery，且不能改变 state");
+      }
+      return;
+    case "revealed":
+      if (before.state !== after.state || before.mastery !== after.mastery || changes.some((field) => field !== "visibility" && field !== "rumorText")) {
+        throw new AbilityValidationError("revealed 事件只能改变 visibility 或 rumorText");
+      }
+      return;
+    case "mutated":
+      return;
+  }
+}
+
+async function assertEventEvidence(
+  tx: AbilityMutationTx,
+  ability: AbilityStoredRecord,
+  event: AbilityChangeEventInput,
+): Promise<string> {
+  const evidence = event.evidence.trim();
+  if (evidence === "") {
+    throw new AbilityValidationError("evidence 不能为空");
+  }
+  const chapter = await tx.chapter.findUnique({ where: { id: event.chapterId } });
+  if (chapter === null) {
+    throw new AbilityValidationError("能力事件章节不存在");
+  }
+  if (chapter.timelineId !== ability.timelineId) {
+    throw new AbilityValidationError("能力事件章节必须与能力处于同一时间线");
+  }
+  if (event.messageId !== undefined && event.messageId !== null) {
+    const message = await tx.message.findUnique({ where: { id: event.messageId } });
+    if (message === null) {
+      throw new AbilityValidationError("能力事件消息不存在");
+    }
+    if (message.chapterId !== chapter.id) {
+      throw new AbilityValidationError("能力事件消息必须属于指定章节");
+    }
+    if (message.scale !== event.scale) {
+      throw new AbilityValidationError("能力事件 scale 必须与消息尺度一致");
+    }
+  }
+  return evidence;
+}
+
+async function assertNoDuplicateDerivedSource(
+  tx: AbilityMutationTx,
+  stored: AbilityStoredRecord,
+  after: AbilityInput,
+): Promise<void> {
+  if (
+    stored.entityId === null ||
+    after.sourceAbilityId === null ||
+    (after.kind !== "racial_innate" && after.kind !== "racial_tradition")
+  ) {
+    return;
+  }
+  const duplicate = await tx.ability.findFirst({
+    where: {
+      entityId: stored.entityId,
+      sourceAbilityId: after.sourceAbilityId,
+      kind: { in: ["racial_innate", "racial_tradition"] },
+      state: { notIn: ["lost", "deprecated"] },
+      id: { not: stored.id },
+    },
+  });
+  if (duplicate !== null) {
+    throw new AbilityValidationError("同一人物不能拥有重复的活跃种族能力来源");
+  }
 }
 
 function throwConflict(): never {
@@ -139,8 +296,12 @@ export async function applyAbilityChange(
 
   const after = createAfter(before, input.patch);
   assertUnlockedFields(before, patchToChangeInput(before, input.patch));
+  assertMonotonicLocks(before, input.patch);
   assertValidTransition(before, after, input.event.type);
-  await validateAbilityOwnership(tx, ownershipInput(stored, after));
+  assertEventTransition(before, after, input.event.type);
+  await validateAbilityOwnership(tx, ownershipInput(stored, after, input.bloodlineJustification));
+  await assertNoDuplicateDerivedSource(tx, stored, after);
+  const evidence = await assertEventEvidence(tx, stored, input.event);
 
   let updated: AbilityStoredRecord;
   try {
@@ -163,7 +324,7 @@ export async function applyAbilityChange(
       type: input.event.type,
       before,
       after: normalizePersistedAbility(updated),
-      evidence: input.event.evidence,
+      evidence,
       scale: input.event.scale,
       dedupeKey: input.event.dedupeKey,
     },
