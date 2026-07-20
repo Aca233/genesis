@@ -6,6 +6,8 @@ import {
   canAddAbility,
   canEditAbilityVisibility,
   canRemoveAbility,
+  nextAvailableAbilityRef,
+  visibleAbilityIndexes,
 } from "./deck-utils";
 import { TextAreaField, TextField, SelectField, Sect } from "./fields";
 
@@ -29,6 +31,10 @@ export type AbilityEditorProps = {
   /** 派生能力可额外声明是否存在可用来源。 */
   canAdd?: boolean;
   addDisabledMessage?: string;
+  /** 全卡组已用能力和覆写 ref；新增项必须避开它们。 */
+  usedRefs: readonly string[];
+  /** 主神天机未破封时，隐藏能力不进入任何可交互渲染分支。 */
+  hideSealedHidden?: boolean;
 };
 
 const KIND_LABELS: Record<AbilityKind, string> = {
@@ -61,14 +67,6 @@ const VISIBILITY_OPTIONS = [
   ["hidden", "隐藏（天机）"],
 ].map(([value, label]) => ({ value, label }));
 
-function nextAbilityRef(basePath: string, abilities: readonly DeckAbility[]): string {
-  const prefix = `${basePath.replaceAll(".", "-")}-ability`;
-  const existing = new Set(abilities.map((ability) => ability.ref));
-  let serial = 1;
-  while (existing.has(`${prefix}-${serial}`)) serial += 1;
-  return `${prefix}-${serial}`;
-}
-
 function blankAbility(ref: string, kind: AbilityKind): DeckAbility {
   return {
     ref,
@@ -99,20 +97,26 @@ export function AbilityEditor({
   maxItems = Number.POSITIVE_INFINITY,
   canAdd = true,
   addDisabledMessage,
+  usedRefs,
+  hideSealedHidden = false,
 }: AbilityEditorProps) {
   const common = { lockedPaths, onEdit };
   const kindOptions = allowedKinds.map((kind) => ({
     value: kind,
     label: KIND_LABELS[kind],
   }));
-  const visibleAbilities = abilities
-    .map((ability, index) => ({ ability, index }))
-    .filter(({ ability }) => allowedKinds.includes(ability.kind));
+  const visibleAbilities = visibleAbilityIndexes(
+    abilities,
+    allowedKinds,
+    hideSealedHidden,
+    sensitiveFieldsRevealed,
+  ).map((index) => ({ ability: abilities[index]!, index }));
   const addAllowed = canAddAbility(abilities.length, maxItems, canAdd);
+  const sealedHidden = hideSealedHidden && !sensitiveFieldsRevealed;
 
   return (
     <div className="grid gap-4">
-      {visibleAbilities.map(({ ability, index }) => {
+      {visibleAbilities.map(({ ability, index }, visibleIndex) => {
         const path = `${basePath}.${index}`;
         const sensitiveHidden = ability.visibility === "hidden" && !sensitiveFieldsRevealed;
         const visibilityEditable = canEditAbilityVisibility(ability.visibility, sensitiveFieldsRevealed);
@@ -120,7 +124,7 @@ export function AbilityEditor({
         return (
           <div key={ability.ref} className="grid gap-3 rounded-md border border-line bg-paper p-3">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-xs text-ink-faint">能力 {index + 1}</span>
+              <span className="text-xs text-ink-faint">能力 {visibleIndex + 1}</span>
               <button
                 type="button"
                 disabled={!removeAllowed}
@@ -157,7 +161,7 @@ export function AbilityEditor({
           </div>
         );
       })}
-      <button
+      {!sealedHidden && <button
         type="button"
         disabled={!addAllowed}
         title={addAllowed ? undefined : addDisabledMessage ?? "已达到能力数量上限"}
@@ -165,13 +169,13 @@ export function AbilityEditor({
           if (!addAllowed) return;
           const kind = allowedKinds[0];
           if (!kind) return;
-          const ref = nextAbilityRef(basePath, abilities);
+          const ref = nextAvailableAbilityRef(basePath, usedRefs);
           onEdit(basePath, [...abilities, createAbility?.(ref, kind) ?? blankAbility(ref, kind)]);
         }}
         className="justify-self-start rounded-md border border-dashed border-line px-4 py-1.5 text-sm text-ink-faint transition hover:border-gilt/40 hover:text-gilt disabled:cursor-not-allowed disabled:opacity-40"
       >
         ＋ 添一项能力
-      </button>
+      </button>}
     </div>
   );
 }

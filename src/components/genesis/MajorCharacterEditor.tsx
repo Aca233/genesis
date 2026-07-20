@@ -3,8 +3,9 @@
 import { useState } from "react";
 import type { WorldDeck } from "@/lib/cards/schemas";
 import {
+  abilityRefsInDeck,
+  availableRacialInnateAbilityRefs,
   changeCharacterRace,
-  firstRacialInnateAbilityRef,
   isPathLocked,
   traditionAbilityRefsForRace,
 } from "./deck-utils";
@@ -87,13 +88,21 @@ export function MajorCharacterEditor({ deck, index, lockedPaths, onEdit }: Props
     const ability = currentRace?.abilities.find((entry) => entry.ref === ref);
     return { ref, label: `${ability?.name ?? ref} · ${ref}` };
   });
-  const innateOptions = currentRace?.abilities
-    .filter((ability) => ability.kind === "racial_innate")
-    .map((ability) => ({
-      value: ability.ref,
-      label: `${currentRace.name} · ${ability.name} · ${ability.ref}`,
-    })) ?? [];
-  const firstInnateRef = firstRacialInnateAbilityRef(deck, character.raceRef);
+  const usedInnateRefs = character.racialOverrides.map((override) => override.sourceAbilityRef);
+  const availableInnateRefs = availableRacialInnateAbilityRefs(
+    deck,
+    character.raceRef,
+    usedInnateRefs,
+  );
+  const innateOptionsFor = (overrideIndex: number) => {
+    const otherUsedRefs = character.racialOverrides
+      .filter((_, index) => index !== overrideIndex)
+      .map((override) => override.sourceAbilityRef);
+    return availableRacialInnateAbilityRefs(deck, character.raceRef, otherUsedRefs).map((ref) => {
+      const ability = currentRace?.abilities.find((entry) => entry.ref === ref);
+      return { value: ref, label: `${currentRace?.name ?? character.raceRef} · ${ability?.name ?? ref} · ${ref}` };
+    });
+  };
 
   const selectedTraditions = character.learnedTraditionRefs.map((reference) => reference.sourceAbilityRef);
 
@@ -114,11 +123,12 @@ export function MajorCharacterEditor({ deck, index, lockedPaths, onEdit }: Props
           const changed = changeCharacterRace(character, nextRaceRef, deck);
           onEdit(`${base}.raceRef`, changed.character.raceRef);
           onEdit(`${base}.learnedTraditionRefs`, changed.character.learnedTraditionRefs);
-          setNotice(
-            changed.removedTraditionRefs.length > 0
-              ? "已移除旧种族技艺引用"
-              : null,
-          );
+          onEdit(`${base}.racialOverrides`, changed.character.racialOverrides);
+          const messages = [
+            changed.removedTraditionRefs.length > 0 ? "已移除旧种族技艺引用" : null,
+            changed.removedOverrideRefs.length > 0 ? "已清理无血脉依据的先天覆写" : null,
+          ].filter((message): message is string => message !== null);
+          setNotice(messages.length > 0 ? messages.join("；") : null);
         }}
       />
       {notice && <p className="rounded-md border border-gilt/30 bg-gilt/5 px-3 py-2 text-sm text-gilt">{notice}</p>}
@@ -188,7 +198,7 @@ export function MajorCharacterEditor({ deck, index, lockedPaths, onEdit }: Props
       <AbilitySection title="先天覆写" />
       {character.racialOverrides.map((override, overrideIndex) => (
         <div key={override.ref} className="grid gap-2 rounded-md border border-line bg-paper p-3">
-          <SelectField label="来源先天能力" path={`${base}.racialOverrides.${overrideIndex}.sourceAbilityRef`} value={override.sourceAbilityRef} options={innateOptions} {...common} />
+          <SelectField label="来源先天能力" path={`${base}.racialOverrides.${overrideIndex}.sourceAbilityRef`} value={override.sourceAbilityRef} options={innateOptionsFor(overrideIndex)} {...common} />
           <TextAreaField label="血脉依据（跨主种族时必填）" path={`${base}.racialOverrides.${overrideIndex}.bloodlineJustification`} value={override.bloodlineJustification ?? ""} rows={2} {...common} />
         </div>
       ))}
@@ -198,10 +208,12 @@ export function MajorCharacterEditor({ deck, index, lockedPaths, onEdit }: Props
         allowedKinds={["racial_innate"]}
         lockedPaths={lockedPaths}
         onEdit={onEdit}
-        canAdd={firstInnateRef !== undefined}
+        canAdd={availableInnateRefs.length > 0}
         addDisabledMessage="没有可引用的先天模板，无法新增先天覆写"
+        usedRefs={abilityRefsInDeck(deck)}
         createAbility={(ref) => {
-          if (firstInnateRef === undefined) {
+          const sourceAbilityRef = availableInnateRefs[0];
+          if (sourceAbilityRef === undefined) {
             throw new Error("新增先天覆写前必须存在可引用的先天模板");
           }
           return {
@@ -217,7 +229,7 @@ export function MajorCharacterEditor({ deck, index, lockedPaths, onEdit }: Props
             visibility: "known",
             rumorText: null,
             lockedFields: [],
-            sourceAbilityRef: firstInnateRef,
+            sourceAbilityRef,
             bloodlineJustification: null,
           };
         }}
@@ -232,6 +244,7 @@ export function MajorCharacterEditor({ deck, index, lockedPaths, onEdit }: Props
         onEdit={onEdit}
         minItems={2}
         maxItems={5}
+        usedRefs={abilityRefsInDeck(deck)}
       />
     </>
   );

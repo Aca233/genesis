@@ -8,6 +8,7 @@ import {
   RELATION_LABELS,
   STYLE_PRESET_LABELS,
   type Rank,
+  abilityRefsInDeck,
   isPathLocked,
 } from "./deck-utils";
 import { AbilityEditor, AbilitySection } from "./AbilityEditor";
@@ -93,6 +94,7 @@ export function PlayerGodEditor({ deck, lockedPaths, onEdit }: EditorProps) {
         onEdit={onEdit}
         minItems={3}
         maxItems={6}
+        usedRefs={abilityRefsInDeck(deck)}
       />
     </>
   );
@@ -157,6 +159,8 @@ export function MajorGodEditor({
         sensitiveFieldsRevealed={agendaRevealed}
         minItems={3}
         maxItems={6}
+        usedRefs={abilityRefsInDeck(deck)}
+        hideSealedHidden
       />
 
       <Sect title="议程（天机）" />
@@ -329,6 +333,7 @@ export function RaceEditor({
         onEdit={onEdit}
         minItems={2}
         maxItems={5}
+        usedRefs={abilityRefsInDeck(deck)}
       />
       <AbilitySection title="族群技艺" />
       <AbilityEditor
@@ -339,6 +344,7 @@ export function RaceEditor({
         onEdit={onEdit}
         minItems={2}
         maxItems={5}
+        usedRefs={abilityRefsInDeck(deck)}
       />
     </>
   );

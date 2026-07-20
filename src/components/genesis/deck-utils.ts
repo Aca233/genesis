@@ -111,6 +111,21 @@ type RaceAbilityDeck = {
 type CharacterTraditionRefs = {
   raceRef: string;
   learnedTraditionRefs: Array<{ sourceAbilityRef: string }>;
+  racialOverrides?: Array<{
+    ref: string;
+    sourceAbilityRef: string;
+    bloodlineJustification?: string | null;
+  }>;
+};
+
+type AbilityRefDeck = {
+  playerGod: { abilities: Array<{ ref: string }> };
+  majorGods: Array<{ abilities: Array<{ ref: string }> }>;
+  races: Array<{ abilities: Array<{ ref: string }> }>;
+  majorCharacters: Array<{
+    abilities: Array<{ ref: string }>;
+    racialOverrides: Array<{ ref: string }>;
+  }>;
 };
 
 /** 封印中的隐藏能力不能在未破封时改为公开可见。 */
@@ -151,11 +166,69 @@ export function firstRacialInnateAbilityRef(
   deck: RaceAbilityDeck,
   raceRef: string,
 ): string | undefined {
+  return racialInnateAbilityRefsForRace(deck, raceRef)[0];
+}
+
+/** 当前种族可引用的先天模板。 */
+export function racialInnateAbilityRefsForRace(
+  deck: RaceAbilityDeck,
+  raceRef: string,
+): string[] {
   return deck.races
     .find((race) => race.ref === raceRef)
     ?.abilities
-    .find((ability) => ability.kind === "racial_innate")
-    ?.ref;
+    .filter((ability) => ability.kind === "racial_innate")
+    .map((ability) => ability.ref) ?? [];
+}
+
+/** 排除其他覆写已经占用的当前种族先天模板。 */
+export function availableRacialInnateAbilityRefs(
+  deck: RaceAbilityDeck,
+  raceRef: string,
+  usedSourceAbilityRefs: readonly string[],
+): string[] {
+  const used = new Set(usedSourceAbilityRefs);
+  return racialInnateAbilityRefsForRace(deck, raceRef).filter((ref) => !used.has(ref));
+}
+
+/** 在封印状态过滤隐藏能力，避免暴露其名称、种类与位置。 */
+export function visibleAbilityIndexes(
+  abilities: ReadonlyArray<{ kind: string; visibility: string }>,
+  allowedKinds: readonly string[],
+  hideSealedHidden: boolean,
+  sensitiveFieldsRevealed: boolean,
+): number[] {
+  return abilities.flatMap((ability, index) =>
+    allowedKinds.includes(ability.kind) &&
+    (!hideSealedHidden || sensitiveFieldsRevealed || ability.visibility !== "hidden")
+      ? [index]
+      : [],
+  );
+}
+
+/** 收集卡组内所有能力和先天覆写 ref，供新增项避免全局冲突。 */
+export function abilityRefsInDeck(deck: AbilityRefDeck): string[] {
+  return [
+    ...deck.playerGod.abilities,
+    ...deck.majorGods.flatMap((god) => god.abilities),
+    ...deck.races.flatMap((race) => race.abilities),
+    ...deck.majorCharacters.flatMap((character) => [
+      ...character.abilities,
+      ...character.racialOverrides,
+    ]),
+  ].map((ability) => ability.ref);
+}
+
+/** 在全卡组已用 ref 中寻找当前能力区的下一个安全 ref。 */
+export function nextAvailableAbilityRef(
+  basePath: string,
+  usedRefs: readonly string[],
+): string {
+  const prefix = `${basePath.replaceAll(".", "-")}-ability`;
+  const existing = new Set(usedRefs);
+  let serial = 1;
+  while (existing.has(`${prefix}-${serial}`)) serial += 1;
+  return `${prefix}-${serial}`;
 }
 
 /**
@@ -166,7 +239,11 @@ export function changeCharacterRace<T extends CharacterTraditionRefs>(
   character: T,
   raceRef: string,
   deck: RaceAbilityDeck,
-): { character: T; removedTraditionRefs: string[] } {
+): {
+  character: T;
+  removedTraditionRefs: string[];
+  removedOverrideRefs: string[];
+} {
   const allowedRefs = new Set(traditionAbilityRefsForRace(deck, raceRef));
   const learnedTraditionRefs = character.learnedTraditionRefs.filter((reference) =>
     allowedRefs.has(reference.sourceAbilityRef),
@@ -174,10 +251,28 @@ export function changeCharacterRace<T extends CharacterTraditionRefs>(
   const removedTraditionRefs = character.learnedTraditionRefs
     .filter((reference) => !allowedRefs.has(reference.sourceAbilityRef))
     .map((reference) => reference.sourceAbilityRef);
+  const sourceRaceByRef = new Map(
+    deck.races.flatMap((race) =>
+      race.abilities.map((ability) => [ability.ref, race.ref] as const),
+    ),
+  );
+  const racialOverrides = character.racialOverrides?.filter((override) =>
+    sourceRaceByRef.get(override.sourceAbilityRef) === raceRef ||
+    Boolean(override.bloodlineJustification?.trim()),
+  );
+  const removedOverrideRefs = character.racialOverrides
+    ?.filter((override) => !racialOverrides?.includes(override))
+    .map((override) => override.ref) ?? [];
 
   return {
-    character: { ...character, raceRef, learnedTraditionRefs } as T,
+    character: {
+      ...character,
+      raceRef,
+      learnedTraditionRefs,
+      ...(racialOverrides === undefined ? {} : { racialOverrides }),
+    } as T,
     removedTraditionRefs,
+    removedOverrideRefs,
   };
 }
 

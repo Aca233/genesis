@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  abilityRefsInDeck,
+  availableRacialInnateAbilityRefs,
   canAddAbility,
   canEditAbilityVisibility,
   canRemoveAbility,
   changeCharacterRace,
   firstRacialInnateAbilityRef,
+  nextAvailableAbilityRef,
   traditionAbilityRefsForRace,
+  visibleAbilityIndexes,
 } from "./deck-utils";
 
 describe("创世人物引用工具", () => {
@@ -50,6 +54,7 @@ describe("创世人物引用工具", () => {
         learnedTraditionRefs: [{ sourceAbilityRef: "dragon-song" }],
       },
       removedTraditionRefs: ["human-ritual"],
+      removedOverrideRefs: [],
     });
   });
 
@@ -82,5 +87,55 @@ describe("创世人物引用工具", () => {
 
     expect(firstRacialInnateAbilityRef(deckWithOtherRaceOnly, "race-current")).toBeUndefined();
     expect(firstRacialInnateAbilityRef(deckWithOtherRaceOnly, "race-other")).toBe("other-inborn");
+  });
+
+  it("切换种族时移除无血脉依据的旧种族先天覆写", () => {
+    const character = {
+      raceRef: "race-human",
+      learnedTraditionRefs: [],
+      racialOverrides: [
+        { ref: "override-human", sourceAbilityRef: "human-inborn", bloodlineJustification: null },
+        { ref: "override-dragon", sourceAbilityRef: "dragon-breath", bloodlineJustification: "龙裔血脉" },
+        { ref: "override-current", sourceAbilityRef: "dragon-breath", bloodlineJustification: null },
+      ],
+    };
+
+    expect(changeCharacterRace(character, "race-dragon", deck)).toMatchObject({
+      character: {
+        raceRef: "race-dragon",
+        racialOverrides: [
+          { ref: "override-dragon", sourceAbilityRef: "dragon-breath" },
+          { ref: "override-current", sourceAbilityRef: "dragon-breath" },
+        ],
+      },
+      removedOverrideRefs: ["override-human"],
+    });
+  });
+
+  it("覆写来源只提供当前种族尚未使用的先天模板", () => {
+    expect(availableRacialInnateAbilityRefs(deck, "race-human", ["human-inborn"])).toEqual([]);
+    expect(availableRacialInnateAbilityRefs(deck, "race-dragon", [])).toEqual(["dragon-breath"]);
+  });
+
+  it("主神天机未破封时完全过滤隐藏神权", () => {
+    const abilities = [
+      { kind: "divine", visibility: "known" },
+      { kind: "divine", visibility: "hidden" },
+      { kind: "personal", visibility: "hidden" },
+    ];
+
+    expect(visibleAbilityIndexes(abilities, ["divine"], true, false)).toEqual([0]);
+    expect(visibleAbilityIndexes(abilities, ["divine"], true, true)).toEqual([0, 1]);
+  });
+
+  it("新增能力 ref 避开全卡组已用的能力与覆写 ref", () => {
+    const usedRefs = abilityRefsInDeck({
+      playerGod: { abilities: [{ ref: "player-ability" }] },
+      majorGods: [{ abilities: [{ ref: "major-ability" }] }],
+      races: [{ abilities: [{ ref: "races-0-abilities-ability-1" }] }],
+      majorCharacters: [{ abilities: [{ ref: "character-ability" }], racialOverrides: [{ ref: "races-0-abilities-ability-2" }] }],
+    });
+
+    expect(nextAvailableAbilityRef("races.0.abilities", usedRefs)).toBe("races-0-abilities-ability-3");
   });
 });
