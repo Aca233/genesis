@@ -7,20 +7,26 @@ const mocks = vi.hoisted(() => ({
   },
   buildNarratorContext: vi.fn(),
   narratorSSE: vi.fn(),
+  narratorCompletionSSE: vi.fn(),
   finalizeNarration: vi.fn(),
   prepareGenerationRequest: vi.fn(),
+  readGenerationCompletion: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mocks.prisma }));
 vi.mock("@/lib/context/builder", () => ({
   buildNarratorContext: mocks.buildNarratorContext,
 }));
-vi.mock("@/lib/context/sse", () => ({ narratorSSE: mocks.narratorSSE }));
+vi.mock("@/lib/context/sse", () => ({
+  narratorSSE: mocks.narratorSSE,
+  narratorCompletionSSE: mocks.narratorCompletionSSE,
+}));
 vi.mock("@/lib/chat/finalize", () => ({
   finalizeNarration: mocks.finalizeNarration,
 }));
 vi.mock("@/lib/chat/request", () => ({
   prepareGenerationRequest: mocks.prepareGenerationRequest,
+  readGenerationCompletion: mocks.readGenerationCompletion,
 }));
 
 import { POST } from "./route";
@@ -37,9 +43,12 @@ describe("POST /api/chat", () => {
     });
     mocks.buildNarratorContext.mockResolvedValue([{ role: "user", content: "继续" }]);
     mocks.narratorSSE.mockImplementation((options) => new Response(JSON.stringify({ options })));
+    mocks.narratorCompletionSSE.mockImplementation(() => new Response("sse replay", {
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    }));
     mocks.finalizeNarration.mockResolvedValue({ messageId: "generation-1", reused: false });
     mocks.prepareGenerationRequest.mockResolvedValue({
-      reused: false,
+      state: "owner",
       meta: {
         type: "chat-generation-request",
         chapterId: "chapter-1",
@@ -53,6 +62,102 @@ describe("POST /api/chat", () => {
         narratorIndex: 4,
       },
     });
+  });
+
+  it("completed generation 重试仍返回含已有 messageId/meta 的 SSE done", async () => {
+    const completion = {
+      messageId: "generation-1",
+      meta: { suggestions: ["继续观察"], chapterBreakHint: false },
+    };
+    mocks.prepareGenerationRequest.mockResolvedValue({
+      state: "completed",
+      meta: expect.anything(),
+      completion,
+    });
+    const request = new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        chapterId: "chapter-1",
+        scale: "scene",
+        mode: "continue",
+        generationId: "generation-1",
+      }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(mocks.narratorCompletionSSE).toHaveBeenCalledWith(expect.objectContaining({
+      completion,
+      signal: request.signal,
+    }));
+    expect(mocks.buildNarratorContext).not.toHaveBeenCalled();
+    expect(mocks.narratorSSE).not.toHaveBeenCalled();
+  });
+
+  it("opening 已产生消息后仍可按 generationId 重放完成 SSE", async () => {
+    const completion = {
+      messageId: "opening-generation",
+      meta: { suggestions: [], chapterBreakHint: false },
+    };
+    mocks.prepareGenerationRequest.mockResolvedValue({
+      state: "completed",
+      meta: {},
+      completion,
+    });
+    const request = new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        chapterId: "chapter-1",
+        scale: "scene",
+        mode: "opening",
+        generationId: "opening-generation",
+      }),
+    });
+
+    await POST(request);
+
+    expect(mocks.prepareGenerationRequest).toHaveBeenCalled();
+    expect(mocks.narratorCompletionSSE).toHaveBeenCalledWith({
+      completion,
+      signal: request.signal,
+    });
+  });
+
+  it("pending generation loser 不调用 LLM，并以 SSE 等待 durable 完成结果", async () => {
+    mocks.prepareGenerationRequest.mockResolvedValue({
+      state: "pending",
+      meta: {
+        type: "chat-generation-request",
+        chapterId: "chapter-1",
+        mode: "continue",
+        scale: "scene",
+        content: null,
+        directive: null,
+        playerMessageId: null,
+        narratorMessageId: "generation-1",
+        playerIndex: null,
+        narratorIndex: 4,
+      },
+    });
+    const request = new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        chapterId: "chapter-1",
+        scale: "scene",
+        mode: "continue",
+        generationId: "generation-1",
+      }),
+    });
+
+    await POST(request);
+
+    expect(mocks.narratorCompletionSSE).toHaveBeenCalledWith(expect.objectContaining({
+      waitForCompletion: expect.any(Function),
+      signal: request.signal,
+    }));
+    expect(mocks.buildNarratorContext).not.toHaveBeenCalled();
+    expect(mocks.narratorSSE).not.toHaveBeenCalled();
   });
 
   it("将稳定 generationId 与 request.signal 传入可取消、事务化完成链路", async () => {

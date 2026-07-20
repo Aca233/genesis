@@ -2,6 +2,7 @@ import { stream as llmStream } from "@/lib/llm/gateway";
 import type { ChatMessage } from "@/lib/llm/types";
 import { splitMetaBlock, type NarratorMeta } from "@/lib/prompts/narrator";
 import { findMetaStartCandidate, findMetaTailFrame } from "@/lib/prompts/meta-framing";
+import type { GenerationCompletion } from "@/lib/chat/request";
 
 const TAIL_WINDOW = 10;
 
@@ -67,9 +68,12 @@ export function narratorSSE(opts: {
           flush();
         }
         if (closed || upstream.signal.aborted) return;
-        const framed = findMetaTailFrame(full);
-        if (!framed && pending) send({ type: "text", text: pending });
         const parsed = splitMetaBlock(full);
+        const framed = findMetaTailFrame(full);
+        // A syntactically framed but invalid JSON block is prose. Stream exactly
+        // what splitMetaBlock hands to persistence so the two views cannot diverge.
+        const malformedFrame = framed && parsed.prose === full.trim();
+        if ((!framed || malformedFrame) && pending) send({ type: "text", text: pending });
         const { messageId } = await opts.onDone({ ...parsed, signal: upstream.signal });
         if (!closed && !upstream.signal.aborted) send({ type: "done", messageId, meta: parsed.meta });
       } catch (error) {
@@ -93,4 +97,42 @@ export function narratorSSE(opts: {
     Connection: "keep-alive",
     "X-Accel-Buffering": "no",
   } });
+}
+
+const SSE_HEADERS = {
+  "Content-Type": "text/event-stream; charset=utf-8",
+  "Cache-Control": "no-cache, no-transform",
+  Connection: "keep-alive",
+  "X-Accel-Buffering": "no",
+};
+
+/** Replays a durable completion (or waits for its owner) using the normal SSE contract. */
+export function narratorCompletionSSE(opts: {
+  completion?: GenerationCompletion;
+  waitForCompletion?: () => Promise<GenerationCompletion | null>;
+  signal?: AbortSignal;
+}): Response {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        let completion = opts.completion;
+        while (!completion && !opts.signal?.aborted) {
+          completion = await opts.waitForCompletion?.() ?? undefined;
+          if (!completion) await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        if (completion && !opts.signal?.aborted) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            type: "done",
+            messageId: completion.messageId,
+            meta: completion.meta,
+          })}\n\n`));
+        }
+      } finally {
+        controller.close();
+      }
+    },
+    cancel() { /* request signal controls the polling loop */ },
+  });
+  return new Response(body, { headers: SSE_HEADERS });
 }

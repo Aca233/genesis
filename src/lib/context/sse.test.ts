@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ stream: vi.fn() }));
 vi.mock("@/lib/llm/gateway", () => ({ stream: mocks.stream }));
 
-import { narratorSSE } from "./sse";
+import { narratorCompletionSSE, narratorSSE } from "./sse";
 
 async function events(response: Response) {
   const text = await response.text();
@@ -14,6 +14,27 @@ async function events(response: Response) {
 }
 
 describe("narratorSSE", () => {
+  it("完整但 JSON 损坏的 META 会作为正文流出并以相同正文持久化", async () => {
+    const full = "正文\n<<<META\n{ broken json\nMETA>>>";
+    mocks.stream.mockImplementation(async function* () {
+      yield { type: "text", text: full.slice(0, 13) };
+      yield { type: "text", text: full.slice(13) };
+    });
+    const onDone = vi.fn().mockResolvedValue({ messageId: "message-1" });
+
+    const output = await events(narratorSSE({ messages: [], onDone }));
+    const streamed = output
+      .filter((event) => event.type === "text")
+      .map((event) => event.text)
+      .join("");
+
+    expect(streamed).toBe(full);
+    expect(onDone).toHaveBeenCalledWith(expect.objectContaining({
+      prose: streamed,
+      meta: { suggestions: [], chapterBreakHint: false },
+    }));
+  });
+
   it("不会因正文中的 inline/早期 META marker 提前抑制内容", async () => {
     mocks.stream.mockImplementation(async function* () {
       yield { type: "text", text: "正文 <<<ME" };
@@ -54,6 +75,19 @@ describe("narratorSSE", () => {
 
     expect(upstreamSignal?.aborted).toBe(true);
     expect(onDone).not.toHaveBeenCalled();
+  });
+});
+
+describe("narratorCompletionSSE", () => {
+  it("以 SSE done 重放已有 messageId 与 meta", async () => {
+    const completion = {
+      messageId: "message-existing",
+      meta: { suggestions: ["继续"], chapterBreakHint: false },
+    };
+
+    const output = await events(narratorCompletionSSE({ completion }));
+
+    expect(output).toEqual([{ type: "done", ...completion }]);
   });
 });
 

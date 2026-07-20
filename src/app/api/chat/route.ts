@@ -3,13 +3,14 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { ScaleSchema } from "@/lib/cards/schemas";
 import { buildNarratorContext } from "@/lib/context/builder";
-import { narratorSSE } from "@/lib/context/sse";
+import { narratorCompletionSSE, narratorSSE } from "@/lib/context/sse";
 import {
   finalizeNarration,
   type NarrationFinalizationClient,
 } from "@/lib/chat/finalize";
 import {
   prepareGenerationRequest,
+  readGenerationCompletion,
   type GenerationRequestClient,
 } from "@/lib/chat/request";
 
@@ -59,13 +60,9 @@ export async function POST(request: Request) {
   if (mode === "say" && !content?.trim()) {
     return NextResponse.json({ error: "神谕不能为空" }, { status: 400 });
   }
-  if (mode === "opening" && lastIndex > 0) {
-    return NextResponse.json({ error: "本章已有开场，不可重复演出" }, { status: 409 });
-  }
-
   // 在任何玩家消息写入前，以 generationId 原子校验/保留整次请求协议。
   const proposedPlayerIndex = mode === "say" ? lastIndex + 1 : null;
-  const proposedNarratorIndex = lastIndex + (mode === "say" ? 2 : 1);
+  const proposedNarratorIndex = mode === "opening" ? 1 : lastIndex + (mode === "say" ? 2 : 1);
   const prepared = await prepareGenerationRequest(
     prisma as unknown as GenerationRequestClient,
     {
@@ -77,13 +74,28 @@ export async function POST(request: Request) {
       directive: directive?.trim() || undefined,
       playerIndex: proposedPlayerIndex,
       narratorIndex: proposedNarratorIndex,
+      chapterHasMessages: lastIndex > 0,
     },
   );
-  if (prepared.completedMessageId) {
-    return NextResponse.json({
-      messageId: prepared.completedMessageId,
-      generationId,
-      completed: true,
+  if (prepared.state === "completed") {
+    return narratorCompletionSSE({ completion: prepared.completion, signal: request.signal });
+  }
+  if (prepared.state === "pending") {
+    return narratorCompletionSSE({
+      signal: request.signal,
+      waitForCompletion: () => readGenerationCompletion(
+        prisma as unknown as GenerationRequestClient,
+        {
+          generationId,
+          chapterId,
+          mode,
+          scale,
+          content: mode === "say" ? content!.trim() : undefined,
+          directive: directive?.trim() || undefined,
+          playerIndex: prepared.meta.playerIndex,
+          narratorIndex: prepared.meta.narratorIndex,
+        },
+      ),
     });
   }
   const narratorIndex = prepared.meta.narratorIndex;

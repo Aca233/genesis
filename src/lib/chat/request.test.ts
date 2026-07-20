@@ -1,31 +1,137 @@
 import { describe, expect, it, vi } from "vitest";
 import { prepareGenerationRequest } from "./request";
+
 function fixture() {
-  const rows = new Map<string, Record<string, unknown>>();
-  const tx = { message: {
-    findUnique: vi.fn(async ({ where }) => rows.get(where.id) ?? null),
-    create: vi.fn(async ({ data }) => { if (rows.has(data.id)) throw Object.assign(new Error("unique"), { code: "P2002" }); const row = { ...data }; rows.set(data.id, row); return row; }),
-  } };
-  return { rows, tx, client: { $transaction: vi.fn(async (fn) => fn(tx)) } };
+  const messages = new Map<string, Record<string, unknown>>();
+  const requests = new Map<string, Record<string, unknown>>();
+  const tx = {
+    generationRequest: {
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => requests.get(where.id) ?? null),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        if (requests.has(String(data.id))) {
+          throw Object.assign(new Error("unique"), { code: "P2002" });
+        }
+        const row = { ...data };
+        requests.set(String(data.id), row);
+        return row;
+      }),
+    },
+    message: {
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => messages.get(where.id) ?? null),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        if (messages.has(String(data.id))) {
+          throw Object.assign(new Error("unique"), { code: "P2002" });
+        }
+        const row = { ...data };
+        messages.set(String(data.id), row);
+        return row;
+      }),
+    },
+  };
+  return {
+    messages,
+    requests,
+    tx,
+    client: { $transaction: vi.fn(async (fn: (value: typeof tx) => unknown) => fn(tx)) },
+  };
 }
-const input = { generationId: "generation-1", chapterId: "chapter-1", mode: "say" as const, scale: "scene" as const, content: "神谕", playerIndex: 3, narratorIndex: 4 };
+
+const input = {
+  generationId: "generation-1",
+  chapterId: "chapter-1",
+  mode: "say" as const,
+  scale: "scene" as const,
+  content: "神谕",
+  playerIndex: 3,
+  narratorIndex: 4,
+};
+
 describe("prepareGenerationRequest", () => {
-  it("首次请求仅以稳定 ID 原子写玩家消息，并在 meta 绑定预期 narrator", async () => {
-    const { client, tx } = fixture();
-    const result = await prepareGenerationRequest(client as never, input);
-    expect(tx.message.create).toHaveBeenCalledTimes(1);
-    expect(tx.message.create.mock.calls[0][0].data).toMatchObject({ id: "genplayer:generation-1", role: "player", index: 3 });
-    expect(result.meta.narratorMessageId).toBe("generation-1");
+  it.each(["say", "continue", "opening"] as const)(
+    "%s 在调用 LLM 前创建 durable reservation",
+    async (mode) => {
+      const { client, tx } = fixture();
+      const result = await prepareGenerationRequest(client as never, {
+        ...input,
+        mode,
+        content: mode === "say" ? input.content : undefined,
+        playerIndex: mode === "say" ? 3 : null,
+        narratorIndex: mode === "say" ? 4 : mode === "opening" ? 1 : 3,
+      });
+
+      expect(result.state).toBe("owner");
+      expect(tx.generationRequest.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          id: "generation-1",
+          chapterId: "chapter-1",
+          mode,
+          status: "pending",
+        }),
+      });
+      expect(tx.message.create).toHaveBeenCalledTimes(mode === "say" ? 1 : 0);
+    },
+  );
+
+  it("首次 opening 在章内已有消息时不留下 pending reservation", async () => {
+    const { client, requests } = fixture();
+
+    await expect(prepareGenerationRequest(client as never, {
+      ...input,
+      mode: "opening",
+      content: undefined,
+      playerIndex: null,
+      narratorIndex: 1,
+      chapterHasMessages: true,
+    })).rejects.toThrow(/已有开场/);
+
+    expect(requests.size).toBe(0);
   });
-  it("相同 ID 重试复用玩家协议，不重复写且沿用原 index", async () => {
+
+  it("相同 ID 并发 loser 复用 pending reservation，不重复玩家写入", async () => {
     const { client, tx } = fixture();
-    await prepareGenerationRequest(client as never, input);
-    const second = await prepareGenerationRequest(client as never, { ...input, playerIndex: 9, narratorIndex: 10 });
-    expect(second.meta).toMatchObject({ playerIndex: 3, narratorIndex: 4 });
+    const first = await prepareGenerationRequest(client as never, input);
+    const second = await prepareGenerationRequest(client as never, {
+      ...input,
+      playerIndex: 9,
+      narratorIndex: 10,
+    });
+
+    expect(first.state).toBe("owner");
+    expect(second).toMatchObject({ state: "pending", meta: { playerIndex: 3, narratorIndex: 4 } });
     expect(tx.message.create).toHaveBeenCalledTimes(1);
   });
+
   it("相同 ID 不同语义请求被拒绝", async () => {
-    const { client } = fixture(); await prepareGenerationRequest(client as never, input);
-    await expect(prepareGenerationRequest(client as never, { ...input, content: "另一神谕" })).rejects.toThrow(/参数不一致/);
+    const { client } = fixture();
+    await prepareGenerationRequest(client as never, input);
+    await expect(
+      prepareGenerationRequest(client as never, { ...input, content: "另一神谕" }),
+    ).rejects.toThrow(/参数不一致|占用/);
+  });
+
+  it("completed reservation 只在 narrator 与请求绑定一致时返回可重放结果", async () => {
+    const { client, requests, messages } = fixture();
+    await prepareGenerationRequest(client as never, input);
+    const request = requests.get(input.generationId)!;
+    request.status = "completed";
+    request.resultMeta = { suggestions: ["继续"], chapterBreakHint: false };
+    messages.set(input.generationId, {
+      id: input.generationId,
+      chapterId: input.chapterId,
+      index: input.narratorIndex,
+      role: "narrator",
+      scale: input.scale,
+      meta: { generationRequest: { type: "chat-generation-request", ...request, narratorMessageId: input.generationId } },
+    });
+
+    const result = await prepareGenerationRequest(client as never, input);
+
+    expect(result).toMatchObject({
+      state: "completed",
+      completion: {
+        messageId: "generation-1",
+        meta: { suggestions: ["继续"], chapterBreakHint: false },
+      },
+    });
   });
 });

@@ -8,6 +8,13 @@ import {
 } from "@/lib/abilities/mutations";
 
 export type NarrationFinalizationTx = Omit<AbilityMutationTx, "message" | "ability"> & {
+  generationRequest: {
+    findUnique(args: { where: { id: string } }): Promise<unknown>;
+    update(args: {
+      where: { id: string };
+      data: { status: string; narratorMessageId: string; resultMeta: Prisma.InputJsonValue };
+    }): Promise<unknown>;
+  };
   message: {
     findUnique(args: { where: { id: string } }): Promise<{
       id: string;
@@ -142,6 +149,16 @@ export async function finalizeNarration(
         data: { revealed: true, revealedAtChapter: input.chapterIndex },
       });
     }
+    checkCancelled();
+
+    await tx.generationRequest.update({
+      where: { id: input.generationId },
+      data: {
+        status: "completed",
+        narratorMessageId: saved.id,
+        resultMeta: input.meta as unknown as Prisma.InputJsonValue,
+      },
+    });
     checkCancelled();
 
     return { messageId: saved.id, reused: false };

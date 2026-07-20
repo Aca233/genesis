@@ -62,10 +62,32 @@ model Chapter {
   snapshot    Json? // 章快照（M3 分叉用）
   messages      Message[]
   abilityEvents AbilityEvent[]
+  generationRequests GenerationRequest[]
   createdAt     DateTime  @default(now()) @map("created_at")
 
   @@unique([timelineId, index])
   @@map("chapters")
+}
+
+model GenerationRequest {
+  id                String   @id
+  chapterId         String   @map("chapter_id")
+  chapter           Chapter  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  mode              String
+  scale             String
+  content           String?
+  directive         String?
+  status            String   @default("pending")
+  playerMessageId   String?  @map("player_message_id")
+  narratorMessageId String   @map("narrator_message_id")
+  playerIndex       Int?     @map("player_index")
+  narratorIndex     Int      @map("narrator_index")
+  resultMeta        Json?    @map("result_meta")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([chapterId, status])
+  @@map("generation_requests")
 }
 
 model Message {

@@ -11,6 +11,23 @@ import { finalizeNarration } from "./finalize";
 function fixture() {
   const state = { messages: new Map<string, Record<string, unknown>>() };
   const tx = {
+    generationRequest: {
+      findUnique: vi.fn(async () => ({
+        id: "generation-1",
+        chapterId: "chapter-1",
+        mode: "say",
+        scale: "scene",
+        content: "神谕",
+        directive: null,
+        status: "pending",
+        playerMessageId: "genplayer:generation-1",
+        narratorMessageId: "generation-1",
+        playerIndex: 3,
+        narratorIndex: 4,
+        resultMeta: null,
+      })),
+      update: vi.fn().mockResolvedValue({}),
+    },
     message: {
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) => state.messages.get(where.id) ?? null),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -79,6 +96,14 @@ describe("finalizeNarration", () => {
     }));
     expect(log).toHaveBeenCalledWith({ abilityId: "invalid", generationId: "generation-1" });
     expect(tx.chronicleEntry.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.generationRequest.update).toHaveBeenCalledWith({
+      where: { id: "generation-1" },
+      data: expect.objectContaining({
+        status: "completed",
+        narratorMessageId: "generation-1",
+        resultMeta: base.meta,
+      }),
+    });
   });
 
   it("相同 generationId 重试直接复用，不重复任何副作用", async () => {
