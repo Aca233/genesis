@@ -55,3 +55,19 @@ describe("章末 pipeline 习得族群技艺", () => {
 });
 
 afterAll(async () => prisma.$disconnect());
+
+it("整体 extraction 基础设施失败时停留 extract checkpoint 且不运行 chronicle", async () => {
+  const data = await fixture();
+  const { completeStructured } = await import("@/lib/llm/structured");
+  vi.mocked(completeStructured).mockImplementationOnce(async () => { throw new Error("extract unavailable"); });
+  try {
+    await expect(settle(data.chapter.id)).rejects.toThrow("extract unavailable");
+    const chapter = await prisma.chapter.findUnique({ where: { id: data.chapter.id } });
+    expect(chapter?.settleState).toBe("settling:extract");
+    expect(vi.mocked(completeStructured)).not.toHaveBeenCalledWith(
+      expect.anything(), expect.objectContaining({ task: "chronicle" }),
+    );
+  } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});

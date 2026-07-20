@@ -7,6 +7,13 @@ import {
 } from "@/lib/abilities/extraction";
 import { completeStructured } from "@/lib/llm/structured";
 import {
+  EXTRACTION_MAX_ABILITIES,
+  EXTRACTION_MAX_ENTITIES,
+  EXTRACTION_MAX_OUTPUT_TOKENS,
+  boundExtractionMessages,
+  mentionedOwnerIds,
+} from "@/lib/settle/extraction-context";
+import {
   PantheonTurnSchema,
   pantheonSystem,
   pantheonUserPrompt,
@@ -245,11 +252,7 @@ export async function* settleChapter(
   // ── 2. 状态抽取 ──
   if (startIdx <= STEP_ORDER.indexOf("extract")) {
     yield { step: "extract" };
-    try {
-      await runExtraction(timeline.id, chapterId, chapterText, scaleNote);
-    } catch {
-      // 抽取失败不阻塞：标记待重抽（meta 层面，M2 简化为跳过）
-    }
+    await runExtraction(timeline.id, chapterId, chapterText, scaleNote);
     await setState(chapterId, "chronicle");
   }
 
@@ -449,33 +452,60 @@ async function runExtraction(
   chapterText: Awaited<ReturnType<typeof chapterProse>>,
   scaleNote: string,
 ) {
-  const [entities, gods, abilities] = await Promise.all([
+  const messages = boundExtractionMessages(chapterText.messages);
+  const [entityIndex, godIndex] = await Promise.all([
     prisma.entity.findMany({
-      where: { timelineId },
-      select: {
-        id: true,
-        name: true,
-        type: true,
-        aliases: true,
-        summary: true,
-        lockedPaths: true,
-        raceId: true,
-      },
+      where: { timelineId, type: { in: ["race", "character"] } },
+      select: { id: true, name: true, type: true, aliases: true, raceId: true },
     }),
     prisma.god.findMany({
       where: { timelineId },
       select: { id: true, name: true, aliases: true, rank: true, isPlayer: true },
     }),
-    prisma.ability.findMany({
-      where: { timelineId },
-      include: {
-        entity: { select: { name: true, type: true } },
-        god: { select: { name: true } },
-        sourceAbility: { select: { name: true } },
-      },
-      orderBy: { createdAt: "asc" },
-    }),
   ]);
+  const relevantIds = mentionedOwnerIds(messages, [...entityIndex, ...godIndex.map((god) => ({
+    ...god, type: "god", raceId: null,
+  }))]);
+  const relevantGodIds = godIndex.filter((god) => relevantIds.has(god.id)).map((god) => god.id);
+  const entities = await prisma.entity.findMany({
+    where: {
+      timelineId,
+      OR: [
+        { id: { in: [...relevantIds] } },
+        { type: { notIn: ["race", "character"] }, scenePresence: true },
+      ],
+    },
+    select: {
+      id: true, name: true, type: true, aliases: true, summary: true,
+      lockedPaths: true, raceId: true,
+    },
+    take: EXTRACTION_MAX_ENTITIES,
+  });
+  const gods = godIndex.filter((god) => relevantIds.has(god.id));
+  const entityIds = entities.map((entity) => entity.id);
+  const abilities = entityIds.length || relevantGodIds.length
+    ? await prisma.ability.findMany({
+        where: {
+          timelineId,
+          OR: [
+            ...(entityIds.length ? [{ entityId: { in: entityIds } }] : []),
+            ...(relevantGodIds.length ? [{ godId: { in: relevantGodIds } }] : []),
+            { id: { in: (await prisma.ability.findMany({
+              where: { timelineId, entityId: { in: entityIds }, sourceAbilityId: { not: null } },
+              select: { sourceAbilityId: true },
+              take: EXTRACTION_MAX_ABILITIES,
+            })).flatMap((ability) => ability.sourceAbilityId ? [ability.sourceAbilityId] : []) } },
+          ],
+        },
+        include: {
+          entity: { select: { name: true, type: true } },
+          god: { select: { name: true } },
+          sourceAbility: { select: { name: true } },
+        },
+        orderBy: { createdAt: "asc" },
+        take: EXTRACTION_MAX_ABILITIES,
+      })
+    : [];
 
   const lockedList = entities
     .flatMap((e) => e.lockedPaths.map((p) => `${e.name}.${p}`))
@@ -485,7 +515,7 @@ async function runExtraction(
     task: "extract",
     system: extractorSystem(),
     user: extractorUserPrompt({
-      chapterMessages: chapterText.messages,
+      chapterMessages: messages,
       knownEntities: entities
         .map((entity) => {
           const race = entity.raceId
@@ -510,7 +540,7 @@ async function runExtraction(
       scaleNote,
     }),
     schema: ExtractionSchema,
-    maxTokens: 6000,
+    maxTokens: EXTRACTION_MAX_OUTPUT_TOKENS,
   });
 
   const byName = new Map<string, (typeof entities)[number]>();
@@ -638,7 +668,7 @@ async function runExtraction(
       timelineId,
       chapterId,
       owners,
-      messages: chapterText.messages,
+      messages,
       changes: extraction.abilityChanges,
     },
   );
@@ -646,7 +676,9 @@ async function runExtraction(
     console.error("章末能力变化被拒绝", {
       chapterId,
       item: rejected.index,
-      ownerName: rejected.change.ownerName,
+      ownerName: typeof rejected.change === "object" && rejected.change !== null && "ownerName" in rejected.change
+        ? String(rejected.change.ownerName)
+        : "未知",
       reason: rejected.reason,
     });
   }

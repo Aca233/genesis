@@ -1,4 +1,7 @@
-import type { AbilityExtractionChange } from "@/lib/prompts/extractor";
+import {
+  AbilityExtractionChangeSchema,
+  type AbilityExtractionChange,
+} from "@/lib/prompts/extractor";
 import {
   applyAbilityChangeInTransaction,
   type AbilityEventRecord,
@@ -44,12 +47,12 @@ export type AbilityExtractionInput = {
   chapterId: string;
   owners: AbilityExtractionOwner[];
   messages: AbilityEvidenceMessage[];
-  changes: AbilityExtractionChange[];
+  changes: unknown[];
 };
 
 export type RejectedAbilityExtraction = {
   index: number;
-  change: AbilityExtractionChange;
+  change: unknown;
   reason: string;
 };
 
@@ -75,47 +78,51 @@ function assertEvidence(
   }
 }
 
-const EVENT_TERMS: Record<AbilityExtractionChange["type"], readonly string[]> = {
-  awakened: ["觉醒", "唤醒", "苏醒", "初次发动", "初次显现"],
-  learned: ["习得", "学会", "学习", "传授", "授予", "传承", "拜师", "教导", "掌握"],
-  improved: ["提升", "精进", "熟练", "纯熟", "突破", "苦修", "训练", "演练", "磨炼", "臻于"],
-  mutated: ["变异", "异变", "突变", "改变", "蜕变", "扭曲"],
-  impaired: ["受损", "受伤", "削弱", "衰退", "失灵", "残缺"],
-  sealed: ["封印", "封禁", "禁锢", "封住", "镇压"],
-  restored: ["恢复", "复原", "解封", "治愈", "重获", "修复"],
-  lost: ["失去", "遗失", "丧失", "忘却", "废去", "消散"],
-  revealed: ["揭示", "显露", "暴露", "目击", "确认", "识破", "真相"],
-  deprecated: ["废弃", "废止", "淘汰", "弃用", "失传"],
+const TYPE_PATTERNS: Record<AbilityExtractionChange["type"], readonly RegExp[]> = {
+  awakened: [/觉醒|苏醒|初(?:次|度).{0,4}(?:发动|显现)|终于能/],
+  learned: [/习得|学会|掌握|传授|授予|传承|教导|拜师/, /终于(?:能|可以|会)(?:以|用|施展)?/],
+  improved: [/提升|精进|纯熟|熟练|突破|苦修|训练|演练|磨炼|臻于|更(?:快|强|稳|熟)/],
+  mutated: [/变异|异变|突变|蜕变|扭曲|变成|化作/],
+  impaired: [/受损|受伤|削弱|衰退|失灵|残缺|不再灵便/],
+  sealed: [/封印|封禁|禁锢|镇压|无法(?:发动|施展|使用)/],
+  restored: [/恢复|复原|解封|治愈|重获|修复|重新(?:能|可以)/],
+  lost: [/失去|遗失|丧失|忘却|废去|消散|再也不能/],
+  revealed: [/揭示|显露|暴露|目击|确认|识破|真相|众人看见/],
+  deprecated: [/废弃|废止|淘汰|弃用|失传|不再传承/],
 };
 
-function semanticAnchors(value: string): string[] {
-  const compact = normalizedEvidence(value);
-  const chunks = compact.match(/[\p{Script=Han}A-Za-z0-9]{2,}/gu) ?? [];
-  return [...new Set(chunks.flatMap((chunk) =>
-    chunk.length <= 4
-      ? [chunk]
-      : Array.from({ length: chunk.length - 1 }, (_, index) => chunk.slice(index, index + 2)),
-  ))];
+const CLAUSE_SPLIT = /[。！？!?；;\n]+/u;
+const OBSERVER_LINK = /(?:看见|看到|目睹|听说|发现|得知|见证).{0,16}(?:终于|已经|开始|能够|能以|学会|习得|掌握)/u;
+const PRONOUN_LINK = /^(?:他|她|其|本人|自己).{0,10}(?:终于|已经|开始|能够|能以|学会|习得|掌握|觉醒|失去|封印)/u;
+
+function identityNames(owner: AbilityExtractionOwner): string[] {
+  return [owner.name, ...owner.aliases].filter(Boolean);
 }
 
 function assertRelevantEvidence(
   evidence: string,
   change: AbilityExtractionChange,
+  owner: AbilityExtractionOwner,
   ability: AbilityStoredRecord,
   source: AbilityStoredRecord | null,
 ): void {
-  const compact = normalizedEvidence(evidence);
-  const abilityAnchors = [ability.name, source?.name]
-    .filter((value): value is string => Boolean(value))
-    .flatMap(semanticAnchors);
-  const patchAnchors = Object.values(change.patch)
-    .filter((value): value is string => typeof value === "string" && value.length > 1)
-    .flatMap(semanticAnchors);
-  const namesAbility = abilityAnchors.some((anchor) => compact.includes(anchor));
-  const namesPatch = patchAnchors.some((anchor) => compact.includes(anchor));
-  const supportsType = EVENT_TERMS[change.type].some((term) => compact.includes(term));
-  if (!(supportsType && (namesAbility || namesPatch))) {
-    throw new AbilityValidationError("正文证据与能力名称、patch 或事件类型缺少相关支撑");
+  const abilityNames = [...new Set([ability.name, source?.name].filter((value): value is string => Boolean(value)))];
+  const clauses = evidence.split(CLAUSE_SPLIT).map((clause) => clause.trim()).filter(Boolean);
+  const valid = clauses.some((clause, index) => {
+    const fullAbility = abilityNames.some((name) => clause.includes(name));
+    const ownerMention = identityNames(owner).find((name) => clause.includes(name));
+    const previousOwnsPronoun = index > 0 && identityNames(owner).some((name) => clauses[index - 1]!.includes(name));
+    const actorLinked = ownerMention !== undefined
+      ? !OBSERVER_LINK.test(clause.slice(clause.indexOf(ownerMention) + ownerMention.length))
+      : previousOwnsPronoun && PRONOUN_LINK.test(clause);
+    const typeLinked = TYPE_PATTERNS[change.type].some((pattern) => pattern.test(clause));
+    const structuredClue = Object.values(change.patch).some((value) =>
+      typeof value === "string" && value.length >= 2 && clause.includes(value),
+    );
+    return fullAbility && actorLinked && (typeLinked || structuredClue);
+  });
+  if (!valid) {
+    throw new AbilityValidationError("正文证据必须在同一子句明确连接拥有者行动、完整能力名与事件变化");
   }
 }
 
@@ -248,7 +255,13 @@ export async function applyAbilityExtraction(
   const applied: AppliedAbilityChange[] = [];
   const rejected: RejectedAbilityExtraction[] = [];
 
-  for (const [index, change] of input.changes.entries()) {
+  for (const [index, rawChange] of input.changes.entries()) {
+    const parsed = AbilityExtractionChangeSchema.safeParse(rawChange);
+    if (!parsed.success) {
+      rejected.push({ index, change: rawChange, reason: `能力变化格式校验失败：${parsed.error.issues[0]?.message ?? "字段无效"}` });
+      continue;
+    }
+    const change: AbilityExtractionChange = parsed.data;
     try {
       const owner = owners.get(change.ownerName);
       if (owner === undefined) {
@@ -264,7 +277,7 @@ export async function applyAbilityExtraction(
           : change.sourceAbilityId
             ? await tx.ability.findUnique({ where: { id: change.sourceAbilityId } })
             : null;
-        assertRelevantEvidence(change.evidence, change, ability, source);
+        assertRelevantEvidence(change.evidence, change, owner, ability, source);
         const dedupeKey = [
           input.chapterId,
           ability.id,

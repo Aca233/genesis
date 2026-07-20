@@ -86,3 +86,63 @@ describe("真实 Prisma 能力乐观更新", () => {
 });
 
 afterAll(async () => prisma.$disconnect());
+
+it("真实 PG 并发相同 dedupe 操作返回一次 applied 与一次幂等，不同操作冲突", async () => {
+  const data = await fixture();
+  const base = {
+    abilityId: data.ability.id,
+    version: 1,
+    patch: { mastery: "adept" },
+    event: {
+      type: "improved",
+      chapterId: data.chapter.id,
+      messageId: data.message.id,
+      evidence: "阿岚反复演练凿阵术，终于将凿阵术由生涩磨炼至纯熟",
+      scale: "years",
+      dedupeKey: `concurrent:${data.ability.id}`,
+    },
+  };
+  try {
+    const same = await Promise.all([
+      applyAbilityChange(prisma as unknown as AbilityMutationClient, base),
+      applyAbilityChange(prisma as unknown as AbilityMutationClient, base),
+    ]);
+    expect(same.map((result) => result.applied).sort()).toEqual([false, true]);
+    expect(await prisma.abilityEvent.count({ where: { abilityId: data.ability.id } })).toBe(1);
+
+  } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+
+  const different = await fixture();
+  const operation = {
+    abilityId: different.ability.id,
+    version: 1,
+    patch: { mastery: "adept" },
+    event: {
+      type: "improved",
+      chapterId: different.chapter.id,
+      messageId: different.message.id,
+      evidence: "阿岚反复演练凿阵术，终于将凿阵术由生涩磨炼至纯熟",
+      scale: "years",
+      dedupeKey: `different:${different.ability.id}`,
+    },
+  };
+  try {
+    const raced = await Promise.allSettled([
+      applyAbilityChange(prisma as unknown as AbilityMutationClient, operation),
+      applyAbilityChange(prisma as unknown as AbilityMutationClient, {
+        ...operation,
+        event: { ...operation.event, evidence: "另一段不同证据" },
+      }),
+    ]);
+    expect(raced.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(raced.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(raced.find((result) => result.status === "rejected")).toMatchObject({
+      reason: expect.objectContaining({ message: expect.stringMatching(/刷新|冲突/) }),
+    });
+    expect(await prisma.abilityEvent.count({ where: { abilityId: different.ability.id } })).toBe(1);
+  } finally {
+    await prisma.world.delete({ where: { id: different.world.id } });
+  }
+});

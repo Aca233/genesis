@@ -446,7 +446,13 @@ async function applyAbilityChangeInTx(
       where: { id: input.abilityId, version: input.version },
       data: { ...input.patch, version: { increment: 1 } },
     });
-    if (write.count !== 1) throwConflict();
+    if (write.count !== 1) {
+      const concurrentEvent = await tx.abilityEvent.findUnique({
+        where: { dedupeKey: input.event.dedupeKey },
+      });
+      if (concurrentEvent !== null) return idempotentResult(concurrentEvent, input);
+      throwConflict();
+    }
     const persisted = await tx.ability.findUnique({ where: { id: input.abilityId } });
     if (persisted === null || persisted.version !== input.version + 1) throwConflict();
     updated = persisted;

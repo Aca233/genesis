@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ExtractionSchema, extractorUserPrompt } from "@/lib/prompts/extractor";
+import {
+  AbilityExtractionChangeSchema,
+  ExtractionSchema,
+  extractorUserPrompt,
+} from "@/lib/prompts/extractor";
 import type {
   AbilityEventRecord,
   AbilityMutationTx,
@@ -217,9 +221,8 @@ describe("能力章末抽取契约", () => {
     expect(parsed.abilityChanges[0]).toMatchObject({ evidenceMessageIndex: 4 });
 
     expect(
-      ExtractionSchema.safeParse({
-        ...baseExtraction,
-        abilityChanges: [{ ...parsed.abilityChanges[0], evidence: "苦练有成" }],
+      AbilityExtractionChangeSchema.safeParse({
+        ...(parsed.abilityChanges[0] as Record<string, unknown>), evidence: "苦练有成",
       }).success,
     ).toBe(false);
   });
@@ -371,4 +374,51 @@ it("拒绝虽然来自正文但与 improved 能力和事件无关的长引用", 
 
   expect(result.applied).toHaveLength(0);
   expect(result.rejected[0]?.reason).toMatch(/相关|支撑|能力名|事件/);
+});
+
+it("逐项拒绝 malformed abilityChanges 且继续应用合法项", async () => {
+  const fixture = extractionFixture();
+  const raw = ExtractionSchema.parse({
+    ...baseExtraction,
+    abilityChanges: [
+      { ownerName: "阿岚", type: "improved", patch: {}, evidence: "缺少消息索引和能力 ID" },
+      {
+        abilityId: "trainable-personal",
+        ownerName: "阿岚",
+        type: "improved",
+        patch: { mastery: "adept" },
+        evidenceMessageIndex: 4,
+        evidence: "阿岚在三年苦修后独自凿成七重石阵，凿阵术由生涩臻于纯熟",
+      },
+    ],
+  });
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: fixture.owners,
+    messages: fixture.messages,
+    changes: raw.abilityChanges,
+  });
+  expect(result.rejected[0]).toMatchObject({ index: 0, reason: expect.stringMatching(/格式|字段|校验/) });
+  expect(result.applied).toHaveLength(1);
+});
+
+it("拒绝观察者被误认成能力行动者，接受 owner 与完整能力名相连的习得释义", async () => {
+  const fixture = extractionFixture();
+  fixture.messages.push(
+    { id: "message-9", index: 9, scale: "scene", content: "阿岚看见白石终于学会踏岩步，便为同伴鼓掌。" },
+    { id: "message-10", index: 10, scale: "scene", content: "阿岚终于能以踏岩步稳稳越过断崖，长老颔首认可。" },
+  );
+  const invalid = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ ownerName: "阿岚", sourceAbilityId: "tradition-native", type: "learned", patch: { mastery: "novice" }, evidenceMessageIndex: 9, evidence: "阿岚看见白石终于学会踏岩步，便为同伴鼓掌" }],
+  });
+  expect(invalid.applied).toHaveLength(0);
+  expect(invalid.rejected[0]?.reason).toMatch(/行动者|拥有者|归属/);
+
+  const valid = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ ownerName: "阿岚", sourceAbilityId: "tradition-native", type: "learned", patch: { mastery: "novice" }, evidenceMessageIndex: 10, evidence: "阿岚终于能以踏岩步稳稳越过断崖，长老颔首认可" }],
+  });
+  expect(valid.applied).toHaveLength(1);
 });

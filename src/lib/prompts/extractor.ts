@@ -132,13 +132,22 @@ export const ExtractionSchema = z.object({
     .array(z.object({ entityName: z.string(), sectionKey: z.string() }))
     .describe("本章叙事已揭开迷雾的栏目"),
   abilityChanges: z
-    .array(AbilityExtractionChangeSchema)
-    .describe("有逐消息正文证据支持的能力变化；没有变化时为空数组"),
+    .array(z.unknown())
+    .max(50)
+    .describe("逐项校验的能力变化候选；没有变化时为空数组"),
 });
 
 export type Extraction = z.infer<typeof ExtractionSchema>;
+export type ParsedExtraction = Omit<Extraction, "abilityChanges"> & {
+  abilityChanges: AbilityExtractionChange[];
+};
 
 const extractionJsonSchema = JSON.stringify(z.toJSONSchema(ExtractionSchema), null, 2);
+const abilityChangeJsonSchema = JSON.stringify(
+  z.toJSONSchema(AbilityExtractionChangeSchema),
+  null,
+  2,
+);
 
 /** 六类实体的栏目模板（约束 sections.key 取值） */
 export const SECTION_TEMPLATES: Record<string, string[]> = {
@@ -180,7 +189,11 @@ ${Object.entries(SECTION_TEMPLATES)
 - Ability patches may only contain mastery, state, visibility, rumorText, effect, trigger, cost, or limitations. Never change a listed locked field. Ordinary training advances mastery by at most one rank.
 - Output ONLY a JSON object matching the schema. All user-facing strings in Chinese.
 
-${extractionJsonSchema}`;
+Overall extraction schema:
+${extractionJsonSchema}
+
+Every abilityChanges item must independently match:
+${abilityChangeJsonSchema}`;
 }
 
 export function extractorUserPrompt(opts: {
