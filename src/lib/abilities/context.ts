@@ -188,7 +188,7 @@ export async function buildAbilityContext(
     for (const ability of abilities) {
       if (ability.visibility === "known") {
         known.push({ owner, ability, disclosure: "full" });
-      } else if (opts.viewer === "player" && ability.visibility === "rumored") {
+      } else if (ability.visibility === "rumored") {
         known.push({ owner, ability, disclosure: "rumor" });
       }
     }
@@ -202,15 +202,21 @@ export async function buildAbilityContext(
     }
 
     const isSubject = opts.viewer === "backstage" && god.id === opts.subjectGodId;
-    if (isSubject || isMentioned(god, opts.searchText)) {
-      addPlayerVisible(owner, god.abilities);
-    }
     if (isSubject) {
+      addPlayerVisible(
+        owner,
+        god.abilities.filter((ability) => ability.visibility === "known"),
+      );
       addFull(
         authorOnly,
         owner,
-        god.abilities.filter((ability) => ability.visibility === "hidden"),
+        god.abilities.filter(
+          (ability) =>
+            ability.visibility === "hidden" || ability.visibility === "rumored",
+        ),
       );
+    } else if (isMentioned(god, opts.searchText)) {
+      addPlayerVisible(owner, god.abilities);
     }
   }
 

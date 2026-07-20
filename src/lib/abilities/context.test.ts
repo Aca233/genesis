@@ -268,6 +268,48 @@ describe("buildAbilityContext", () => {
     expect(context).not.toContain("潮底低语的效果");
   });
 
+
+  it("后台行动神获得自身 rumored 神权完整机制，非行动神仍仅见安全传闻", async () => {
+    const subjectRumor = ability(
+      "divine-acting-rumored",
+      "潮底低语",
+      "rumored",
+    );
+    const otherRumor = ability(
+      "divine-unrelated-rumored",
+      "灰烬回声",
+      "rumored",
+    );
+    mocks.prisma.god.findMany.mockResolvedValue([
+      { ...actingGod, abilities: [subjectRumor] },
+      { ...unrelatedGod, abilities: [otherRumor] },
+    ]);
+
+    const context = await buildAbilityContext({
+      timelineId: "timeline-1",
+      viewer: "backstage",
+      subjectGodId: "god-acting",
+      searchText: "潮神与灰神",
+    });
+
+    const [knownBlock, authorOnly = ""] = context.split(
+      "== AUTHOR-ONLY HIDDEN ABILITIES ==",
+    );
+    expect(authorOnly).toContain("[divine-acting-rumored] 潮底低语");
+    expect(authorOnly).toContain("effect: 潮底低语的效果");
+    expect(authorOnly).toContain("trigger: 潮底低语的触发");
+    expect(authorOnly).toContain("cost: 潮底低语的代价");
+    expect(authorOnly).toContain("limitations: 潮底低语的限制");
+    expect(authorOnly).toContain("mastery: adept");
+
+    expect(knownBlock).toContain("[divine-unrelated-rumored] 灰烬回声");
+    expect(knownBlock).toContain("rumor: 关于灰烬回声的传闻");
+    expect(context).not.toContain("灰烬回声的效果");
+    expect(context).not.toContain("灰烬回声的触发");
+    expect(context).not.toContain("灰烬回声的代价");
+    expect(context).not.toContain("灰烬回声的限制");
+  });
+
   it("后台块只额外加入当前行动主神自己的隐藏神权", async () => {
     const context = await buildAbilityContext({
       timelineId: "timeline-1",
