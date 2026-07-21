@@ -3,7 +3,7 @@ import type { GenesisTask, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { stream } from "@/lib/llm/gateway";
 import { completeStructured } from "@/lib/llm/structured";
-import { WorldDeckSchema, type WorldDeck } from "@/lib/cards/schemas";
+import type { WorldDeck } from "@/lib/cards/schemas";
 import { GENESIS_SYSTEM, genesisRepairPrompt, genesisUserPrompt } from "@/lib/prompts/genesis";
 import { lorebookExcerpts, parseStWorldbook } from "@/lib/lorebook/st-import";
 import { generateGenesisDeck } from "./generate";
@@ -160,6 +160,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
     }
 
     const deck = await generateGenesisDeck({
+      mode: "pantheon",
       decree: task.decree,
       lorebookExcerpts: excerpts,
       materialSnapshot,
@@ -170,27 +171,45 @@ async function runGenesisTask(taskId: string): Promise<void> {
           cache: { namespace: "genesis:v1" },
           messages: [
             { role: "system", content: GENESIS_SYSTEM, cacheScope: "global" },
-            { role: "user", content: genesisUserPrompt(task.decree, excerpts, materialText), cacheScope: "dynamic" },
+            { role: "user", content: genesisUserPrompt({
+              mode: "pantheon",
+              decree: task.decree,
+              lorebookExcerpts: excerpts,
+              materialConstraints: materialText,
+            }), cacheScope: "dynamic" },
           ],
         })) {
           if (chunk.type === "text") yield chunk.text;
         }
       },
-      repairCompletion: ({ invalidOutput, validationError }) =>
-        completeStructured("narrative", {
+      repairCompletion: (input) => {
+        const repairPrompt = genesisRepairPrompt({
+          mode: input.mode,
+          decree: task.decree,
+          lorebookExcerpts: excerpts,
+          invalidOutput: input.invalidOutput,
+          validationError: input.validationError,
+          materialConstraints: materialText,
+        });
+        if (input.mode === "creator") {
+          return completeStructured("narrative", {
+            task: "genesis",
+            system: GENESIS_SYSTEM,
+            user: repairPrompt,
+            schema: input.schema,
+            maxTokens: 16000,
+            cache: { namespace: "genesis:v1" },
+          });
+        }
+        return completeStructured("narrative", {
           task: "genesis",
           system: GENESIS_SYSTEM,
-          user: genesisRepairPrompt({
-            decree: task.decree,
-            lorebookExcerpts: excerpts,
-            invalidOutput,
-            validationError,
-            materialConstraints: materialText,
-          }),
-          schema: WorldDeckSchema,
+          user: repairPrompt,
+          schema: input.schema,
           maxTokens: 16000,
           cache: { namespace: "genesis:v1" },
-        }),
+        });
+      },
       onChunk: async (rawOutput) => {
         latestRaw = rawOutput;
         const now = Date.now();

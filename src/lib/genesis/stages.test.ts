@@ -8,6 +8,12 @@ import {
 } from "./stages";
 
 describe("创世阶段映射", () => {
+  it("诸神阶段文案不假定玩家位于世界内", () => {
+    const gods = GENESIS_STAGES.find(({ id }) => id === "gods")!;
+    expect(gods.description).toContain("诸神谱系");
+    expect(gods.description).not.toContain("玩家神");
+  });
+
   it("只有一组所需字段全部完成才进入下一阶段", () => {
     expect(deriveStreamingStage([])).toBe("laws");
     expect(deriveStreamingStage(["mode"])).toBe("laws");

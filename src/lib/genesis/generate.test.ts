@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { completeDeck } from "@/lib/abilities/embark.test-fixtures";
+import { CreatorWorldDeckSchema, PantheonWorldDeckSchema } from "@/lib/cards/schemas";
 import { extractDeckMaterials } from "@/lib/materials/extract-deck";
 import type { GenesisMaterialSnapshot } from "@/lib/materials/types";
-import { generateGenesisDeck } from "./generate";
+import type { WorldMode } from "@/lib/world-mode";
+import { generateGenesisDeck, type GenesisGenerationOptions } from "./generate";
 
 async function* chunksOf(text: string, size = 17) {
   for (let index = 0; index < text.length; index += size) {
@@ -10,7 +12,70 @@ async function* chunksOf(text: string, size = 17) {
   }
 }
 
+function completeCreatorDeck() {
+  const pantheon = completeDeck();
+  const { playerGod: _playerGod, ...shared } = pantheon;
+  void _playerGod;
+  return CreatorWorldDeckSchema.parse({
+    ...shared,
+    mode: "creator",
+    majorGods: shared.majorGods.map(({ agenda, initialRelationToPlayer: _relation, ...god }, index, gods) => {
+      void _relation;
+      return {
+        ...god,
+        agenda: {
+          longTermGoal: agenda.longTermGoal,
+          shortTermGoals: agenda.shortTermGoals,
+          methods: agenda.methods,
+          schemes: agenda.schemes,
+        },
+        relations: [{
+          targetGodRef: gods[(index + 1) % gods.length]!.ref,
+          label: "rival",
+          note: "世界内神明之间的竞争",
+        }],
+      };
+    }),
+  });
+}
+
 describe("generateGenesisDeck", () => {
+  it("要求调用方显式冻结生成模式", () => {
+    expectTypeOf<GenesisGenerationOptions>().toMatchObjectType<{ mode: WorldMode }>();
+  });
+
+  it("合法 creator 首轮输出无需修补即可成功", async () => {
+    const creator = completeCreatorDeck();
+    const repairCompletion = vi.fn();
+
+    await expect(generateGenesisDeck({
+      mode: "creator",
+      decree: "创造测试界",
+      streamCompletion: () => chunksOf(JSON.stringify(creator)),
+      repairCompletion,
+      onProgress: vi.fn(), onChunk: vi.fn(), onStage: vi.fn(),
+    })).resolves.toEqual(creator);
+    expect(repairCompletion).not.toHaveBeenCalled();
+  });
+
+  it("合法 creator 修补使用 Creator schema 并成功返回", async () => {
+    const creator = completeCreatorDeck();
+    const repairCompletion = vi.fn(async (input) => {
+      expect(input.mode).toBe("creator");
+      expect(input.schema).toBe(CreatorWorldDeckSchema);
+      return input.schema.parse(creator);
+    });
+
+    await expect(generateGenesisDeck({
+      mode: "creator",
+      decree: "创造测试界",
+      streamCompletion: () => chunksOf('{"mode":"creator"}'),
+      repairCompletion,
+      onProgress: vi.fn(), onChunk: vi.fn(), onStage: vi.fn(),
+    })).resolves.toEqual(creator);
+    expect(repairCompletion).toHaveBeenCalledTimes(1);
+  });
+
   it("流式读取卡组并在顶层值闭合时报告真实进度", async () => {
     const deck = completeDeck();
     const progress: Array<{ keys: string[]; raw: string }> = [];
@@ -73,6 +138,7 @@ describe("generateGenesisDeck", () => {
     expect(onStage).toHaveBeenCalledWith("validation");
     expect(onStage).toHaveBeenCalledWith("repair");
     expect(repairCompletion).toHaveBeenCalledWith(expect.objectContaining({
+      schema: PantheonWorldDeckSchema,
       invalidOutput: '{"mode":"pantheon","worldName":"破碎界"}',
       validationError: expect.stringContaining("cosmology"),
     }));

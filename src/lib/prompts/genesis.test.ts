@@ -24,12 +24,16 @@ describe("genesis mode prompts", () => {
   });
 
   it("用户与修补提示词显式冻结模式", () => {
-    expect(genesisUserPrompt("creator", "造一个世界")).toContain('mode="creator"');
-    expect(genesisRepairPrompt({
+    expect(genesisUserPrompt({ mode: "creator", decree: "造一个世界" })).toContain('mode="creator"');
+    const repair = genesisRepairPrompt({
       mode: "creator",
       decree: "造一个世界",
       invalidOutput: "{}",
       validationError: "缺字段",
-    })).toContain("Never introduce playerGod");
+    });
+    expect(repair).toContain("Never introduce playerGod");
+    expect(repair).toContain("preserving valid content");
+    expect(repair).toContain("locked path");
+    expect(repair).toContain("do not reveal hidden material");
   });
 });

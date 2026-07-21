@@ -1,5 +1,9 @@
 import type { WorldDeck } from "@/lib/cards/schemas";
-import { WorldDeckSchema } from "@/lib/cards/schemas";
+import {
+  CreatorWorldDeckSchema,
+  PantheonWorldDeckSchema,
+  WorldDeckSchema,
+} from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 import { extractJson } from "@/lib/llm/structured";
 import type { GenesisMaterialSnapshot } from "@/lib/materials/types";
@@ -11,16 +15,20 @@ import {
 } from "./json-progress";
 import { mergeCompletedKeys, type GenesisStageId } from "./stages";
 
-type RepairInput = {
-  mode: WorldMode;
+type SharedRepairInput = {
   decree: string;
   lorebookExcerpts?: string;
   invalidOutput: string;
   validationError: string;
 };
 
+export type RepairInput = SharedRepairInput & (
+  | { mode: "pantheon"; schema: typeof PantheonWorldDeckSchema }
+  | { mode: "creator"; schema: typeof CreatorWorldDeckSchema }
+);
+
 export type GenesisGenerationOptions = {
-  mode?: WorldMode;
+  mode: WorldMode;
   decree: string;
   lorebookExcerpts?: string;
   materialSnapshot?: GenesisMaterialSnapshot | null;
@@ -69,7 +77,7 @@ function describeValidationError(error: unknown): string {
 export async function generateGenesisDeck(
   options: GenesisGenerationOptions,
 ): Promise<WorldDeck> {
-  const mode = options.mode ?? "pantheon";
+  const mode = options.mode;
   const scanner = new TopLevelJsonProgressScanner();
   let completedKeys: GenesisTopLevelKey[] = [];
   let lastProgressRaw = "";
@@ -96,13 +104,23 @@ export async function generateGenesisDeck(
   } catch (error) {
     const validationError = describeValidationError(error);
     await options.onStage("repair");
-    const repaired = await options.repairCompletion({
-      mode,
+    const sharedRepairInput = {
       decree: options.decree,
       lorebookExcerpts: options.lorebookExcerpts,
       invalidOutput: rawOutput,
       validationError,
-    });
+    };
+    const repaired = mode === "pantheon"
+      ? await options.repairCompletion({
+        ...sharedRepairInput,
+        mode,
+        schema: PantheonWorldDeckSchema,
+      })
+      : await options.repairCompletion({
+        ...sharedRepairInput,
+        mode,
+        schema: CreatorWorldDeckSchema,
+      });
     return validateParsedDeck(repaired, mode, options.materialSnapshot ?? null);
   }
 }

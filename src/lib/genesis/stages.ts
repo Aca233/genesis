@@ -7,7 +7,7 @@ import {
 export const GENESIS_STAGES = [
   { id: "oracle", title: "聆听神谕", description: "请求建立，解析随行典籍" },
   { id: "laws", title: "奠定世界法则", description: "凝聚世界名、宇宙论与融合公理" },
-  { id: "gods", title: "铸造诸神", description: "塑造玩家神与诸神谱系" },
+  { id: "gods", title: "铸造诸神", description: "塑造诸神谱系与神间关系" },
   { id: "peoples", title: "铺展众生与疆域", description: "生成种族、势力与重要地点" },
   { id: "characters", title: "编织命运人物", description: "创造推动时代的主要人物" },
   { id: "conflict", title: "确立时代冲突", description: "定下时代矛盾、文风与主题" },

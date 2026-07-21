@@ -44,7 +44,11 @@ export async function POST(request: Request) {
     deck = await completeStructured("narrative", {
       task: "genesis",
       system: GENESIS_SYSTEM,
-      user: genesisUserPrompt(body.decree, excerpts),
+      user: genesisUserPrompt({
+        mode: "pantheon",
+        decree: body.decree,
+        lorebookExcerpts: excerpts,
+      }),
       schema: WorldDeckSchema,
       maxTokens: 16000,
       cache: { namespace: "genesis:v1" },

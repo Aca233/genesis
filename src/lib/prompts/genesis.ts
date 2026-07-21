@@ -49,45 +49,28 @@ export function genesisSystem(mode: WorldMode): string {
 /** Temporary pantheon alias for legacy call sites; task 3 freezes mode through those routes. */
 export const GENESIS_SYSTEM = genesisSystem("pantheon");
 
-export function genesisUserPrompt(
-  mode: WorldMode,
-  decree: string,
+export function genesisUserPrompt(opts: {
+  mode: WorldMode;
+  decree: string;
   lorebookExcerpts?: string,
   materialConstraints?: string,
-): string;
-/** Temporary compatibility overload for task-3 call sites. */
-export function genesisUserPrompt(
-  decree: string,
-  lorebookExcerpts?: string,
-  materialConstraints?: string,
-): string;
-export function genesisUserPrompt(
-  modeOrDecree: WorldMode | string,
-  decreeOrLorebook?: string,
-  lorebookOrMaterials?: string,
-  materialConstraints?: string,
-): string {
-  const explicitMode = modeOrDecree === "pantheon" || modeOrDecree === "creator";
-  const mode: WorldMode = explicitMode ? modeOrDecree : "pantheon";
-  const decree = explicitMode ? (decreeOrLorebook ?? "") : modeOrDecree;
-  const lorebookExcerpts = explicitMode ? lorebookOrMaterials : decreeOrLorebook;
-  const materials = explicitMode ? materialConstraints : lorebookOrMaterials;
-  const lore = lorebookExcerpts
-    ? `\n\nAuthoritative lorebook excerpts (override your own knowledge on conflict):\n${lorebookExcerpts}`
+}): string {
+  const lore = opts.lorebookExcerpts
+    ? `\n\nAuthoritative lorebook excerpts (override your own knowledge on conflict):\n${opts.lorebookExcerpts}`
     : "";
-  const materialText = materials ? `\n\n${materials}` : "";
-  return `Frozen world mode: mode="${mode}".\nPrimordial decree from the player:\n"""\n${decree}\n"""${lore}${materialText}\n\nGenerate the complete world deck JSON now.`;
+  const materialText = opts.materialConstraints ? `\n\n${opts.materialConstraints}` : "";
+  return `Frozen world mode: mode="${opts.mode}".\nPrimordial decree from the player:\n"""\n${opts.decree}\n"""${lore}${materialText}\n\nGenerate the complete world deck JSON now.`;
 }
 
 export function genesisRepairPrompt(opts: {
-  mode?: WorldMode;
+  mode: WorldMode;
   decree: string;
   lorebookExcerpts?: string;
   invalidOutput: string;
   validationError: string;
   materialConstraints?: string;
 }) {
-  const mode = opts.mode ?? "pantheon";
+  const mode = opts.mode;
   const lore = opts.lorebookExcerpts
     ? `\n\nAuthoritative lorebook excerpts:\n${opts.lorebookExcerpts}`
     : "";
@@ -95,7 +78,7 @@ export function genesisRepairPrompt(opts: {
   const modeGuard = mode === "creator"
     ? "Never introduce playerGod, stanceToPlayer, or initialRelationToPlayer. Preserve only world-internal god relations."
     : "Keep exactly one playerGod and all pantheon player-god relationship fields.";
-  return `The previous Genesis output failed validation.\n\nFrozen world mode: mode="${mode}". ${modeGuard}\nPrimordial decree:\n"""\n${opts.decree}\n"""${lore}${materials}\n\nValidation error:\n${opts.validationError}\n\nInvalid output:\n${opts.invalidOutput.slice(0, 50000)}\n\nRepair every reported structural, stable-reference, and material inheritance issue. Return ONLY the complete corrected JSON in this order: ${TOP_LEVEL_ORDER[mode]}. The first property must be mode="${mode}".`;
+  return `The previous Genesis output failed validation.\n\nFrozen world mode: mode="${mode}". ${modeGuard}\nPrimordial decree:\n"""\n${opts.decree}\n"""${lore}${materials}\n\nValidation error:\n${opts.validationError}\n\nInvalid output:\n${opts.invalidOutput.slice(0, 50000)}\n\nRepair every reported structural, stable-reference, and material inheritance issue while preserving valid content. Enforce every GENESIS MATERIALS locked path verbatim and do not reveal hidden material. Return ONLY the complete corrected JSON in this order: ${TOP_LEVEL_ORDER[mode]}. The first property must be mode="${mode}".`;
 }
 
 /** 单卡重掷：其余卡组为约束 */
