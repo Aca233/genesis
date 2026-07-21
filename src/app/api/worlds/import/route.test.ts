@@ -535,6 +535,62 @@ describe("存档导入", () => {
   });
 
   it.each([
+    ["由非人物实体携带", (archive: ReturnType<typeof versionTwoArchive>) => {
+      archive.world.timelines[0].entities[1].raceId = "race-old";
+    }],
+    ["指向非种族目标", (archive: ReturnType<typeof versionTwoArchive>) => {
+      archive.world.timelines[0].entities[2].raceId = "faction-old";
+    }],
+  ])("拒绝 raceId %s", async (_label, mutate) => {
+    const archive = versionTwoArchive();
+    mutate(archive);
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("大型引用图校验不在集合循环中使用 Array.find", async () => {
+    const archive = versionTwoArchive();
+    const timeline = archive.world.timelines[0];
+    const templateCharacter = timeline.entities[2];
+    const templateMembership = timeline.memberships[0];
+    for (let index = 0; index < 2_000; index += 1) {
+      const characterId = `bulk-character-${index}`;
+      timeline.entities.push({
+        ...templateCharacter,
+        id: characterId,
+        name: `人物${index}`,
+        emblemSeed: characterId,
+        sections: [],
+      });
+      timeline.memberships.push({
+        ...templateMembership,
+        id: `bulk-membership-${index}`,
+        characterId,
+      });
+    }
+    const originalFind = Array.prototype.find;
+    let findCalls = 0;
+    const findSpy = vi.spyOn(Array.prototype, "find").mockImplementation(function (
+      this: unknown[],
+      ...args: Parameters<typeof originalFind>
+    ) {
+      findCalls += 1;
+      return originalFind.apply(this, args);
+    });
+
+    try {
+      const response = await importWorld(request(archive));
+      expect(response.status).toBe(200);
+      expect(findCalls).toBe(0);
+    } finally {
+      findSpy.mockRestore();
+    }
+  });
+
+  it.each([
     ["时间线", (archive: ReturnType<typeof versionTwoArchive>) => {
       archive.world.timelines[0].worldId = "another-world";
     }],

@@ -345,21 +345,100 @@ function assertDeclaredOwner(declaredId: string | undefined, ownerId: string, la
   }
 }
 
-function requireLocalId(ids: ReadonlySet<string>, id: string, label: string) {
-  if (!ids.has(id)) throw new Error(`${label}必须属于当前时间线`);
+type ImportedWorld = z.infer<typeof WorldSchema>;
+type ImportedTimeline = z.infer<typeof TimelineSchema>;
+type ImportedChapter = z.infer<typeof ChapterSchema>;
+type ImportedMessage = z.infer<typeof MessageSchema>;
+type ImportedEntity = z.infer<typeof EntitySchema>;
+type ImportedGod = z.infer<typeof GodSchema>;
+type ImportedAbility = z.infer<typeof AbilitySchema>;
+
+interface TimelineReferenceIndexes {
+  chapters: Map<string, ImportedChapter>;
+  messageToChapter: Map<string, { message: ImportedMessage; chapterId: string }>;
+  entities: Map<string, ImportedEntity>;
+  gods: Map<string, ImportedGod>;
+  abilities: Map<string, ImportedAbility>;
 }
 
-function validateTimelineReferences(
-  timeline: z.infer<typeof TimelineSchema>,
-  abilityById: ReadonlyMap<string, z.infer<typeof AbilitySchema>>,
+interface GlobalReferenceIndexes {
+  timelines: Map<string, TimelineReferenceIndexes>;
+  chapters: Map<string, { timelineId: string; value: ImportedChapter }>;
+  messageToChapter: Map<
+    string,
+    { timelineId: string; chapterId: string; value: ImportedMessage }
+  >;
+  entities: Map<string, { timelineId: string; value: ImportedEntity }>;
+  gods: Map<string, { timelineId: string; value: ImportedGod }>;
+  abilities: Map<string, { timelineId: string; value: ImportedAbility }>;
+}
+
+function buildReferenceIndexes(world: ImportedWorld): GlobalReferenceIndexes {
+  const indexes: GlobalReferenceIndexes = {
+    timelines: new Map(),
+    chapters: new Map(),
+    messageToChapter: new Map(),
+    entities: new Map(),
+    gods: new Map(),
+    abilities: new Map(),
+  };
+
+  for (const timeline of world.timelines) {
+    const local: TimelineReferenceIndexes = {
+      chapters: new Map(),
+      messageToChapter: new Map(),
+      entities: new Map(),
+      gods: new Map(),
+      abilities: new Map(),
+    };
+    indexes.timelines.set(timeline.id, local);
+
+    for (const chapter of timeline.chapters) {
+      local.chapters.set(chapter.id, chapter);
+      indexes.chapters.set(chapter.id, { timelineId: timeline.id, value: chapter });
+      for (const message of chapter.messages) {
+        local.messageToChapter.set(message.id, { message, chapterId: chapter.id });
+        indexes.messageToChapter.set(message.id, {
+          timelineId: timeline.id,
+          chapterId: chapter.id,
+          value: message,
+        });
+      }
+    }
+    for (const entity of timeline.entities) {
+      local.entities.set(entity.id, entity);
+      indexes.entities.set(entity.id, { timelineId: timeline.id, value: entity });
+    }
+    for (const god of timeline.gods) {
+      local.gods.set(god.id, god);
+      indexes.gods.set(god.id, { timelineId: timeline.id, value: god });
+    }
+    for (const ability of timeline.abilities) {
+      local.abilities.set(ability.id, ability);
+      indexes.abilities.set(ability.id, { timelineId: timeline.id, value: ability });
+    }
+  }
+  return indexes;
+}
+
+function requireTimelineRecord<T>(
+  map: ReadonlyMap<string, { timelineId: string; value: T }>,
+  id: string,
+  timelineId: string,
+  label: string,
+): T {
+  const indexed = map.get(id);
+  if (indexed === undefined) throw new Error(`${label}引用不存在：${id}`);
+  if (indexed.timelineId !== timelineId) throw new Error(`${label}必须属于当前时间线`);
+  return indexed.value;
+}
+
+async function validateTimelineReferences(
+  timeline: ImportedTimeline,
+  indexes: GlobalReferenceIndexes,
 ) {
-  const chapterIds = new Set(timeline.chapters.map((chapter) => chapter.id));
-  const messageIds = new Set(
-    timeline.chapters.flatMap((chapter) => chapter.messages.map((message) => message.id)),
-  );
-  const entityIds = new Set(timeline.entities.map((entity) => entity.id));
-  const godIds = new Set(timeline.gods.map((god) => god.id));
-  const abilityIds = new Set(timeline.abilities.map((ability) => ability.id));
+  const local = indexes.timelines.get(timeline.id);
+  if (local === undefined) throw new Error(`时间线索引不存在：${timeline.id}`);
 
   for (const chapter of timeline.chapters) {
     assertDeclaredOwner(chapter.timelineId, timeline.id, "章节");
@@ -369,89 +448,128 @@ function validateTimelineReferences(
   }
   for (const entity of timeline.entities) {
     assertDeclaredOwner(entity.timelineId, timeline.id, "实体");
-    if (entity.raceId != null) requireLocalId(entityIds, entity.raceId, "人物种族");
+    if (entity.raceId != null) {
+      if (entity.type !== "character") throw new Error("只有 character 实体可以携带 raceId");
+      const race = requireTimelineRecord(indexes.entities, entity.raceId, timeline.id, "人物种族");
+      if (race.type !== "race") throw new Error("人物 raceId 必须指向 race 实体");
+    }
     for (const section of entity.sections) {
       assertDeclaredOwner(section.entityId, entity.id, "实体栏目");
     }
   }
   for (const god of timeline.gods) {
     assertDeclaredOwner(god.timelineId, timeline.id, "神明");
-    if (god.codexEntityId != null) requireLocalId(entityIds, god.codexEntityId, "神明百科实体");
+    if (god.codexEntityId != null) {
+      requireTimelineRecord(indexes.entities, god.codexEntityId, timeline.id, "神明百科实体");
+    }
     for (const relationId of Object.keys(god.relations ?? {})) {
-      requireLocalId(godIds, relationId, "神明关系");
+      requireTimelineRecord(indexes.gods, relationId, timeline.id, "神明关系");
     }
   }
   for (const ability of timeline.abilities) {
     assertDeclaredOwner(ability.timelineId, timeline.id, "能力");
-    if (ability.entityId != null) requireLocalId(entityIds, ability.entityId, "能力实体");
-    if (ability.godId != null) requireLocalId(godIds, ability.godId, "能力神明");
+    if (ability.entityId != null) {
+      requireTimelineRecord(indexes.entities, ability.entityId, timeline.id, "能力实体");
+    }
+    if (ability.godId != null) {
+      requireTimelineRecord(indexes.gods, ability.godId, timeline.id, "能力神明");
+    }
     if (ability.sourceAbilityId != null) {
-      requireLocalId(abilityIds, ability.sourceAbilityId, "来源能力");
+      requireTimelineRecord(indexes.abilities, ability.sourceAbilityId, timeline.id, "来源能力");
     }
   }
   for (const membership of timeline.memberships) {
-    requireLocalId(entityIds, membership.characterId, "成员人物");
-    requireLocalId(entityIds, membership.factionId, "成员势力");
-    const character = timeline.entities.find((entity) => entity.id === membership.characterId);
-    const faction = timeline.entities.find((entity) => entity.id === membership.factionId);
-    if (character?.type !== "character" || faction?.type !== "faction") {
+    const character = requireTimelineRecord(
+      indexes.entities,
+      membership.characterId,
+      timeline.id,
+      "成员人物",
+    );
+    const faction = requireTimelineRecord(
+      indexes.entities,
+      membership.factionId,
+      timeline.id,
+      "成员势力",
+    );
+    if (character.type !== "character" || faction.type !== "faction") {
       throw new Error("成员关系必须连接 character 与 faction");
     }
   }
   for (const event of timeline.abilityEvents) {
-    requireLocalId(abilityIds, event.abilityId, "事件能力");
-    requireLocalId(chapterIds, event.chapterId, "事件章节");
-    if (event.messageId != null) requireLocalId(messageIds, event.messageId, "事件消息");
-    const messageBelongsToChapter = timeline.chapters
-      .find((chapter) => chapter.id === event.chapterId)
-      ?.messages.some((message) => message.id === event.messageId);
-    if (event.messageId != null && !messageBelongsToChapter) {
-      throw new Error("事件消息必须属于事件章节");
+    requireTimelineRecord(indexes.abilities, event.abilityId, timeline.id, "事件能力");
+    requireTimelineRecord(indexes.chapters, event.chapterId, timeline.id, "事件章节");
+    if (event.messageId != null) {
+      const message = indexes.messageToChapter.get(event.messageId);
+      if (message === undefined) throw new Error(`事件消息引用不存在：${event.messageId}`);
+      if (message.timelineId !== timeline.id) throw new Error("事件消息必须属于当前时间线");
+      if (message.chapterId !== event.chapterId) throw new Error("事件消息必须属于事件章节");
     }
   }
   for (const chronicle of timeline.chronicles) {
     assertDeclaredOwner(chronicle.timelineId, timeline.id, "编年史");
-    for (const id of chronicle.entityIds) requireLocalId(entityIds, id, "编年史实体");
-    for (const id of chronicle.godIds) requireLocalId(godIds, id, "编年史神明");
+    for (const id of chronicle.entityIds) {
+      requireTimelineRecord(indexes.entities, id, timeline.id, "编年史实体");
+    }
+    for (const id of chronicle.godIds) {
+      requireTimelineRecord(indexes.gods, id, timeline.id, "编年史神明");
+    }
   }
   for (const omen of timeline.omens) {
     assertDeclaredOwner(omen.timelineId, timeline.id, "征兆");
-    requireLocalId(godIds, omen.godId, "征兆神明");
+    requireTimelineRecord(indexes.gods, omen.godId, timeline.id, "征兆神明");
   }
 
-  const entityById = new Map(timeline.entities.map((entity) => [entity.id, entity]));
-  const godById = new Map(timeline.gods.map((god) => [god.id, god]));
   const ownershipTx = {
-    entity: { findUnique: async ({ where }: { where: { id: string } }) => {
-      const entity = entityById.get(where.id);
-      return entity ? { id: entity.id, timelineId: timeline.id, type: entity.type, raceId: entity.raceId ?? null } : null;
-    } },
-    god: { findUnique: async ({ where }: { where: { id: string } }) => {
-      const god = godById.get(where.id);
-      return god ? { id: god.id, timelineId: timeline.id } : null;
-    } },
-    ability: { findUnique: async ({ where }: { where: { id: string } }) => {
-      const ability = abilityById.get(where.id);
-      return ability ? {
+    entity: {
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        const entity = local.entities.get(where.id);
+        return entity
+          ? {
+              id: entity.id,
+              timelineId: timeline.id,
+              type: entity.type,
+              raceId: entity.raceId ?? null,
+            }
+          : null;
+      },
+    },
+    god: {
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        const god = local.gods.get(where.id);
+        return god ? { id: god.id, timelineId: timeline.id } : null;
+      },
+    },
+    ability: {
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        const ability = local.abilities.get(where.id);
+        return ability
+          ? {
+              id: ability.id,
+              timelineId: timeline.id,
+              entityId: ability.entityId ?? null,
+              godId: ability.godId ?? null,
+              sourceAbilityId: ability.sourceAbilityId ?? null,
+              kind: ability.kind,
+            }
+          : null;
+      },
+    },
+  };
+  await Promise.all(
+    timeline.abilities.map((ability) =>
+      validateAbilityOwnership(ownershipTx, {
         id: ability.id,
         timelineId: timeline.id,
         entityId: ability.entityId ?? null,
         godId: ability.godId ?? null,
         sourceAbilityId: ability.sourceAbilityId ?? null,
         kind: ability.kind,
-      } : null;
-    } },
-  };
-  return Promise.all(timeline.abilities.map((ability) => validateAbilityOwnership(ownershipTx, {
-    id: ability.id,
-    timelineId: timeline.id,
-    entityId: ability.entityId ?? null,
-    godId: ability.godId ?? null,
-    sourceAbilityId: ability.sourceAbilityId ?? null,
-    kind: ability.kind,
-    bloodlineJustification: ability.bloodlineJustification,
-  })));
+        bloodlineJustification: ability.bloodlineJustification,
+      }),
+    ),
+  );
 }
+
 
 function remapDedupeKey(
   event: z.infer<typeof AbilityEventSchema>,
@@ -545,11 +663,9 @@ export async function POST(request: Request) {
       }
     }
 
-    const abilityById = new Map(
-      w.timelines.flatMap((timeline) => timeline.abilities.map((ability) => [ability.id, ability] as const)),
-    );
+    const referenceIndexes = buildReferenceIndexes(w);
     for (const timeline of w.timelines) {
-      await validateTimelineReferences(timeline, abilityById);
+      await validateTimelineReferences(timeline, referenceIndexes);
     }
 
     const timelineRows: Prisma.TimelineCreateManyInput[] = [];
