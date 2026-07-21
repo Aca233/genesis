@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 import {
+  CreatorWorldDeckSchema,
   LegacyWorldDeckSchema,
   WorldDeckSchema,
   isLegacyWorldDeck,
@@ -49,6 +50,7 @@ function createCharacters() {
 function completeDeck() {
   const characters = createCharacters();
   return {
+    mode: "pantheon" as const,
     worldName: "测试界",
     cosmology: {
       origin: "星海初燃",
@@ -149,6 +151,33 @@ function completeDeck() {
   };
 }
 
+
+function completeCreatorDeck() {
+  const { playerGod: _playerGod, ...shared } = completeDeck();
+  void _playerGod;
+  return {
+    ...shared,
+    mode: "creator" as const,
+    majorGods: shared.majorGods.map(({ agenda, initialRelationToPlayer: _relation, ...god }, index, gods) => {
+      void _relation;
+      return {
+        ...god,
+        agenda: {
+          longTermGoal: agenda.longTermGoal,
+          shortTermGoals: agenda.shortTermGoals,
+          methods: agenda.methods,
+          schemes: agenda.schemes,
+        },
+        relations: [{
+          targetGodRef: gods[(index + 1) % gods.length]!.ref,
+          label: "rival" as const,
+          note: "世界内神明之间的竞争",
+        }],
+      };
+    }),
+  };
+}
+
 function completeLegacyDeck(): Record<string, unknown> {
   const legacy = completeDeck() as Record<string, unknown>;
   const playerGod = legacy.playerGod as Record<string, unknown>;
@@ -169,6 +198,50 @@ function completeLegacyDeck(): Record<string, unknown> {
   delete legacy.majorCharacters;
   return legacy;
 }
+
+describe("WorldDeck 模式判别联合", () => {
+  it("要求 pantheon 显式声明 mode 并包含 playerGod", () => {
+    const pantheon = WorldDeckSchema.parse(completeDeck());
+    expect(pantheon.mode).toBe("pantheon");
+    expect(pantheon.mode === "pantheon" && pantheon.playerGod.name).toBeTruthy();
+
+    const { mode: _mode, ...withoutMode } = completeDeck();
+    void _mode;
+    expect(WorldDeckSchema.safeParse(withoutMode).success).toBe(false);
+  });
+
+  it("接受不含玩家神且只描述世界内关系的 creator 卡组", () => {
+    const creator = CreatorWorldDeckSchema.parse(completeCreatorDeck());
+    expect(creator.mode).toBe("creator");
+    expect("playerGod" in creator).toBe(false);
+    expect("stanceToPlayer" in creator.majorGods[0]!.agenda).toBe(false);
+    if (creator.mode !== "creator") throw new Error("预期 creator 卡组");
+    expect(creator.majorGods[0]!.relations[0]?.targetGodRef).toBe("god-major-2");
+  });
+
+  it("严格拒绝 creator 卡组附带 playerGod 或玩家关系字段", () => {
+    const creator = completeCreatorDeck();
+    expect(WorldDeckSchema.safeParse({ ...creator, playerGod: completeDeck().playerGod }).success).toBe(false);
+    expect(WorldDeckSchema.safeParse({
+      ...creator,
+      majorGods: creator.majorGods.map((god, index) => index === 0
+        ? { ...god, initialRelationToPlayer: { label: "rival", note: "不应存在" } }
+        : god),
+    }).success).toBe(false);
+    expect(WorldDeckSchema.safeParse({
+      ...creator,
+      majorGods: creator.majorGods.map((god, index) => index === 0
+        ? { ...god, agenda: { ...god.agenda, stanceToPlayer: { level: "rivalry", motive: "不应存在" } } }
+        : god),
+    }).success).toBe(false);
+  });
+
+  it("将无 mode 的已持久化当前卡组归一化为 pantheon", () => {
+    const { mode: _mode, ...persisted } = completeDeck();
+    void _mode;
+    expect(parsePersistedWorldDeck(persisted).mode).toBe("pantheon");
+  });
+});
 
 describe("WorldDeck 能力与主要人物引用", () => {
   it("接受包含嵌套稳定引用的完整卡组", () => {
@@ -256,6 +329,7 @@ describe("WorldDeck 能力与主要人物引用", () => {
     expect(LegacyWorldDeckSchema.safeParse(normalized).success).toBe(true);
     expect(WorldDeckSchema.safeParse(normalized).success).toBe(false);
     expect(parsePersistedWorldDeck(legacy)).toEqual(normalized);
+    expect(normalized.mode).toBe("pantheon");
     expect(normalized.playerGod.ref).toBe("player-god-1");
     expect(normalized.majorGods.map((god) => god.ref)).toEqual([
       "major-god-1", "major-god-2", "major-god-3", "major-god-4",

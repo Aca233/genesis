@@ -10,10 +10,12 @@ import {
 describe("创世阶段映射", () => {
   it("只有一组所需字段全部完成才进入下一阶段", () => {
     expect(deriveStreamingStage([])).toBe("laws");
-    expect(deriveStreamingStage(["worldName", "cosmology"])).toBe("laws");
-    expect(deriveStreamingStage(["worldName", "cosmology", "fusionAxiom"])).toBe("gods");
+    expect(deriveStreamingStage(["mode"])).toBe("laws");
+    expect(deriveStreamingStage(["mode", "worldName", "cosmology"])).toBe("laws");
+    expect(deriveStreamingStage(["mode", "worldName", "cosmology", "fusionAxiom"])).toBe("gods");
     expect(
       deriveStreamingStage([
+        "mode",
         "worldName",
         "cosmology",
         "fusionAxiom",
@@ -24,13 +26,19 @@ describe("创世阶段映射", () => {
     ).toBe("peoples");
   });
 
+  it("creator 神谱阶段不等待不存在的 playerGod", () => {
+    expect(deriveStreamingStage([
+      "mode", "worldName", "cosmology", "fusionAxiom", "majorGods", "minorGods",
+    ], "creator")).toBe("peoples");
+  });
+
   it("固定输出顺序会先完整展示疆域阶段再进入人物阶段", () => {
     expect(deriveStreamingStage([
-      "worldName", "cosmology", "fusionAxiom", "playerGod", "majorGods", "minorGods",
+      "mode", "worldName", "cosmology", "fusionAxiom", "playerGod", "majorGods", "minorGods",
       "factions", "races", "places",
     ])).toBe("characters");
     expect(deriveStreamingStage([
-      "worldName", "cosmology", "fusionAxiom", "playerGod", "majorGods", "minorGods",
+      "mode", "worldName", "cosmology", "fusionAxiom", "playerGod", "majorGods", "minorGods",
       "factions", "races", "places", "majorCharacters",
     ])).toBe("conflict");
   });
@@ -38,6 +46,7 @@ describe("创世阶段映射", () => {
   it("众生疆域阶段不依赖字段到达顺序", () => {
     expect(
       deriveStreamingStage([
+        "mode",
         "worldName",
         "cosmology",
         "fusionAxiom",
@@ -53,14 +62,14 @@ describe("创世阶段映射", () => {
 
   it("所有流式字段完成但流尚未结束时仍停留在时代冲突", () => {
     expect(deriveStreamingStage([
-      "worldName", "cosmology", "fusionAxiom", "playerGod", "majorGods", "minorGods",
+      "mode", "worldName", "cosmology", "fusionAxiom", "playerGod", "majorGods", "minorGods",
       "factions", "races", "places", "majorCharacters", "epochConflict", "style", "theme",
     ])).toBe("conflict");
   });
 
   it("合并完成字段时去重且不允许进度倒退", () => {
-    expect(mergeCompletedKeys(["worldName", "cosmology"], ["worldName", "fusionAxiom"]))
-      .toEqual(["worldName", "cosmology", "fusionAxiom"]);
+    expect(mergeCompletedKeys(["mode", "worldName", "cosmology"], ["worldName", "fusionAxiom"]))
+      .toEqual(["mode", "worldName", "cosmology", "fusionAxiom"]);
   });
 
   it("恢复或修补重试时阶段只能前进不能倒退", () => {

@@ -226,6 +226,9 @@ export interface WorldDeckAbilityRef extends WorldDeckRef {
 
 /** Structural contract for the final WorldDeck reference graph (Task 5 independent). */
 export interface WorldDeckReferenceGraph {
+  mode?: "pantheon" | "creator";
+  playerGod?: WorldDeckRef;
+  majorGods?: Array<WorldDeckRef & { relations?: Array<{ targetGodRef: string | WorldDeckRef }> }>;
   races: Array<WorldDeckRef & { abilities: WorldDeckAbilityRef[] }>;
   factions: Array<WorldDeckRef & { keyCharacterRefs: WorldDeckRef[] }>;
   majorCharacters: Array<
@@ -304,6 +307,30 @@ function requireReference(ref: string, available: ReadonlySet<string>, label: st
  */
 export function validateDeckReferences(deck: WorldDeckReferenceGraph): void {
   const root = record(deck, "WorldDeck");
+
+  if (root.mode === "creator") {
+    if (root.playerGod !== undefined) {
+      fail("creator 模式不能包含 playerGod");
+    }
+    const majorGods = deckList(root, "majorGods").map((rawGod, index) => {
+      const god = record(rawGod, `majorGods[${index}]`);
+      return { ref: fieldRef(god, "ref", `majorGods[${index}].ref`), value: god };
+    });
+    assertUnique(majorGods.map(({ ref }) => ref), "majorGods");
+    const majorGodRefs = new Set(majorGods.map(({ ref }) => ref));
+    for (const [godIndex, god] of majorGods.entries()) {
+      const relationTargets = deckList(god.value, "relations").map((rawRelation, relationIndex) => {
+        const relation = record(rawRelation, `majorGods[${godIndex}].relations[${relationIndex}]`);
+        return fieldRef(relation, "targetGodRef", `majorGods[${godIndex}].relations[${relationIndex}].targetGodRef`);
+      });
+      assertUnique(relationTargets, `majorGods[${godIndex}].relations`);
+      for (const targetRef of relationTargets) {
+        if (targetRef === god.ref) fail(`主神关系不能引用自身 "${god.ref}"`);
+        requireReference(targetRef, majorGodRefs, "主神关系");
+      }
+    }
+  }
+
   const races = new Set<string>();
   const abilities = new Map<string, DeckAbilitySource>();
 

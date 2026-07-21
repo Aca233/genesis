@@ -64,6 +64,7 @@ describe("TopLevelJsonProgressScanner", () => {
     const completed = scanner.push('{"unknown":{"worldName":"伪字段"},"worldName":"真字段"}');
 
     expect(completed).toEqual(["worldName"]);
+    expect(GENESIS_TOP_LEVEL_KEYS).toContain("mode");
     expect(GENESIS_TOP_LEVEL_KEYS).toContain("majorCharacters");
   });
 

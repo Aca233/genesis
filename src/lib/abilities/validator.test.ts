@@ -152,6 +152,36 @@ describe("validateDeckReferences nested WorldDeck reference graph", () => {
     ],
   };
 
+  it("creator 关系只能指向另一个世界内主神", () => {
+    const creator = {
+      ...deck,
+      mode: "creator" as const,
+      majorGods: [
+        { ref: "god-sun", relations: [{ targetGodRef: "god-moon" }] },
+        { ref: "god-moon", relations: [] },
+      ],
+    };
+    expect(() => validateDeckReferences(creator)).not.toThrow();
+    expect(() => validateDeckReferences({
+      ...creator,
+      playerGod: { ref: "player-god-should-not-exist" },
+    })).toThrow(/creator.*playerGod/);
+    expect(() => validateDeckReferences({
+      ...creator,
+      majorGods: [
+        { ref: "god-sun", relations: [{ targetGodRef: "god-sun" }] },
+        { ref: "god-moon", relations: [] },
+      ],
+    })).toThrow(/不能引用自身/);
+    expect(() => validateDeckReferences({
+      ...creator,
+      majorGods: [
+        { ref: "god-sun", relations: [{ targetGodRef: "missing-god" }] },
+        { ref: "god-moon", relations: [] },
+      ],
+    })).toThrow(/主神关系引用.*不存在/);
+  });
+
   it("接受最终嵌套的 WorldDeck 引用图谱", () => {
     expect(() => validateDeckReferences(deck)).not.toThrow();
   });

@@ -1,3 +1,4 @@
+import type { WorldMode } from "@/lib/world-mode";
 import {
   GENESIS_TOP_LEVEL_KEYS,
   type GenesisTopLevelKey,
@@ -19,13 +20,22 @@ export const GENESIS_STAGES = [
 export type GenesisStageId = (typeof GENESIS_STAGES)[number]["id"];
 export type GenesisTaskStatus = "queued" | "running" | "repairing" | "completed" | "failed";
 
-const requirements: Array<{ stage: GenesisStageId; keys: GenesisTopLevelKey[] }> = [
-  { stage: "laws", keys: ["worldName", "cosmology", "fusionAxiom"] },
-  { stage: "gods", keys: ["playerGod", "majorGods", "minorGods"] },
+const sharedRequirements: Array<{ stage: GenesisStageId; keys: GenesisTopLevelKey[] }> = [
+  { stage: "laws", keys: ["mode", "worldName", "cosmology", "fusionAxiom"] },
   { stage: "peoples", keys: ["races", "factions", "places"] },
   { stage: "characters", keys: ["majorCharacters"] },
   { stage: "conflict", keys: ["epochConflict", "style", "theme"] },
 ];
+
+function requirements(mode: WorldMode): Array<{ stage: GenesisStageId; keys: GenesisTopLevelKey[] }> {
+  return [
+    sharedRequirements[0]!,
+    { stage: "gods", keys: mode === "pantheon"
+      ? ["playerGod", "majorGods", "minorGods"]
+      : ["majorGods", "minorGods"] },
+    ...sharedRequirements.slice(1),
+  ];
+}
 
 export function mergeCompletedKeys(
   previous: readonly string[],
@@ -36,9 +46,12 @@ export function mergeCompletedKeys(
 }
 
 /** Returns the phase currently being generated, never a synthetic percentage. */
-export function deriveStreamingStage(completedKeys: readonly string[]): GenesisStageId {
+export function deriveStreamingStage(
+  completedKeys: readonly string[],
+  mode: WorldMode = "pantheon",
+): GenesisStageId {
   const completed = new Set(completedKeys);
-  for (const group of requirements) {
+  for (const group of requirements(mode)) {
     if (!group.keys.every((key) => completed.has(key))) return group.stage;
   }
   // Validation begins only after the model stream itself has ended.

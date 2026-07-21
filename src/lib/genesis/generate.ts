@@ -1,9 +1,14 @@
 import type { WorldDeck } from "@/lib/cards/schemas";
-import { WorldDeckSchema } from "@/lib/cards/schemas";
+import {
+  CreatorWorldDeckSchema,
+  PantheonWorldDeckSchema,
+  WorldDeckSchema,
+} from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 import { extractJson } from "@/lib/llm/structured";
 import type { GenesisMaterialSnapshot } from "@/lib/materials/types";
 import { assertMaterializedDeck } from "@/lib/materials/validate-result";
+import type { WorldMode } from "@/lib/world-mode";
 import {
   TopLevelJsonProgressScanner,
   type GenesisTopLevelKey,
@@ -11,6 +16,7 @@ import {
 import { mergeCompletedKeys, type GenesisStageId } from "./stages";
 
 type RepairInput = {
+  mode: WorldMode;
   decree: string;
   lorebookExcerpts?: string;
   invalidOutput: string;
@@ -18,21 +24,47 @@ type RepairInput = {
 };
 
 export type GenesisGenerationOptions = {
+  mode?: WorldMode;
   decree: string;
   lorebookExcerpts?: string;
   materialSnapshot?: GenesisMaterialSnapshot | null;
   streamCompletion: () => AsyncIterable<string>;
-  repairCompletion: (input: RepairInput) => Promise<WorldDeck>;
+  repairCompletion: (input: RepairInput) => Promise<unknown>;
   onProgress: (completedKeys: GenesisTopLevelKey[], rawOutput: string) => Promise<void> | void;
   onChunk: (rawOutput: string) => Promise<void> | void;
   onStage: (stage: GenesisStageId) => Promise<void> | void;
 };
 
-function parseAndValidate(raw: string, materialSnapshot: GenesisMaterialSnapshot | null): WorldDeck {
-  const deck = WorldDeckSchema.parse(extractJson(raw));
+function modeSchema(mode: WorldMode) {
+  return mode === "pantheon" ? PantheonWorldDeckSchema : CreatorWorldDeckSchema;
+}
+
+function assertExpectedMode(deck: WorldDeck, expectedMode: WorldMode): void {
+  if (deck.mode !== expectedMode) {
+    throw new Error(`创世卡组模式不匹配：期望 ${expectedMode}，实际 ${deck.mode}`);
+  }
+}
+
+function validateParsedDeck(
+  rawDeck: unknown,
+  expectedMode: WorldMode,
+  materialSnapshot: GenesisMaterialSnapshot | null,
+): WorldDeck {
+  // Parse the union first so a valid opposite-mode response yields a clear mode error.
+  const unionDeck = WorldDeckSchema.parse(rawDeck);
+  assertExpectedMode(unionDeck, expectedMode);
+  const deck = modeSchema(expectedMode).parse(unionDeck) as WorldDeck;
   validateDeckReferences(deck);
   assertMaterializedDeck(deck, materialSnapshot);
   return deck;
+}
+
+function parseAndValidate(
+  raw: string,
+  expectedMode: WorldMode,
+  materialSnapshot: GenesisMaterialSnapshot | null,
+): WorldDeck {
+  return validateParsedDeck(extractJson(raw), expectedMode, materialSnapshot);
 }
 
 function describeValidationError(error: unknown): string {
@@ -46,6 +78,7 @@ function describeValidationError(error: unknown): string {
 export async function generateGenesisDeck(
   options: GenesisGenerationOptions,
 ): Promise<WorldDeck> {
+  const mode = options.mode ?? "pantheon";
   const scanner = new TopLevelJsonProgressScanner();
   let completedKeys: GenesisTopLevelKey[] = [];
   let lastProgressRaw = "";
@@ -68,20 +101,17 @@ export async function generateGenesisDeck(
   await options.onStage("validation");
 
   try {
-    return parseAndValidate(rawOutput, options.materialSnapshot ?? null);
+    return parseAndValidate(rawOutput, mode, options.materialSnapshot ?? null);
   } catch (error) {
     const validationError = describeValidationError(error);
     await options.onStage("repair");
     const repaired = await options.repairCompletion({
+      mode,
       decree: options.decree,
       lorebookExcerpts: options.lorebookExcerpts,
       invalidOutput: rawOutput,
       validationError,
     });
-    // Repair adapters are external/untrusted too. Never skip either authority.
-    const deck = WorldDeckSchema.parse(repaired);
-    validateDeckReferences(deck);
-    assertMaterializedDeck(deck, options.materialSnapshot ?? null);
-    return deck;
+    return validateParsedDeck(repaired, mode, options.materialSnapshot ?? null);
   }
 }

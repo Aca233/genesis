@@ -48,6 +48,7 @@ export function completeDeck(): WorldDeck {
   }));
 
   return WorldDeckSchema.parse({
+    mode: "pantheon",
     worldName: "测试界",
     cosmology: {
       origin: "星海初燃",

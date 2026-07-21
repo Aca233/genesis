@@ -145,6 +145,10 @@ export const GodAgendaSchema = z.object({
   schemes: z.array(z.string()).describe("进行中的密谋"),
 });
 
+export const CreatorGodAgendaSchema = GodAgendaSchema
+  .omit({ stanceToPlayer: true })
+  .strict();
+
 export const MajorGodCardSchema = z.object({
   ref: StableRefSchema.describe("稳定引用，供跨卡关系与开局物化使用"),
   name: z.string(),
@@ -161,6 +165,17 @@ export const MajorGodCardSchema = z.object({
   faithScope: z.string().describe("信仰范围一句话"),
   abilities: z.array(DivineDeckAbilitySchema).min(3).max(6).describe("神权能力"),
 });
+
+export const CreatorMajorGodCardSchema = MajorGodCardSchema
+  .omit({ agenda: true, initialRelationToPlayer: true })
+  .extend({
+    agenda: CreatorGodAgendaSchema,
+    relations: z.array(z.object({
+      targetGodRef: StableRefSchema,
+      label: RelationLabelSchema,
+      note: z.string(),
+    }).strict()).default([]),
+  }).strict();
 
 export const MinorGodSchema = z.object({
   name: z.string(),
@@ -242,12 +257,10 @@ export const ThemeCardSchema = z.object({
 
 // ───────────────────────── 卡组 ─────────────────────────
 
-const StrictWorldDeckObjectSchema = z.object({
+const SharedWorldDeckShape = {
   worldName: z.string(),
   cosmology: CosmologyCardSchema,
   fusionAxiom: FusionAxiomCardSchema.nullable().describe("仅多IP融合时非空"),
-  playerGod: PlayerGodCardSchema,
-  majorGods: z.array(MajorGodCardSchema).min(4).max(10),
   minorGods: z.array(MinorGodSchema),
   factions: z.array(FactionCardSchema).min(2).max(8),
   races: z.array(RaceCardSchema),
@@ -256,7 +269,20 @@ const StrictWorldDeckObjectSchema = z.object({
   epochConflict: EpochConflictCardSchema,
   style: StyleCardSchema,
   theme: ThemeCardSchema,
-});
+};
+
+const PantheonWorldDeckObjectSchema = z.object({
+  mode: z.literal("pantheon"),
+  ...SharedWorldDeckShape,
+  playerGod: PlayerGodCardSchema,
+  majorGods: z.array(MajorGodCardSchema).min(4).max(10),
+}).strict();
+
+const CreatorWorldDeckObjectSchema = z.object({
+  mode: z.literal("creator"),
+  ...SharedWorldDeckShape,
+  majorGods: z.array(CreatorMajorGodCardSchema).min(4).max(10),
+}).strict();
 
 /** Compatibility-only cards used after a positively identified pre-ability draft. */
 const LegacyPlayerGodCardSchema = PlayerGodCardSchema.extend({
@@ -273,6 +299,7 @@ const LegacyMajorCharacterCardSchema = MajorCharacterCardSchema.extend({
 });
 
 const LegacyWorldDeckObjectSchema = z.object({
+  mode: z.literal("pantheon"),
   worldName: z.string(),
   cosmology: CosmologyCardSchema,
   fusionAxiom: FusionAxiomCardSchema.nullable().describe("仅多IP融合时非空"),
@@ -289,7 +316,8 @@ const LegacyWorldDeckObjectSchema = z.object({
 });
 
 type DeckReferenceGraph = {
-  playerGod: { ref: string; abilities: Array<{ ref: string }> };
+  mode: "pantheon" | "creator";
+  playerGod?: { ref: string; abilities: Array<{ ref: string }> };
   majorGods: Array<{ ref: string; abilities: Array<{ ref: string }> }>;
   races: Array<{ ref: string; abilities: Array<{ ref: string }> }>;
   factions: Array<{ ref: string }>;
@@ -320,12 +348,8 @@ function addUniqueRef(
   seen.set(ref, path);
 }
 
-/**
- * Every stable card ref and every DeckAbility / derived override ref shares one
- * namespace so provenance stays
- * unambiguous after a draft is saved or rerolled.
- */
-function validateDeckReferenceUniqueness(
+/** Every card ref and ability ref has one unambiguous namespace. */
+function validateModeAwareDeckReferenceUniqueness(
   deck: DeckReferenceGraph,
   ctx: z.RefinementCtx,
 ): void {
@@ -334,10 +358,12 @@ function validateDeckReferenceUniqueness(
   const addAbility = (ability: { ref: string }, path: (string | number)[]) =>
     addUniqueRef(ctx, abilityRefs, ability.ref, path);
 
-  addUniqueRef(ctx, cardRefs, deck.playerGod.ref, ["playerGod", "ref"]);
-  deck.playerGod.abilities.forEach((ability, index) =>
-    addAbility(ability, ["playerGod", "abilities", index, "ref"]),
-  );
+  if (deck.mode === "pantheon" && deck.playerGod) {
+    addUniqueRef(ctx, cardRefs, deck.playerGod.ref, ["playerGod", "ref"]);
+    deck.playerGod.abilities.forEach((ability, index) =>
+      addAbility(ability, ["playerGod", "abilities", index, "ref"]),
+    );
+  }
   deck.majorGods.forEach((god, godIndex) => {
     addUniqueRef(ctx, cardRefs, god.ref, ["majorGods", godIndex, "ref"]);
     god.abilities.forEach((ability, abilityIndex) =>
@@ -367,21 +393,44 @@ function validateDeckReferenceUniqueness(
   });
 }
 
-/** Strict contract for every newly created, patched, or rerolled WorldDeck. */
-export const WorldDeckSchema = StrictWorldDeckObjectSchema.superRefine(
-  validateDeckReferenceUniqueness,
+/** Strict contracts for new Genesis output and rerolls. */
+export const PantheonWorldDeckSchema = PantheonWorldDeckObjectSchema.superRefine(
+  validateModeAwareDeckReferenceUniqueness,
 );
+export const CreatorWorldDeckSchema = CreatorWorldDeckObjectSchema.superRefine(
+  validateModeAwareDeckReferenceUniqueness,
+);
+const StrictWorldDeckSchema = z.discriminatedUnion("mode", [
+  PantheonWorldDeckSchema,
+  CreatorWorldDeckSchema,
+]);
 
 /** Compatibility parser used only after isLegacyWorldDeck() positively identifies an old draft. */
 export const LegacyWorldDeckSchema = LegacyWorldDeckObjectSchema.superRefine(
-  validateDeckReferenceUniqueness,
+  validateModeAwareDeckReferenceUniqueness,
 );
 
-export type WorldDeck = z.infer<typeof WorldDeckSchema>;
+export type PantheonWorldDeck = z.infer<typeof PantheonWorldDeckSchema>;
+export type CreatorWorldDeck = z.infer<typeof CreatorWorldDeckSchema>;
 export type LegacyWorldDeck = z.infer<typeof LegacyWorldDeckSchema>;
 export type MajorGodCard = z.infer<typeof MajorGodCardSchema>;
-
+export type CreatorMajorGodCard = z.infer<typeof CreatorMajorGodCardSchema>;
 export type PlayerGodCard = z.infer<typeof PlayerGodCardSchema>;
+
+/**
+ * Transitional consumer surface until mode-aware editor/material/embark routing lands.
+ * Runtime parsing remains the strict discriminated union; creator output still omits
+ * playerGod and player-facing god fields. Dedicated mode types above are authoritative.
+ */
+type CreatorMajorGodCompatibility = MajorGodCard & {
+  relations?: CreatorMajorGodCard["relations"];
+};
+type CreatorWorldDeckCompatibility = Omit<CreatorWorldDeck, "majorGods"> & {
+  playerGod: PlayerGodCard;
+  majorGods: CreatorMajorGodCompatibility[];
+};
+export type WorldDeck = PantheonWorldDeck | CreatorWorldDeckCompatibility;
+export const WorldDeckSchema = StrictWorldDeckSchema as unknown as z.ZodType<WorldDeck>;
 
 type LooseRecord = Record<string, unknown>;
 
@@ -451,6 +500,7 @@ export function isLegacyWorldDeck(raw: unknown): boolean {
   }
 
   return (
+    (!hasOwn(raw, "mode") || raw.mode === "pantheon") &&
     !hasOwn(raw, "majorCharacters") &&
     lacksOwnFields(raw.playerGod, ["ref", "abilities"]) &&
     allRecordsLackFields(raw.majorGods, ["ref", "abilities"]) &&
@@ -463,11 +513,13 @@ export function isLegacyWorldDeck(raw: unknown): boolean {
  * Parses a persisted draft strictly unless its missing fields positively identify
  * it as pre-ability legacy data.
  */
-function normalizeMissingPlaceRefs(raw: unknown): unknown {
-  if (!isLooseRecord(raw) || !Array.isArray(raw.places)) return raw;
+function normalizePersistedPantheonDeck(raw: unknown): unknown {
+  if (!isLooseRecord(raw)) return raw;
+  const withMode = hasOwn(raw, "mode") ? raw : { mode: "pantheon", ...raw };
+  if (!Array.isArray(withMode.places)) return withMode;
   return {
-    ...raw,
-    places: raw.places.map((rawPlace, index) => {
+    ...withMode,
+    places: withMode.places.map((rawPlace, index) => {
       const place = asLooseRecord(rawPlace);
       return hasOwn(place, "ref") ? place : { ...place, ref: `place-${index + 1}` };
     }),
@@ -477,7 +529,7 @@ function normalizeMissingPlaceRefs(raw: unknown): unknown {
 export function parsePersistedWorldDeck(raw: unknown): WorldDeck | LegacyWorldDeck {
   return isLegacyWorldDeck(raw)
     ? normalizeLegacyWorldDeck(raw)
-    : WorldDeckSchema.parse(normalizeMissingPlaceRefs(raw));
+    : WorldDeckSchema.parse(normalizePersistedPantheonDeck(raw));
 }
 
 /**
@@ -498,6 +550,7 @@ export function normalizeLegacyWorldDeck(raw: unknown): LegacyWorldDeck {
 
   return LegacyWorldDeckSchema.parse({
     ...deck,
+    mode: "pantheon",
     playerGod: {
       ...playerGod,
       ...(hasOwn(playerGod, "ref") ? {} : { ref: "player-god-1" }),
