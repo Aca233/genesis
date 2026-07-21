@@ -23,6 +23,7 @@ const MAX_COLLECTION_ITEMS = 10_000;
 const MAX_STRING_LIST_ITEMS = 1_000;
 const MAX_TEXT_LENGTH = 1024 * 1024;
 const IMPORT_TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 60_000 } as const;
+const RESERVED_GOD_RELATION_KEYS = new Set(["player"]);
 
 const IdSchema = z.string().min(1).max(512);
 const OptionalIdSchema = IdSchema.optional();
@@ -463,6 +464,7 @@ async function validateTimelineReferences(
       requireTimelineRecord(indexes.entities, god.codexEntityId, timeline.id, "神明百科实体");
     }
     for (const relationId of Object.keys(god.relations ?? {})) {
+      if (RESERVED_GOD_RELATION_KEYS.has(relationId)) continue;
       requireTimelineRecord(indexes.gods, relationId, timeline.id, "神明关系");
     }
   }
@@ -757,7 +759,9 @@ export async function POST(request: Request) {
         const relations = god.relations
           ? (Object.fromEntries(
               Object.entries(god.relations).map(([id, relation]) => [
-                remapRequired(godMap, id, "神明关系"),
+                RESERVED_GOD_RELATION_KEYS.has(id)
+                  ? id
+                  : remapRequired(godMap, id, "神明关系"),
                 relation,
               ]),
             ) as Prisma.InputJsonValue)

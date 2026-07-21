@@ -387,6 +387,45 @@ describe("存档导入", () => {
     );
   });
 
+  it("保留 embark 的 relations.player 并重映射真实神明 ID 关系键", async () => {
+    const archive = versionTwoArchive();
+    archive.world.timelines[0].gods.push({
+      ...archive.world.timelines[0].gods[0],
+      id: "major-god-old",
+      name: "潮汐之神",
+      tier: "major",
+      isPlayer: false,
+      codexEntityId: null,
+      relations: {
+        player: { label: "rival", note: "领域相邻" },
+        "god-old": { label: "ally", note: "暂时结盟" },
+      },
+    } as unknown as (typeof archive.world.timelines)[number]["gods"][number]);
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(200);
+    const gods = lastCreateManyData(mocks.prisma.god);
+    const playerGod = gods.find((god) => god.isPlayer === true)!;
+    const majorGod = gods.find((god) => god.name === "潮汐之神")!;
+    expect(majorGod.relations).toEqual({
+      player: { label: "rival", note: "领域相邻" },
+      [playerGod.id as string]: { label: "ally", note: "暂时结盟" },
+    });
+  });
+
+  it("拒绝除 player 和真实神明 ID 之外的关系键", async () => {
+    const archive = versionTwoArchive();
+    archive.world.timelines[0].gods[0].relations = {
+      "不存在的神": { label: "enemy", note: "非法目标" },
+    };
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it("canonical 事件键映射为新逻辑 ID，使恢复结算能命中已导入事件", async () => {
     await importWorld(request(versionTwoArchive()));
     const event = lastCreateManyData(mocks.prisma.abilityEvent)[0];
