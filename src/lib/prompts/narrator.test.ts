@@ -37,3 +37,71 @@ it.each([
   expect(result.meta.suggestions).toEqual(["追问"]);
   expect(result.prose).not.toContain("<<<META");
 });
+
+import {
+  narratorGlobalSystem,
+  narratorTurnSystem,
+  narratorWorldSystem,
+} from "./narrator";
+
+describe("narrator quality contract", () => {
+  it("protects player agency at natural decision points", () => {
+    const prompt = narratorGlobalSystem();
+    expect(prompt).toContain("PLAYER AGENCY BOUNDARY");
+    expect(prompt).toContain("explicitly supplied words, actions and intent");
+    expect(prompt).toContain("never invent a new consequential decision");
+    expect(prompt).toContain("natural dramatic beat");
+    expect(prompt).toContain("Do not announce that it is the player's turn");
+  });
+
+  it("requires grounded knowledge and ability provenance for every NPC", () => {
+    const prompt = narratorGlobalSystem();
+    expect(prompt).toContain("KNOWLEDGE BOUNDARY");
+    expect(prompt).toContain("witnessed, was told, can reliably infer");
+    expect(prompt).toContain("Narrator knowledge is not character knowledge");
+    expect(prompt).toContain("AUTHOR-ONLY");
+  });
+
+  it("builds living characters from state instead of random traits", () => {
+    const prompt = narratorGlobalSystem();
+    expect(prompt).toContain("LIVING CHARACTER METHOD");
+    expect(prompt).toContain("persona, present goal, known information, relationships, recent experience, abilities and limitations");
+    expect(prompt).toContain("surprising but retrospectively explainable");
+    expect(prompt).toContain("Never invent permanent personality traits merely to create variety");
+  });
+
+  it("uses positive prose guidance and forbids visible planning", () => {
+    const prompt = narratorGlobalSystem();
+    expect(prompt).toContain("PROSE CRAFT");
+    expect(prompt).toContain("Render personality through choices, timing, action and dialogue");
+    expect(prompt).toContain("Use direct description for ordinary sensory facts");
+    expect(prompt).toContain("SILENT PREFLIGHT");
+    expect(prompt).toContain("Never output chain-of-thought");
+    expect(prompt).toContain("End prose on an action, line of dialogue, image, consequence or unresolved tension");
+  });
+
+  it("keeps stable quality rules global and turn facts dynamic", () => {
+    const global = narratorGlobalSystem();
+    const world = narratorWorldSystem({
+      worldName: "测试世界",
+      styleCard: null,
+      themeCard: null,
+      cosmology: null,
+      playerGod: null,
+    });
+    const turn = narratorTurnSystem({ scale: "scene", omens: ["潮声倒流"] });
+    expect(global).toContain("PLAYER AGENCY BOUNDARY");
+    expect(global).not.toContain("潮声倒流");
+    expect(world).toContain("测试世界");
+    expect(world).not.toContain("CURRENT SCALE");
+    expect(turn).toContain("CURRENT SCALE");
+    expect(turn).toContain("潮声倒流");
+    expect(turn).not.toContain("PLAYER AGENCY BOUNDARY");
+  });
+
+  it("limits suggestions to unresolved player choices without prewriting outcomes", () => {
+    const prompt = narratorGlobalSystem();
+    expect(prompt).toContain("Suggest only actions or attitudes the player god may choose");
+    expect(prompt).toContain("never state the outcome as already achieved");
+  });
+});
