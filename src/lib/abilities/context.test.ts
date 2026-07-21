@@ -391,6 +391,42 @@ describe("buildAbilityContext", () => {
     expect(authorOnly).not.toContain("灰烬密仪");
     expect(authorOnly).not.toContain("无声誓");
   });
+
+  it("Narrator 仅获得被点名 NPC、种族与非玩家神的隐藏能力完整机制", async () => {
+    const context = await buildAbilityContext({
+      timelineId: "timeline-1",
+      viewer: "narrator",
+      searchText: "林霁循着逐光者古道，请潮神现身",
+    });
+
+    const [, authorOnly = ""] = context.split("== AUTHOR-ONLY HIDDEN ABILITIES ==");
+    const [known = ""] = context.split("== AUTHOR-ONLY HIDDEN ABILITIES ==");
+    expect(known).toContain("[divine-player-known] 昼临");
+    expect(known).toContain("[divine-player-hidden] 秘日");
+    expect(authorOnly).toContain("[character-hidden] 无声誓");
+    expect(authorOnly).toContain("effect: 无声誓的效果");
+    expect(authorOnly).toContain("trigger: 无声誓的触发");
+    expect(authorOnly).toContain("[race-hidden] 日蚀血脉");
+    expect(authorOnly.match(/\[race-hidden\] 日蚀血脉/g)).toHaveLength(1);
+    expect(authorOnly).toContain("[divine-acting-hidden] 沉海");
+    expect(authorOnly).toContain("effect: 沉海的效果");
+    expect(authorOnly).not.toContain("[divine-unrelated-hidden] 灰烬密仪");
+    expect(authorOnly).not.toContain("[divine-player-hidden] 秘日");
+  });
+
+  it("Narrator 不因 scenePresence 向 AUTHOR-ONLY 加入未被检索文本提及的秘密", async () => {
+    const context = await buildAbilityContext({
+      timelineId: "timeline-1",
+      viewer: "narrator",
+      searchText: "潮神掀起浪潮",
+    });
+
+    const [, authorOnly = ""] = context.split("== AUTHOR-ONLY HIDDEN ABILITIES ==");
+    expect(authorOnly).toContain("沉海");
+    expect(authorOnly).not.toContain("无声誓");
+    expect(authorOnly).not.toContain("日蚀血脉");
+    expect(authorOnly).not.toContain("灰烬密仪");
+  });
 });
 
 import { splitMetaBlock } from "@/lib/prompts/narrator";

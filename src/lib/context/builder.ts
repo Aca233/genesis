@@ -347,7 +347,7 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
     chronicleBlock(chapter.timelineId, searchText),
     buildAbilityContext({
       timelineId: chapter.timelineId,
-      viewer: "player",
+      viewer: "narrator",
       searchText,
     }),
   ]);

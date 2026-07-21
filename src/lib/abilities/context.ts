@@ -5,7 +5,7 @@ import {
   type PersistedAbilityRecord,
 } from "./types";
 
-export type AbilityContextViewer = "player" | "backstage";
+export type AbilityContextViewer = "player" | "narrator" | "backstage";
 
 export type BuildAbilityContextOptions = {
   timelineId: string;
@@ -85,6 +85,9 @@ export async function buildAbilityContext(
     }),
   ]);
 
+  const mentionedCharacters = entityIndex.filter(
+    (entity) => entity.type === "character" && isMentioned(entity, opts.searchText),
+  );
   const relevantCharacters = entityIndex.filter(
     (entity) =>
       entity.type === "character" &&
@@ -101,9 +104,20 @@ export async function buildAbilityContext(
   );
   const relevantGods = godIndex.filter(
     (god) =>
-      (opts.viewer === "player" && god.isPlayer) ||
+      ((opts.viewer === "player" || opts.viewer === "narrator") && god.isPlayer) ||
       (opts.viewer === "backstage" && god.id === opts.subjectGodId) ||
       isMentioned(god, opts.searchText),
+  );
+  const narratorHiddenEntityIds = new Set(
+    opts.viewer === "narrator"
+      ? [
+          ...mentionedCharacters.map((entity) => entity.id),
+          ...mentionedCharacters.flatMap((entity) => entity.raceId ? [entity.raceId] : []),
+          ...entityIndex
+            .filter((entity) => entity.type === "race" && isMentioned(entity, opts.searchText))
+            .map((entity) => entity.id),
+        ]
+      : [],
   );
 
   const godIds = relevantGods.map((god) => god.id);
@@ -150,7 +164,7 @@ export async function buildAbilityContext(
   for (const god of relevantGods) {
     const owner = { id: god.id, name: god.name, type: "god" as const };
     const items = byGod.get(god.id) ?? [];
-    if (god.isPlayer && opts.viewer === "player") {
+    if (god.isPlayer && (opts.viewer === "player" || opts.viewer === "narrator")) {
       addFull(known, owner, items);
       continue;
     }
@@ -166,6 +180,9 @@ export async function buildAbilityContext(
       );
     } else {
       addVisible(owner, items);
+      if (opts.viewer === "narrator" && !god.isPlayer && isMentioned(god, opts.searchText)) {
+        addFull(authorOnly, owner, items.filter((ability) => ability.visibility === "hidden"));
+      }
     }
   }
 
@@ -176,7 +193,11 @@ export async function buildAbilityContext(
       type: entity.type as "race" | "character",
     };
     if (entity.type === "race") {
-      addVisible(owner, byEntity.get(entity.id) ?? []);
+      const items = byEntity.get(entity.id) ?? [];
+      addVisible(owner, items);
+      if (narratorHiddenEntityIds.has(entity.id)) {
+        addFull(authorOnly, owner, items.filter((ability) => ability.visibility === "hidden"));
+      }
       continue;
     }
     const effective = resolveEffectiveAbilities({
@@ -203,6 +224,18 @@ export async function buildAbilityContext(
       } satisfies ContextAbility;
     });
     addVisible(owner, effective);
+    if (narratorHiddenEntityIds.has(entity.id)) {
+      const inheritedRaceIds = new Set(
+        entity.raceId ? (byEntity.get(entity.raceId) ?? []).map((ability) => ability.id) : [],
+      );
+      addFull(
+        authorOnly,
+        owner,
+        effective.filter(
+          (ability) => ability.visibility === "hidden" && !inheritedRaceIds.has(ability.id),
+        ),
+      );
+    }
   }
 
   return [
