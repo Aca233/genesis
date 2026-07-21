@@ -91,9 +91,18 @@ export const ExtractionSchema = z.object({
           .describe("按类型模板的栏目，仅写有据可依的"),
         isChosen: z.boolean().describe("是否玩家神选者（获赐印记）"),
         isMajorCharacter: z.boolean().optional().default(false).describe("仅人物且正文明确成为主线关键人物时为 true"),
+        raceName: z.string().trim().min(1).optional().describe("新人物的主种族正名或别名；仅 character 可填"),
       }),
     )
     .describe("值得入册的新实体——路人不入册：有名字且已影响或将影响剧情者才入"),
+  newGods: z.array(z.object({
+    name: z.string().trim().min(1),
+    aliases: z.array(z.string()),
+    tier: z.enum(["major", "minor"]),
+    rank: z.enum(["fallen", "ember", "slumbering", "nascent", "ascended", "exalted", "sovereign"]),
+    domains: z.array(z.string()),
+    faithScope: z.string().nullish(),
+  })).optional().default([]).describe("本章首次明确出现、值得入册的新神；不得创建玩家神"),
   entityUpdates: z
     .array(
       z.object({
@@ -204,6 +213,7 @@ ${Object.entries(SECTION_TEMPLATES)
 - Write ONLY what the narrative supports; never invent facts to fill sections.
 - CHOSEN marks: if the player god granted a mark/blessing formally binding a mortal, set isChosen/becameChosen.
 - MAJOR CHARACTERS: set newEntities.isMajorCharacter only for a new character explicitly established as plot-critical. For an existing character, emit majorCharacterPromotions with verbatim message evidence; do not promote merely for appearing.
+- NEW OWNERS: a new character may set raceName only to an exact known race name/alias or a race created in the same extraction. Put newly introduced gods in newGods (never a player god). This lets an explicitly demonstrated new personal/divine/racial ability belong to its new owner in the same chapter.
 - Mortal lifespans: if the chapter spans years (era/epoch scale), reflect aging/succession in lifespan sections.
 - Rank changes require in-chapter justification (a god diminished by mass apostasy, exalted by a miracle witnessed by nations...).
 - scenePresent: true only for entities physically/narratively present at the chapter's end scene.

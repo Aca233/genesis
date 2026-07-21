@@ -31,7 +31,7 @@ async function fixture() {
     newEntities: [], entityUpdates: [], godUpdates: [], revealSections: [],
     abilityChanges: [{ ownerName: "阿岚", sourceAbilityId: source.id, type: "learned", patch: { mastery: "novice" }, evidenceMessageIndex: 7, evidence: "阿岚走完断崖石阶，并正式获授踏岩步的传承石符" }],
   };
-  return { world, timeline, character, source, chapter, message };
+  return { world, timeline, race, character, source, chapter, message };
 }
 
 async function settle(id: string) { for await (const _progress of settleChapter(id)) void _progress; }
@@ -257,5 +257,55 @@ it("显式抽取的新重要人物创建时直接标记 major", async () => {
     expect(await prisma.entity.findFirst({ where: { timelineId: data.timeline.id, name } })).toMatchObject({ isMajorCharacter: true });
   } finally {
     await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it("同章新人物可解析种族并获得个人能力与事件，非法能力时整阶段回滚", async () => {
+  const data = await fixture();
+  const successName = `石芽-${crypto.randomUUID()}`;
+  const successEvidence = `${successName}终于学会碎岩拳，独自击碎封路巨石并成为关键人物；他是山民新秀。`;
+  const successMessage = await prisma.message.create({ data: {
+    chapterId: data.chapter.id, index: 150, role: "narrator", content: successEvidence, scale: "scene",
+  } });
+  responses.extract = {
+    newEntities: [{ type: "character", name: successName, aliases: [], raceName: "山民", summary: "山民新秀", sections: [], isChosen: false, isMajorCharacter: true }],
+    entityUpdates: [], godUpdates: [], revealSections: [], majorCharacterPromotions: [],
+    abilityChanges: [{
+      ownerName: successName, name: "碎岩拳", kind: "personal", type: "learned",
+      effect: "击碎岩石", trigger: "挥拳", cost: "体力", limitations: "需近身", lockedFields: [],
+      patch: { mastery: "novice" }, evidenceMessageIndex: 150, evidence: successEvidence.slice(0, -1),
+    }],
+  };
+  try {
+    await settle(data.chapter.id);
+    const entity = await prisma.entity.findFirst({ where: { timelineId: data.timeline.id, name: successName } });
+    const ability = await prisma.ability.findFirst({ where: { entityId: entity?.id, name: "碎岩拳" } });
+    const event = await prisma.abilityEvent.findFirst({ where: { abilityId: ability?.id } });
+    expect(entity).toMatchObject({ raceId: data.race.id, isMajorCharacter: true });
+    expect(ability).toMatchObject({ kind: "personal", mastery: "novice", version: 2 });
+    expect(event).toMatchObject({ chapterId: data.chapter.id, messageId: successMessage.id, scale: "scene", type: "learned" });
+  } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+
+  const rollback = await fixture();
+  const invalidName = `错脉-${crypto.randomUUID()}`;
+  const invalidEvidence = `${invalidName}终于学会伪神权，并当众施展震动群山；他是山民新秀。`;
+  await prisma.message.create({ data: { chapterId: rollback.chapter.id, index: 151, role: "narrator", content: invalidEvidence, scale: "scene" } });
+  responses.extract = {
+    newEntities: [{ type: "character", name: invalidName, aliases: [], raceName: "山民", summary: "山民新秀", sections: [], isChosen: false, isMajorCharacter: false }],
+    entityUpdates: [], godUpdates: [], revealSections: [], majorCharacterPromotions: [],
+    abilityChanges: [{
+      ownerName: invalidName, name: "伪神权", kind: "divine", type: "learned",
+      effect: "震动群山", trigger: "施展", cost: "体力", limitations: "无", lockedFields: [],
+      patch: { mastery: "novice" }, evidenceMessageIndex: 151, evidence: invalidEvidence.slice(0, -1),
+    }],
+  };
+  try {
+    await expect(settle(rollback.chapter.id)).rejects.toThrow(/kind|personal|能力/);
+    expect(await prisma.entity.count({ where: { timelineId: rollback.timeline.id, name: invalidName } })).toBe(0);
+    expect((await prisma.chapter.findUnique({ where: { id: rollback.chapter.id } }))?.settleState).toBe("settling:extract");
+  } finally {
+    await prisma.world.delete({ where: { id: rollback.world.id } });
   }
 });

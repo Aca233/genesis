@@ -5,6 +5,7 @@ import {
   applyAbilityExtractionInTransaction,
   type AbilityExtractionTx,
 } from "@/lib/abilities/extraction";
+import { AbilityValidationError } from "@/lib/abilities/validator";
 import { completeStructured } from "@/lib/llm/structured";
 import {
   EXTRACTION_MAX_ABILITIES,
@@ -514,6 +515,7 @@ async function runExtraction(
 
   const extraction = {
     newEntities: [] as Array<Extraction["newEntities"][number]>,
+    newGods: [] as Array<Extraction["newGods"][number]>,
     entityUpdates: [] as Array<Extraction["entityUpdates"][number]>,
     godUpdates: [] as Array<Extraction["godUpdates"][number]>,
     revealSections: [] as Array<Extraction["revealSections"][number]>,
@@ -553,6 +555,7 @@ async function runExtraction(
       maxTokens: EXTRACTION_MAX_OUTPUT_TOKENS,
     });
     extraction.newEntities.push(...windowExtraction.newEntities);
+    extraction.newGods.push(...(windowExtraction.newGods ?? []));
     extraction.entityUpdates.push(...windowExtraction.entityUpdates);
     extraction.godUpdates.push(...windowExtraction.godUpdates);
     extraction.revealSections.push(...windowExtraction.revealSections);
@@ -561,15 +564,36 @@ async function runExtraction(
   }
 
   await prisma.$transaction(async (tx) => {
-    const byName = new Map<string, (typeof entities)[number]>();
-    for (const e of entities) {
-      byName.set(e.name, e);
-      for (const a of e.aliases) byName.set(a, e);
+    const entityRecords = await tx.entity.findMany({
+      where: { timelineId },
+      select: {
+        id: true, name: true, type: true, aliases: true, summary: true,
+        lockedPaths: true, raceId: true,
+      },
+    });
+    const byName = new Map<string, (typeof entityRecords)[number]>();
+    for (const entity of entityRecords) {
+      byName.set(entity.name, entity);
+      for (const alias of entity.aliases) byName.set(alias, entity);
     }
+    const createdOwnerIds = new Set<string>();
 
-    // 新实体建卡
-    for (const ne of extraction.newEntities) {
-      if (byName.has(ne.name)) continue; // 防重复
+    // 种族必须先建卡，以便同批新人物按正名或别名解析主种族。
+    const orderedNewEntities = [
+      ...extraction.newEntities.filter((entity) => entity.type === "race"),
+      ...extraction.newEntities.filter((entity) => entity.type !== "race"),
+    ];
+    for (const ne of orderedNewEntities) {
+      if (byName.has(ne.name)) continue;
+      if (ne.type !== "character" && ne.raceName !== undefined) {
+        throw new AbilityValidationError("只有新人物可以指定 raceName");
+      }
+      const race = ne.type === "character" && ne.raceName !== undefined
+        ? byName.get(ne.raceName)
+        : undefined;
+      if (ne.type === "character" && ne.raceName !== undefined && race?.type !== "race") {
+        throw new AbilityValidationError(`新人物 ${ne.name} 的主种族 ${ne.raceName} 不存在`);
+      }
       const validKeys = new Set(SECTION_TEMPLATES[ne.type] ?? []);
       const created = await tx.entity.create({
         data: {
@@ -581,13 +605,14 @@ async function runExtraction(
           summary: ne.summary.slice(0, 200),
           isChosen: ne.isChosen,
           isMajorCharacter: ne.type === "character" && ne.isMajorCharacter,
+          raceId: race?.id,
           scenePresence: true,
           sections: {
             create: ne.sections
-              .filter((s) => validKeys.has(s.key))
-              .map((s) => ({
-                key: s.key,
-                content: { title: s.title, text: s.text } as Prisma.InputJsonValue,
+              .filter((section) => validKeys.has(section.key))
+              .map((section) => ({
+                key: section.key,
+                content: { title: section.title, text: section.text } as Prisma.InputJsonValue,
               })),
           },
         },
@@ -598,6 +623,7 @@ async function runExtraction(
       });
       byName.set(created.name, created);
       for (const alias of created.aliases) byName.set(alias, created);
+      if (created.type === "race" || created.type === "character") createdOwnerIds.add(created.id);
     }
 
     // 既有实体增量
@@ -642,11 +668,33 @@ async function runExtraction(
       }
     }
 
-    // 诸神状态
-    const godByName = new Map<string, (typeof gods)[number]>();
-    for (const g of gods) {
-      godByName.set(g.name, g);
-      for (const a of g.aliases) godByName.set(a, g);
+    // 诸神状态；新神立即加入索引，供同事务能力创建使用。
+    const godRecords = await tx.god.findMany({
+      where: { timelineId },
+      select: { id: true, name: true, aliases: true, rank: true, isPlayer: true },
+    });
+    const godByName = new Map<string, (typeof godRecords)[number]>();
+    for (const god of godRecords) {
+      godByName.set(god.name, god);
+      for (const alias of god.aliases) godByName.set(alias, god);
+    }
+    for (const newGod of extraction.newGods) {
+      if (godByName.has(newGod.name)) continue;
+      const created = await tx.god.create({
+        data: {
+          timelineId,
+          name: newGod.name,
+          aliases: newGod.aliases,
+          tier: newGod.tier,
+          rank: newGod.rank,
+          domains: newGod.domains,
+          faithScope: newGod.faithScope,
+        },
+        select: { id: true, name: true, aliases: true, rank: true, isPlayer: true },
+      });
+      godByName.set(created.name, created);
+      for (const alias of created.aliases) godByName.set(alias, created);
+      createdOwnerIds.add(created.id);
     }
     for (const gu of extraction.godUpdates) {
       const target = godByName.get(gu.name);
@@ -691,8 +739,14 @@ async function runExtraction(
       });
     }
 
+    const currentEntities = [...new Map(
+      [...byName.values()].map((entity) => [entity.id, entity]),
+    ).values()];
+    const currentGods = [...new Map(
+      [...godByName.values()].map((god) => [god.id, god]),
+    ).values()];
     const owners = [
-      ...entities
+      ...currentEntities
         .filter((entity) => entity.type === "race" || entity.type === "character")
         .map((entity) => ({
           id: entity.id,
@@ -701,7 +755,7 @@ async function runExtraction(
           aliases: entity.aliases,
           raceId: entity.raceId,
         })),
-      ...gods.map((god) => ({
+      ...currentGods.map((god) => ({
         id: god.id,
         type: "god" as const,
         name: god.name,
@@ -716,13 +770,25 @@ async function runExtraction(
         chapterId,
         owners,
         knownEntityNames: [
-          ...entityIndex.flatMap((entity) => [entity.name, ...entity.aliases]),
-          ...godIndex.flatMap((god) => [god.name, ...god.aliases]),
+          ...currentEntities.flatMap((entity) => [entity.name, ...entity.aliases]),
+          ...currentGods.flatMap((god) => [god.name, ...god.aliases]),
         ],
         messages: chapterText.messages,
         changes: extraction.abilityChanges,
       },
     );
+    const rejectedForNewOwner = result.rejected.find((rejected) => {
+      const change = rejected.change;
+      if (typeof change !== "object" || change === null || !("ownerName" in change)) return false;
+      const ownerName = String(change.ownerName);
+      const owner = owners.find((candidate) =>
+        candidate.name === ownerName || candidate.aliases.includes(ownerName),
+      );
+      return owner !== undefined && createdOwnerIds.has(owner.id);
+    });
+    if (rejectedForNewOwner !== undefined) {
+      throw new AbilityValidationError(`新实体能力无效：${rejectedForNewOwner.reason}`);
+    }
     for (const rejected of result.rejected) {
       console.error("章末能力变化被拒绝", {
         chapterId,
