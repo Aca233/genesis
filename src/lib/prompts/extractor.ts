@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   AbilityEventTypeSchema,
+  AbilityKindSchema,
   AbilityMasterySchema,
   AbilityStateSchema,
   AbilityVisibilitySchema,
@@ -35,14 +36,31 @@ export const AbilityExtractionChangeSchema = z.object({
   abilityId: z.string().min(1).optional(),
   ownerName: z.string().min(1),
   sourceAbilityId: z.string().min(1).optional(),
+  name: z.string().trim().min(1).optional(),
+  kind: AbilityKindSchema.optional(),
+  effect: z.string().trim().min(1).optional(),
+  trigger: z.string().trim().min(1).optional(),
+  cost: z.string().trim().min(1).optional(),
+  limitations: z.string().trim().min(1).optional(),
+  lockedFields: z.array(z.string().min(1)).optional(),
+  visibility: AbilityVisibilitySchema.optional(),
+  rumorText: z.string().nullable().optional(),
   type: AbilityEventTypeSchema,
   patch: AbilityExtractionPatchSchema,
   evidenceMessageIndex: z.number().int().nonnegative(),
   evidence: z.string().trim().min(12),
-}).strict().refine(
-  (change) => change.abilityId !== undefined || change.sourceAbilityId !== undefined,
-  { message: "abilityId 与 sourceAbilityId 至少提供一项" },
-);
+}).strict().superRefine((change, ctx) => {
+  const createsNew = change.abilityId === undefined && change.sourceAbilityId === undefined;
+  if (!createsNew) return;
+  for (const field of ["name", "kind", "effect", "trigger", "cost", "limitations", "lockedFields"] as const) {
+    if (change[field] === undefined) {
+      ctx.addIssue({ code: "custom", path: [field], message: `新能力必须提供 ${field}` });
+    }
+  }
+  if (change.type !== "learned" && change.type !== "awakened") {
+    ctx.addIssue({ code: "custom", path: ["type"], message: "新能力只能以 learned 或 awakened 创建" });
+  }
+});
 
 export type AbilityExtractionChange = z.infer<typeof AbilityExtractionChangeSchema>;
 
@@ -72,6 +90,7 @@ export const ExtractionSchema = z.object({
           )
           .describe("按类型模板的栏目，仅写有据可依的"),
         isChosen: z.boolean().describe("是否玩家神选者（获赐印记）"),
+        isMajorCharacter: z.boolean().optional().default(false).describe("仅人物且正文明确成为主线关键人物时为 true"),
       }),
     )
     .describe("值得入册的新实体——路人不入册：有名字且已影响或将影响剧情者才入"),
@@ -131,6 +150,11 @@ export const ExtractionSchema = z.object({
   revealSections: z
     .array(z.object({ entityName: z.string(), sectionKey: z.string() }))
     .describe("本章叙事已揭开迷雾的栏目"),
+  majorCharacterPromotions: z.array(z.object({
+    name: z.string().min(1).describe("既有 character 的正名"),
+    evidenceMessageIndex: z.number().int().nonnegative(),
+    evidence: z.string().trim().min(12),
+  })).optional().default([]).describe("正文明确使既有人物成为主线关键人物时晋升；逐项提供正文证据"),
   abilityChanges: z
     .array(z.unknown())
     .max(50)
@@ -179,6 +203,7 @@ ${Object.entries(SECTION_TEMPLATES)
 - Every section carries a "title": a short Chinese heading phrased in THIS world's voice (a cultivation world might title "military" as 「道兵战力」, a gothic empire as 「军团武备」). Keep titles stable for the same entity across chapters unless the world's framing shifts.
 - Write ONLY what the narrative supports; never invent facts to fill sections.
 - CHOSEN marks: if the player god granted a mark/blessing formally binding a mortal, set isChosen/becameChosen.
+- MAJOR CHARACTERS: set newEntities.isMajorCharacter only for a new character explicitly established as plot-critical. For an existing character, emit majorCharacterPromotions with verbatim message evidence; do not promote merely for appearing.
 - Mortal lifespans: if the chapter spans years (era/epoch scale), reflect aging/succession in lifespan sections.
 - Rank changes require in-chapter justification (a god diminished by mass apostasy, exalted by a miracle witnessed by nations...).
 - scenePresent: true only for entities physically/narratively present at the chapter's end scene.
@@ -186,6 +211,7 @@ ${Object.entries(SECTION_TEMPLATES)
 - ABILITY CHANGES: allowed event types are awakened, learned, improved, mutated, impaired, sealed, restored, lost, revealed, deprecated.
 - Every ability change must cite exactly one labelled chapter message by evidenceMessageIndex and copy a verbatim evidence excerpt of at least 12 Chinese characters from that message. Never infer an upgrade without explicit training, awakening, injury, sealing, restoration, loss, revelation or mutation in the prose.
 - For an existing ability, use its exact abilityId. For learning a racial tradition, use sourceAbilityId plus the character ownerName; never teach a racial_tradition from outside the character's primary race. Do not invent IDs.
+- If prose explicitly establishes a genuinely new ability absent from ABILITIES, omit both IDs and provide ownerName, name, kind, effect, trigger, cost, limitations and lockedFields. Characters may create personal, gods divine, and races racial_innate/racial_tradition only. New abilities require learned or awakened evidence; do not backfill old lore in bulk.
 - Ability patches may only contain mastery, state, visibility, rumorText, effect, trigger, cost, or limitations. Never change a listed locked field. Ordinary training advances mastery by at most one rank.
 - Output ONLY a JSON object matching the schema. All user-facing strings in Chinese.
 

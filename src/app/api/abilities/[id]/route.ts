@@ -18,6 +18,7 @@ import {
   normalizePersistedAbility,
 } from "@/lib/abilities/types";
 import { projectAbilityForPlayer } from "@/lib/abilities/visibility";
+import { ScaleSchema } from "@/lib/cards/schemas";
 
 const EditableAbilityFieldsSchema = z.object({
   name: z.string(),
@@ -39,7 +40,7 @@ const EventSchema = z.object({
   chapterId: z.string().min(1),
   messageId: z.string().min(1).nullable().optional(),
   evidence: z.string(),
-  scale: z.enum(["scene", "era", "epoch"]),
+  scale: ScaleSchema,
   dedupeKey: z.string().min(1),
 }).strict();
 

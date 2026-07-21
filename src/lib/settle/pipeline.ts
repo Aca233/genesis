@@ -517,6 +517,7 @@ async function runExtraction(
     entityUpdates: [] as Array<Extraction["entityUpdates"][number]>,
     godUpdates: [] as Array<Extraction["godUpdates"][number]>,
     revealSections: [] as Array<Extraction["revealSections"][number]>,
+    majorCharacterPromotions: [] as Array<Extraction["majorCharacterPromotions"][number]>,
     abilityChanges: [] as unknown[],
   };
   for (const messages of messageWindows) {
@@ -555,6 +556,7 @@ async function runExtraction(
     extraction.entityUpdates.push(...windowExtraction.entityUpdates);
     extraction.godUpdates.push(...windowExtraction.godUpdates);
     extraction.revealSections.push(...windowExtraction.revealSections);
+    extraction.majorCharacterPromotions.push(...(windowExtraction.majorCharacterPromotions ?? []));
     extraction.abilityChanges.push(...windowExtraction.abilityChanges);
   }
 
@@ -578,6 +580,7 @@ async function runExtraction(
           emblemSeed: emblemSeed(ne.name),
           summary: ne.summary.slice(0, 200),
           isChosen: ne.isChosen,
+          isMajorCharacter: ne.type === "character" && ne.isMajorCharacter,
           scenePresence: true,
           sections: {
             create: ne.sections
@@ -662,6 +665,20 @@ async function runExtraction(
           ...(gu.faithScope ? { faithScope: gu.faithScope } : {}),
         },
       });
+    }
+
+    // 主要人物晋升：只接受本章连续正文证据，且目标必须是既有 character。
+    const messagesByIndex = new Map(chapterText.messages.map((message) => [message.index, message]));
+    for (const promotion of extraction.majorCharacterPromotions) {
+      const target = byName.get(promotion.name);
+      const message = messagesByIndex.get(promotion.evidenceMessageIndex);
+      const evidence = promotion.evidence.replace(/\s+/gu, "");
+      if (
+        target?.type !== "character" || message === undefined || evidence.length < 12 ||
+        !message.content.replace(/\s+/gu, "").includes(evidence) ||
+        !/(?:领袖|核心人物|关键人物|举足轻重|名震|公认|主心骨|统帅)/u.test(promotion.evidence)
+      ) continue;
+      await tx.entity.update({ where: { id: target.id }, data: { isMajorCharacter: true } });
     }
 
     // 迷雾揭示

@@ -209,3 +209,53 @@ it("多窗口实体更新会累积去重 aliases，标量 section 冲突按窗�
     await prisma.world.delete({ where: { id: data.world.id } });
   }
 });
+
+
+it("旧世界章节可创建新能力并将既有人物晋升主要人物，重跑幂等", async () => {
+  const data = await fixture();
+  const evidence = "阿岚终于学会裂石掌并独自守住山门，从此成为山民公认的领袖人物。";
+  const message = await prisma.message.create({ data: {
+    chapterId: data.chapter.id, index: 90, role: "narrator", content: evidence, scale: "years",
+  } });
+  responses.extract = {
+    newEntities: [], entityUpdates: [], godUpdates: [], revealSections: [],
+    majorCharacterPromotions: [{ name: "阿岚", evidenceMessageIndex: 90, evidence: evidence.slice(0, -1) }],
+    abilityChanges: [{
+      ownerName: "阿岚", name: "裂石掌", kind: "personal", type: "learned",
+      effect: "以掌劲碎岩", trigger: "挥掌", cost: "体力", limitations: "需近身", lockedFields: [],
+      patch: { mastery: "novice" }, evidenceMessageIndex: 90, evidence: evidence.slice(0, -1),
+    }],
+  };
+  try {
+    await settle(data.chapter.id);
+    await prisma.chapter.update({ where: { id: data.chapter.id }, data: { settleState: "settling:extract" } });
+    await settle(data.chapter.id);
+    const [character, abilities, events] = await Promise.all([
+      prisma.entity.findUnique({ where: { id: data.character.id } }),
+      prisma.ability.findMany({ where: { entityId: data.character.id, name: "裂石掌" } }),
+      prisma.abilityEvent.findMany({ where: { chapterId: data.chapter.id, messageId: message.id, type: "learned" } }),
+    ]);
+    expect(character?.isMajorCharacter).toBe(true);
+    expect(abilities).toHaveLength(1);
+    expect(abilities[0]).toMatchObject({ kind: "personal", mastery: "novice", visibility: "known", version: 2 });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ scale: "years", evidence: evidence.slice(0, -1) });
+  } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it("显式抽取的新重要人物创建时直接标记 major", async () => {
+  const data = await fixture();
+  const name = `白石-${crypto.randomUUID()}`;
+  responses.extract = {
+    newEntities: [{ type: "character", name, aliases: [], summary: "守住山门的新领袖", sections: [], isChosen: false, isMajorCharacter: true }],
+    entityUpdates: [], godUpdates: [], revealSections: [], majorCharacterPromotions: [], abilityChanges: [],
+  };
+  try {
+    await settle(data.chapter.id);
+    expect(await prisma.entity.findFirst({ where: { timelineId: data.timeline.id, name } })).toMatchObject({ isMajorCharacter: true });
+  } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});

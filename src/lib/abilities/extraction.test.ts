@@ -42,6 +42,7 @@ function extractionFixture() {
     { id: "race-1", type: "race", name: "山民", aliases: [], raceId: null },
     { id: "race-2", type: "race", name: "羽民", aliases: [], raceId: null },
     { id: "character-1", type: "character", name: "阿岚", aliases: ["石女"], raceId: "race-1" },
+    { id: "god-1", type: "god", name: "岩母", aliases: [], raceId: null },
   ];
   const abilities = new Map<string, AbilityStoredRecord>([
     [
@@ -112,13 +113,15 @@ function extractionFixture() {
           : null;
       },
     },
-    god: { findUnique: async () => null },
+    god: { findUnique: async ({ where }: { where: { id: string } }) => where.id === "god-1" ? { id: "god-1", timelineId: "timeline-1" } : null },
     ability: {
       findUnique: async ({ where }: { where: { id: string } }) => abilities.get(where.id) ?? null,
       findFirst: async ({ where }: { where: Record<string, unknown> }) =>
         [...abilities.values()].find((ability) => {
           if (typeof where.entityId === "string" && ability.entityId !== where.entityId) return false;
           if (typeof where.sourceAbilityId === "string" && ability.sourceAbilityId !== where.sourceAbilityId) return false;
+          if (typeof where.godId === "string" && ability.godId !== where.godId) return false;
+          if (typeof where.name === "string" && ability.name !== where.name) return false;
           const id = where.id as { not?: string } | undefined;
           return id?.not === undefined || ability.id !== id.not;
         }) ?? null,
@@ -225,6 +228,15 @@ describe("能力章末抽取契约", () => {
       ],
     });
     expect(parsed.abilityChanges[0]).toMatchObject({ evidenceMessageIndex: 4 });
+    const promotion = ExtractionSchema.parse({
+      ...baseExtraction,
+      majorCharacterPromotions: [{
+        name: "阿岚", evidenceMessageIndex: 4,
+        evidence: "阿岚独自守住山门，成为山民公认的领袖人物",
+      }],
+      abilityChanges: [],
+    });
+    expect(promotion.majorCharacterPromotions[0]).toMatchObject({ name: "阿岚", evidenceMessageIndex: 4 });
 
     expect(
       AbilityExtractionChangeSchema.safeParse({
@@ -680,4 +692,68 @@ it.each([
     timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
     changes: [{ abilityId: "trainable-personal", ownerName: "阿岚", type: "improved", patch: { mastery: "adept" }, evidenceMessageIndex: 4, evidence: "阿岚在三年苦修后独自凿成七重石阵，凿阵术由生涩臻于纯熟" }],
   })).rejects.toBe(failure);
+});
+
+
+it("无 ID 时可按 owner 类型创建证据支持的新能力，重复执行幂等", async () => {
+  const cases = [
+    { ownerName: "阿岚", kind: "personal", name: "裂石掌", type: "learned", patch: { mastery: "novice" }, evidence: "阿岚终于学会裂石掌，一掌击碎挡路巨岩" },
+    { ownerName: "山民", kind: "racial_tradition", name: "听山礼", type: "learned", patch: { mastery: "novice" }, evidence: "山民正式传承听山礼，以此辨认地脉回声" },
+    { ownerName: "岩母", kind: "divine", name: "镇岳神权", type: "awakened", patch: { mastery: "novice" }, evidence: "岩母终于觉醒镇岳神权，成功平息群山震动" },
+  ] as const;
+  for (const [offset, candidate] of cases.entries()) {
+    const fixture = extractionFixture();
+    fixture.messages.push({ id: `message-create-${offset}`, index: 40 + offset, scale: "scene", content: `${candidate.evidence}。` });
+    const change = {
+      ...candidate,
+      effect: "以掌劲或仪式改变岩层",
+      trigger: "主动施展",
+      cost: "消耗体力",
+      limitations: "需要接触岩石",
+      lockedFields: [],
+      evidenceMessageIndex: 40 + offset,
+      evidence: candidate.evidence,
+    };
+    const first = await applyAbilityExtraction(fixture.client, {
+      timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+      changes: [change],
+    });
+    const second = await applyAbilityExtraction(fixture.client, {
+      timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+      changes: [change],
+    });
+    expect(first.applied).toHaveLength(1);
+    expect(second.applied[0]?.applied).toBe(false);
+    const created = [...fixture.abilities.values()].filter((ability) => ability.name === candidate.name);
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({ kind: candidate.kind, mastery: "novice", visibility: "known", lockedFields: [] });
+  }
+});
+
+it("拒绝无 ID 新能力的 owner-kind 越权、重复名和缺失证据字段", async () => {
+  const fixture = extractionFixture();
+  fixture.messages.push({ id: "message-create-invalid", index: 45, scale: "scene", content: "阿岚终于学会裂石掌，一掌击碎挡路巨岩。" });
+  const base = {
+    ownerName: "阿岚", name: "裂石掌", type: "learned", patch: { mastery: "novice" },
+    effect: "击碎巨岩", trigger: "挥掌", cost: "体力", limitations: "近距离", lockedFields: [],
+    evidenceMessageIndex: 45, evidence: "阿岚终于学会裂石掌，一掌击碎挡路巨岩",
+  };
+  const invalidKind = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ ...base, kind: "divine" }],
+  });
+  expect(invalidKind.rejected[0]?.reason).toMatch(/kind|人物|personal/);
+
+  const missing = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ ownerName: "阿岚", name: "裂石掌", kind: "personal", type: "learned", patch: { mastery: "novice" }, evidenceMessageIndex: 45, evidence: base.evidence }],
+  });
+  expect(missing.rejected[0]?.reason).toMatch(/格式|字段|校验/);
+
+  fixture.abilities.set("duplicate-personal", storedAbility({ id: "duplicate-personal", entityId: "character-1", name: "裂石掌", kind: "personal" }));
+  const duplicate = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
+    changes: [{ ...base, kind: "personal" }],
+  });
+  expect(duplicate.rejected[0]?.reason).toMatch(/重复|已存在/);
 });

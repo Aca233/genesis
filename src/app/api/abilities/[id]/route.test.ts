@@ -242,6 +242,28 @@ describe("能力 API 可见性", () => {
     });
   });
 
+  it.each(["moment", "scene", "years", "era", "epoch"] as const)(
+    "PATCH 接受完整 TimeScale %s",
+    async (scale) => {
+      const { PATCH } = await import("./route");
+      let current = { ...knownAbility, kind: "personal", timelineId: "timeline-1", entityId: "character-1", godId: null };
+      mocks.prisma.ability.findUnique.mockImplementation(async () => current);
+      mocks.prisma.ability.updateMany.mockImplementation(async ({ data }) => {
+        current = { ...current, ...data, version: current.version + data.version.increment };
+        return { count: 1 };
+      });
+      mocks.prisma.message.findUnique.mockResolvedValue({ id: "message-1", chapterId: "chapter-1", scale });
+      const response = await PATCH(new Request("http://localhost/api/abilities/ability-known", {
+        method: "PATCH",
+        body: JSON.stringify({
+          expectedVersion: 1, patch: { name: `晨曦感知-${scale}` },
+          event: { type: "mutated", chapterId: "chapter-1", messageId: "message-1", evidence: "完整时间尺度能力变化证据", scale, dedupeKey: `patch-scale-${scale}` },
+        }),
+      }), { params: Promise.resolve({ id: "ability-known" }) });
+      expect(response.status).toBe(200);
+    },
+  );
+
   it("PATCH 锁定字段返回 409", async () => {
     const { PATCH } = await import("./route");
     mocks.prisma.ability.findUnique.mockResolvedValue({
@@ -721,6 +743,28 @@ describe("能力 API 可见性", () => {
       event: { type: "deprecated" },
     });
   });
+
+  it.each(["moment", "scene", "years", "era", "epoch"] as const)(
+    "DELETE 废弃路径接受完整 TimeScale %s",
+    async (scale) => {
+      const { DELETE } = await import("./route");
+      let current = { ...knownAbility, kind: "personal", timelineId: "timeline-1", entityId: "character-1", godId: null };
+      mocks.prisma.ability.findUnique.mockImplementation(async () => current);
+      mocks.prisma.abilityEvent.count.mockResolvedValue(1);
+      mocks.prisma.message.findUnique.mockResolvedValue({ id: "message-1", chapterId: "chapter-1", scale });
+      mocks.prisma.ability.updateMany.mockImplementation(async ({ data }) => {
+        current = { ...current, ...data, version: current.version + data.version.increment };
+        return { count: 1 };
+      });
+      const response = await DELETE(new Request("http://localhost/api/abilities/ability-known", {
+        method: "DELETE",
+        body: JSON.stringify({ expectedVersion: 1, event: {
+          type: "deprecated", chapterId: "chapter-1", messageId: "message-1", evidence: "完整时间尺度废弃能力证据", scale, dedupeKey: `delete-scale-${scale}`,
+        } }),
+      }), { params: Promise.resolve({ id: "ability-known" }) });
+      expect(response.status).toBe(200);
+    },
+  );
 
   it("history 对传闻能力只公开揭示时间和 rumorText", async () => {
     const { GET } = await import("./history/route");

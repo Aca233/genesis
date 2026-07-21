@@ -338,12 +338,98 @@ async function findLearnedAbility(
   });
 }
 
+const ABILITY_LOCK_FIELDS = new Set([
+  "name", "kind", "effect", "trigger", "cost", "limitations", "mastery", "state",
+  "visibility", "rumorText", "bloodlineJustification", "sourceAbilityId", "lockedFields",
+]);
+
+function newAbilityVisibility(change: AbilityExtractionChange): "known" | "rumored" | "hidden" {
+  const inferred = /据说|传闻|听闻/u.test(change.evidence)
+    ? "rumored"
+    : /秘密|暗中|无人知晓|未被察觉/u.test(change.evidence)
+      ? "hidden"
+      : "known";
+  if (change.visibility !== undefined && change.visibility !== inferred) {
+    throw new AbilityValidationError("新能力 visibility 必须由正文证据支持");
+  }
+  return change.visibility ?? inferred;
+}
+
+function assertNewAbilityKind(owner: AbilityExtractionOwner, kind: string): void {
+  const allowed = owner.type === "character"
+    ? ["personal"]
+    : owner.type === "god"
+      ? ["divine"]
+      : ["racial_innate", "racial_tradition"];
+  if (!allowed.includes(kind)) {
+    throw new AbilityValidationError(`${owner.type} 拥有者不能创建 kind=${kind}；允许 ${allowed.join("/")}`);
+  }
+}
+
+async function findOwnedAbilityByName(
+  tx: AbilityExtractionTx,
+  owner: AbilityExtractionOwner,
+  name: string,
+): Promise<AbilityStoredRecord | null> {
+  return (tx.ability as unknown as {
+    findFirst(args: { where: { entityId?: string; godId?: string; name: string } }): Promise<AbilityStoredRecord | null>;
+  }).findFirst({ where: owner.type === "god" ? { godId: owner.id, name } : { entityId: owner.id, name } });
+}
+
+function newAbilityData(
+  timelineId: string,
+  owner: AbilityExtractionOwner,
+  change: AbilityExtractionChange,
+): LearnedAbilityCreateData {
+  if (
+    change.name === undefined || change.kind === undefined || change.effect === undefined ||
+    change.trigger === undefined || change.cost === undefined || change.limitations === undefined ||
+    change.lockedFields === undefined
+  ) {
+    throw new AbilityValidationError("新能力缺少完整字段");
+  }
+  assertNewAbilityKind(owner, change.kind);
+  if (new Set(change.lockedFields).size !== change.lockedFields.length || change.lockedFields.some((field) => !ABILITY_LOCK_FIELDS.has(field))) {
+    throw new AbilityValidationError("新能力 lockedFields 包含重复或未知字段");
+  }
+  const visibility = newAbilityVisibility(change);
+  return {
+    timelineId,
+    entityId: owner.type === "god" ? null : owner.id,
+    godId: owner.type === "god" ? owner.id : null,
+    sourceAbilityId: null,
+    name: change.name,
+    kind: change.kind,
+    effect: change.effect,
+    trigger: change.trigger,
+    cost: change.cost,
+    limitations: change.limitations,
+    mastery: "unawakened",
+    state: "normal",
+    visibility,
+    rumorText: visibility === "rumored" ? change.rumorText ?? change.evidence : null,
+    bloodlineJustification: null,
+    lockedFields: change.lockedFields,
+  };
+}
+
 async function resolveAbility(
   tx: AbilityExtractionTx,
   change: AbilityExtractionChange,
   owner: AbilityExtractionOwner,
   timelineId: string,
-): Promise<{ ability: AbilityStoredRecord; created: boolean }> {
+): Promise<{ ability: AbilityStoredRecord; created: boolean; reusedNew?: boolean }> {
+  if (change.abilityId === undefined && change.sourceAbilityId === undefined) {
+    const data = newAbilityData(timelineId, owner, change);
+    const existing = await findOwnedAbilityByName(tx, owner, data.name);
+    if (existing !== null) {
+      assertAbilityOwner(existing, owner, timelineId);
+      if (existing.kind !== data.kind) throw new AbilityValidationError("拥有者已存在同名不同 kind 能力");
+      return { ability: existing, created: false, reusedNew: true };
+    }
+    return { ability: await tx.ability.create({ data }), created: true };
+  }
+
   if (change.abilityId !== undefined) {
     const ability = await tx.ability.findUnique({ where: { id: change.abilityId } });
     if (ability === null) throw new AbilityValidationError("能力不存在");
@@ -457,6 +543,9 @@ export async function applyAbilityExtractionInTransaction(
       assertRelevantEvidence(change.evidence, change, owner, ability, source, input.knownEntityNames ?? []);
       const dedupeKey = [input.chapterId, ability.id, change.type, message.id].join(":");
       const existingEvent: AbilityEventRecord | null = await tx.abilityEvent.findUnique({ where: { dedupeKey } });
+      if (resolved.reusedNew === true && existingEvent === null) {
+        throw new AbilityValidationError("拥有者已存在同名能力，不能重复创建");
+      }
       const result = await applyAbilityChangeInTransaction(tx, {
         abilityId: ability.id,
         version: existingEvent?.before.version ?? ability.version,
