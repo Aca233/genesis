@@ -26,11 +26,40 @@ model World {
   activeTimelineId   String?    @map("active_timeline_id")
   timelines          Timeline[]
   lorebookEntries    LorebookEntry[]
+  genesisTasks       GenesisTask[]
+  materialCards      MaterialCard[]
+  materialArchiveStatus String   @default("pending") @map("material_archive_status")
+  materialArchiveError  String?  @map("material_archive_error")
   createdAt          DateTime   @default(now()) @map("created_at")
   updatedAt          DateTime   @updatedAt @map("updated_at")
 
   @@index([userId])
   @@map("worlds")
+}
+
+model GenesisTask {
+  id             String    @id @default(cuid())
+  userId         String    @default("local") @map("user_id")
+  decree         String
+  lorebook       Json?
+  lorebookName   String?   @map("lorebook_name")
+  materialSelection Json?  @map("material_selection")
+  status         String    @default("queued") // queued | running | repairing | completed | failed
+  stage          String    @default("oracle")
+  completedKeys  String[]  @map("completed_keys")
+  rawOutput      String    @default("") @map("raw_output") @db.Text
+  error          String?
+  attempt        Int       @default(0)
+  leaseToken     String?   @map("lease_token")
+  leaseExpiresAt DateTime? @map("lease_expires_at")
+  worldId        String?   @unique @map("world_id")
+  world          World?    @relation(fields: [worldId], references: [id], onDelete: SetNull)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId, status])
+  @@index([status, leaseExpiresAt])
+  @@map("genesis_tasks")
 }
 
 model Timeline {
@@ -128,12 +157,14 @@ model God {
   agendaRevealed Boolean  @default(false) @map("agenda_revealed")
   relations      Json? // { targetId: {label, note} }
   faithScope     String?  @map("faith_scope")
+  materialRef    String?  @map("material_ref")
   codexEntityId  String?    @map("codex_entity_id")
   abilities      Ability[] @relation("GodAbilities")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@index([timelineId])
+  @@unique([timelineId, materialRef])
   @@map("gods")
 }
 
@@ -158,6 +189,7 @@ model Entity {
   scenePresence Boolean         @default(false) @map("scene_presence")
   summary       String // 摘要卡（dormant 时的全部）
   lockedPaths   String[]        @map("locked_paths") // player_locked 字段路径
+  materialRef   String?         @map("material_ref")
   sections              EntitySection[]
   abilities             Ability[]         @relation("EntityAbilities")
   memberships           EntityMembership[] @relation("MembershipCharacter")
@@ -166,6 +198,7 @@ model Entity {
   updatedAt     DateTime        @updatedAt @map("updated_at")
 
   @@index([timelineId, type])
+  @@unique([timelineId, materialRef])
   @@map("entities")
 }
 
@@ -193,6 +226,7 @@ model Ability {
   bloodlineJustification String?         @map("bloodline_justification")
   lockedFields    String[]        @map("locked_fields")
   version         Int             @default(1)
+  materialRef     String?         @map("material_ref")
   events          AbilityEvent[]
   createdAt       DateTime        @default(now()) @map("created_at")
   updatedAt       DateTime        @updatedAt @map("updated_at")
@@ -201,6 +235,7 @@ model Ability {
   @@index([entityId])
   @@index([godId])
   @@index([sourceAbilityId])
+  @@unique([timelineId, materialRef])
   @@unique([entityId, sourceAbilityId])
   @@map("abilities")
 }
@@ -304,6 +339,57 @@ model LorebookEntry {
   @@map("lorebook_entries")
 }
 
+
+// ───────────────────────── 创世素材库 ─────────────────────────
+
+model MaterialCard {
+  id               String            @id @default(cuid())
+  userId           String            @default("local") @map("user_id")
+  kind             String
+  name             String
+  summary          String
+  favorite         Boolean           @default(false)
+  hidden           Boolean           @default(false)
+  sourceWorldId    String?           @map("source_world_id")
+  sourceWorld      World?            @relation(fields: [sourceWorldId], references: [id], onDelete: SetNull)
+  sourceWorldName  String            @map("source_world_name")
+  sourceKind       String            @map("source_kind")
+  sourceRef        String            @map("source_ref")
+  defaultVersionId String?           @map("default_version_id")
+  versions         MaterialVersion[] @relation("MaterialCardVersions")
+  defaultVersion   MaterialVersion?  @relation("MaterialDefaultVersion", fields: [defaultVersionId], references: [id], onDelete: SetNull)
+  lastUsedAt       DateTime?         @map("last_used_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  @@unique([userId, sourceKind, sourceRef])
+  @@index([userId, favorite, hidden, updatedAt])
+  @@index([sourceWorldId])
+  @@map("material_cards")
+}
+
+model MaterialVersion {
+  id              String            @id @default(cuid())
+  cardId          String            @map("card_id")
+  card            MaterialCard      @relation("MaterialCardVersions", fields: [cardId], references: [id], onDelete: Cascade)
+  defaultForCards MaterialCard[]     @relation("MaterialDefaultVersion")
+  version         Int
+  name            String
+  note            String?
+  content         Json
+  dependencies    Json
+  schemaVersion   Int               @default(1) @map("schema_version")
+  isInitial       Boolean           @default(false) @map("is_initial")
+  parentVersionId String?           @map("parent_version_id")
+  parentVersion   MaterialVersion?  @relation("MaterialVersionParents", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  childVersions   MaterialVersion[] @relation("MaterialVersionParents")
+  createdAt       DateTime          @default(now()) @map("created_at")
+
+  @@unique([cardId, version])
+  @@index([parentVersionId])
+  @@map("material_versions")
+}
+
 // ───────────────────────── 设置与日志 ─────────────────────────
 
 model Settings {
@@ -318,14 +404,23 @@ model Settings {
 }
 
 model LlmCall {
-  id         String   @id @default(cuid())
-  task       String // narrative | genesis | pantheon | extract | chronicle | test
-  slot       String // narrative | backstage
-  durationMs Int      @map("duration_ms")
-  ok         Boolean
-  error      String?
-  createdAt  DateTime @default(now()) @map("created_at")
+  id               String   @id @default(cuid())
+  task             String // narrative | genesis | settlement | reroll | pantheon | extract | chronicle | test
+  slot             String // narrative | backstage
+  provider         String?
+  model            String?
+  durationMs       Int      @map("duration_ms")
+  ok               Boolean
+  error            String?
+  inputTokens      Int?     @map("input_tokens")
+  outputTokens     Int?     @map("output_tokens")
+  cacheReadTokens  Int?     @map("cache_read_tokens")
+  cacheWriteTokens Int?     @map("cache_write_tokens")
+  cacheRequested   Boolean  @default(false) @map("cache_requested")
+  cacheFallback    Boolean  @default(false) @map("cache_fallback")
+  createdAt        DateTime @default(now()) @map("created_at")
 
   @@index([createdAt])
+  @@index([task, createdAt])
   @@map("llm_calls")
 }

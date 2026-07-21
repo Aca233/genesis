@@ -5,17 +5,10 @@ import {
   ModelSlotSchema,
   type CompletionRequest,
   type ModelSlot,
+  type NormalizedUsage,
   type SlotName,
   type StreamChunk,
 } from "./types";
-
-/**
- * LLM Gateway（docs/02 §3）：
- * - 槽位解析（幕后缺省回落叙事槽）
- * - Key 解密（仅在请求瞬间存在于内存）
- * - 统一重试：网络错误/429/5xx 指数退避 ×3
- * - llm_calls 日志
- */
 
 const MAX_RETRIES = 3;
 
@@ -28,105 +21,121 @@ export type CompleteOptions = {
 
 class SlotNotConfiguredError extends Error {
   constructor(slot: SlotName) {
-    super(
-      slot === "narrative"
-        ? "叙事模型未配置：请先在设置（香炉）中完成模型槽位配置"
-        : "幕后模型未配置",
-    );
+    super(slot === "narrative"
+      ? "叙事模型未配置：请先在设置（香炉）中完成模型槽位配置"
+      : "幕后模型未配置");
     this.name = "SlotNotConfiguredError";
   }
 }
 
-/** 解析槽位：backstage 未配置时回落 narrative */
+/** Resolve a model slot; backstage falls back to narrative. */
 export async function resolveSlot(
   name: SlotName,
 ): Promise<{ slot: ModelSlot; apiKey: string; slotName: SlotName }> {
   const settings = await prisma.settings.findUnique({ where: { userId: "local" } });
-  const raw =
-    name === "backstage"
-      ? (settings?.backstageSlot ?? settings?.narrativeSlot)
-      : settings?.narrativeSlot;
-  const usedName: SlotName =
-    name === "backstage" && !settings?.backstageSlot ? "narrative" : name;
+  const raw = name === "backstage"
+    ? (settings?.backstageSlot ?? settings?.narrativeSlot)
+    : settings?.narrativeSlot;
+  const usedName: SlotName = name === "backstage" && !settings?.backstageSlot
+    ? "narrative"
+    : name;
   if (!raw) throw new SlotNotConfiguredError("narrative");
-
   const slot = ModelSlotSchema.parse(raw);
   if (!slot.apiKeyEncrypted) throw new SlotNotConfiguredError(usedName);
   return { slot, apiKey: decryptSecret(slot.apiKeyEncrypted), slotName: usedName };
 }
 
-/** 网络层/断流类错误（undici 的 terminated、other side closed 等都算） */
-function isNetworkError(msg: string): boolean {
-  return /fetch failed|terminated|other side closed|aborted|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|socket|UND_ERR/i.test(
-    msg,
-  );
+function isNetworkError(message: string): boolean {
+  return /fetch failed|terminated|other side closed|aborted|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|socket|UND_ERR/i.test(message);
 }
 
-function isRetryable(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/HTTP (429|500|502|503|504|529)/.test(msg)) return true;
-  // 中转站的 route_not_found / upstream 类 404 往往换个上游即通，值得重试
-  if (/HTTP 404/.test(msg) && /route_not_found|upstream|数据面/.test(msg)) return true;
-  return isNetworkError(msg);
+function isRetryable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/HTTP (429|500|502|503|504|529)/.test(message)) return true;
+  if (/HTTP 404/.test(message) && /route_not_found|upstream|数据面/.test(message)) return true;
+  return isNetworkError(message);
 }
 
-/** 把裸网络错误翻译成用户可读的说明（终局失败时用；HTTP 错误已自带响应体不动它） */
-function describeError(err: unknown): Error {
-  const msg = err instanceof Error ? err.message : String(err);
-  if (isNetworkError(msg) && !/^HTTP \d/.test(msg)) {
-    return new Error(
-      `与模型端点的连接中断（${msg}）——多为中转站在长响应中途掐断连接。已自动重试仍失败，可稍后再试或换用更稳的端点/模型。`,
-    );
+function describeError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  if (isNetworkError(message) && !/^HTTP \d/.test(message)) {
+    return new Error(`与模型端点的连接中断（${message}）——多为中转站在长响应中途掐断连接。已自动重试仍失败，可稍后再试或换用更稳的端点/模型。`);
   }
-  return err instanceof Error ? err : new Error(msg);
+  return error instanceof Error ? error : new Error(message);
 }
 
 async function backoff(attempt: number) {
-  const ms = 1000 * 2 ** attempt + Math.random() * 500;
-  await new Promise((r) => setTimeout(r, ms));
+  const milliseconds = 1000 * 2 ** attempt + Math.random() * 500;
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function logCall(
-  task: string,
-  slot: SlotName,
-  startedAt: number,
-  ok: boolean,
-  error?: string,
-) {
+type CallLog = {
+  task: string;
+  slot: SlotName;
+  provider: string;
+  model: string;
+  startedAt: number;
+  ok: boolean;
+  error?: string;
+  usage?: NormalizedUsage;
+  cacheRequested?: boolean;
+  cacheFallback?: boolean;
+};
+
+async function logCall(log: CallLog) {
   try {
     await prisma.llmCall.create({
       data: {
-        task,
-        slot,
-        durationMs: Date.now() - startedAt,
-        ok,
-        error: error?.slice(0, 1000),
+        task: log.task,
+        slot: log.slot,
+        provider: log.provider,
+        model: log.model,
+        durationMs: Date.now() - log.startedAt,
+        ok: log.ok,
+        error: log.error?.slice(0, 1000),
+        inputTokens: log.usage?.inputTokens ?? null,
+        outputTokens: log.usage?.outputTokens ?? null,
+        cacheReadTokens: log.usage?.cacheReadTokens ?? null,
+        cacheWriteTokens: log.usage?.cacheWriteTokens ?? null,
+        cacheRequested: log.cacheRequested ?? false,
+        cacheFallback: log.cacheFallback ?? false,
       },
     });
   } catch {
-    // 日志失败不阻塞主流程
+    // Logging failure must not block model output.
   }
 }
 
-/** 以流式请求聚合出全文（多数中转站只稳定支持流式，故这是默认路径） */
+type CollectedStream = {
+  text: string;
+  usage?: NormalizedUsage;
+  cacheRequested: boolean;
+  cacheFallback: boolean;
+};
+
 async function collectStream(
   adapter: (typeof adapters)[keyof typeof adapters],
   slot: ModelSlot,
   req: CompletionRequest,
   apiKey: string,
-): Promise<string> {
+): Promise<CollectedStream> {
   let text = "";
+  let usage: NormalizedUsage | undefined;
+  let cacheRequested = false;
+  let cacheFallback = false;
   for await (const chunk of adapter.stream(slot, req, apiKey)) {
     if (chunk.type === "text") text += chunk.text;
+    if (chunk.type === "usage") {
+      usage = chunk.usage;
+      cacheRequested = chunk.cacheRequested;
+      cacheFallback = chunk.cacheFallback;
+    }
   }
   if (!text.trim()) throw new Error("流式响应为空");
-  return text;
+  return { text, usage, cacheRequested, cacheFallback };
 }
 
-/**
- * 非流式任务补全（世界生成/诸神回合/抽取/压缩/连接测试）。
- * 底层优先走流式聚合（中转站兼容性最好），流式彻底失败后回落一次非流式。
- */
+/** Non-streaming business completion, using streamed transport first for relay compatibility. */
 export async function complete(
   slotName: SlotName,
   req: CompletionRequest,
@@ -135,42 +144,50 @@ export async function complete(
   const { slot, apiKey, slotName: used } = await resolveSlot(slotName);
   const adapter = adapters[slot.provider];
   const startedAt = Date.now();
+  const baseLog = {
+    task: req.task,
+    slot: used,
+    provider: slot.provider,
+    model: slot.model,
+    startedAt,
+  };
 
   const maxAttempts = Math.max(1, options?.maxAttempts ?? MAX_RETRIES);
   const allowFallback = options?.allowFallback ?? true;
   let lastError: unknown;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
-      const text = await collectStream(adapter, slot, req, apiKey);
-      await logCall(req.task, used, startedAt, true);
-      return text;
-    } catch (err) {
-      lastError = err;
-      if (!isRetryable(err) || attempt === maxAttempts - 1) break;
+      const result = await collectStream(adapter, slot, req, apiKey);
+      await logCall({ ...baseLog, ok: true, usage: result.usage,
+        cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+      return result.text;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryable(error) || attempt === maxAttempts - 1) break;
       await backoff(attempt);
     }
   }
 
   if (allowFallback) {
-    // 流式失败 → 回落非流式再试一次（个别网关只支持非流式）
     try {
       const result = await adapter.complete(slot, req, apiKey);
-      await logCall(req.task, used, startedAt, true);
+      await logCall({ ...baseLog, ok: true, usage: result.usage,
+        cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
       return result.text;
-    } catch (fallbackErr) {
-      const finalErr = lastError ?? fallbackErr;
-      const message = finalErr instanceof Error ? finalErr.message : String(finalErr);
-      await logCall(req.task, used, startedAt, false, message);
-      throw describeError(finalErr);
+    } catch (fallbackError) {
+      const finalError = lastError ?? fallbackError;
+      const message = finalError instanceof Error ? finalError.message : String(finalError);
+      await logCall({ ...baseLog, ok: false, error: message });
+      throw describeError(finalError);
     }
   }
 
   const message = lastError instanceof Error ? lastError.message : String(lastError);
-  await logCall(req.task, used, startedAt, false, message);
+  await logCall({ ...baseLog, ok: false, error: message });
   throw describeError(lastError);
 }
 
-/** 流式补全（正文叙事）。流中途出错不重试（避免正文重复），直接抛出。 */
+/** Narrative stream. Usage events are internal and never exposed to business consumers. */
 export async function* stream(
   slotName: SlotName,
   req: CompletionRequest,
@@ -179,46 +196,66 @@ export async function* stream(
   const { slot, apiKey, slotName: used } = await resolveSlot(slotName);
   const adapter = adapters[slot.provider];
   const startedAt = Date.now();
+  const baseLog = {
+    task: req.task,
+    slot: used,
+    provider: slot.provider,
+    model: slot.model,
+    startedAt,
+  };
 
   try {
-    yield* adapter.stream(slot, req, apiKey, options);
+    let usage: NormalizedUsage | undefined;
+    let cacheRequested = false;
+    let cacheFallback = false;
+    for await (const chunk of adapter.stream(slot, req, apiKey, options)) {
+      if (chunk.type === "usage") {
+        usage = chunk.usage;
+        cacheRequested = chunk.cacheRequested;
+        cacheFallback = chunk.cacheFallback;
+      } else {
+        yield chunk;
+      }
+    }
     if (options?.signal?.aborted) return;
-    await logCall(req.task, used, startedAt, true);
-  } catch (err) {
+    await logCall({ ...baseLog, ok: true, usage, cacheRequested, cacheFallback });
+  } catch (error) {
     if (options?.signal?.aborted) return;
-    const message = err instanceof Error ? err.message : String(err);
-    await logCall(req.task, used, startedAt, false, message);
-    throw err;
+    const message = error instanceof Error ? error.message : String(error);
+    await logCall({ ...baseLog, ok: false, error: message });
+    throw error;
   }
 }
 
-/** 「试炼一问」连接测试：直接用传入槽位（未落库前验证），流式聚合，不走重试 */
+/** Connection test against an unsaved slot. */
 export async function testSlot(slot: ModelSlot, apiKey: string): Promise<string> {
   const adapter = adapters[slot.provider];
   const startedAt = Date.now();
   const req: CompletionRequest = {
     task: "test",
     maxTokens: 64,
-    messages: [
-      {
-        role: "user",
-        content: "请只回答四个字：试炼已过",
-      },
-    ],
+    messages: [{ role: "user", content: "请只回答四个字：试炼已过" }],
+  };
+  const baseLog = {
+    task: "test",
+    slot: "narrative" as const,
+    provider: slot.provider,
+    model: slot.model,
+    startedAt,
   };
   try {
-    let text: string;
     try {
-      text = await collectStream(adapter, slot, req, apiKey);
+      const result = await collectStream(adapter, slot, req, apiKey);
+      await logCall({ ...baseLog, ok: true, usage: result.usage });
+      return result.text;
     } catch {
-      // 流式失败回落非流式（个别网关只支持其一）
-      text = (await adapter.complete(slot, req, apiKey)).text;
+      const result = await adapter.complete(slot, req, apiKey);
+      await logCall({ ...baseLog, ok: true, usage: result.usage });
+      return result.text;
     }
-    await logCall("test", "narrative", startedAt, true);
-    return text;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await logCall("test", "narrative", startedAt, false, message);
-    throw err;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await logCall({ ...baseLog, ok: false, error: message });
+    throw error;
   }
 }
