@@ -34,6 +34,14 @@ function request(body: unknown) {
   });
 }
 
+function requestWithHeaders(body: string, headers: Record<string, string>) {
+  return new Request("http://localhost/api/worlds/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body,
+  });
+}
+
 function legacyArchive() {
   return {
     version: 1,
@@ -289,6 +297,16 @@ function versionTwoArchive() {
   };
 }
 
+function twoTimelineArchive() {
+  const archive = versionTwoArchive();
+  const other = JSON.parse(
+    JSON.stringify(archive.world.timelines[0]).replaceAll("-old", "-other"),
+  );
+  other.worldId = "world-old";
+  archive.world.timelines.push(other);
+  return archive;
+}
+
 function installSuccessfulTransaction() {
   mocks.prisma.$transaction.mockImplementation(async (run) => run(mocks.prisma));
   for (const value of Object.values(mocks.prisma)) {
@@ -362,10 +380,40 @@ describe("存档导入", () => {
       abilityId: characterAbility.id,
       chapterId: chapter.id,
       messageId: message.id,
+      dedupeKey: `${chapter.id}:${characterAbility.id}:improved:${message.id}`,
     });
     expect(events[0].dedupeKey).not.toBe(
       "chapter-old:character-ability-old:improved:message-old",
     );
+  });
+
+  it("canonical 事件键映射为新逻辑 ID，使恢复结算能命中已导入事件", async () => {
+    await importWorld(request(versionTwoArchive()));
+    const event = lastCreateManyData(mocks.prisma.abilityEvent)[0];
+
+    const resumedPipelineKey = [
+      event.chapterId,
+      event.abilityId,
+      event.type,
+      event.messageId,
+    ].join(":");
+    expect(event.dedupeKey).toBe(resumedPipelineKey);
+  });
+
+  it("任意事件键使用当前导入世界和事件的新 ID 命名空间且跨导入不碰撞", async () => {
+    const archive = versionTwoArchive();
+    archive.world.timelines[0].abilityEvents[0].dedupeKey = "manual:legacy:key";
+
+    const firstResponse = await importWorld(request(archive));
+    const firstWorldId = (await firstResponse.json()).worldId;
+    const first = lastCreateManyData(mocks.prisma.abilityEvent)[0];
+    const secondResponse = await importWorld(request(archive));
+    const secondWorldId = (await secondResponse.json()).worldId;
+    const second = lastCreateManyData(mocks.prisma.abilityEvent)[0];
+
+    expect(first.dedupeKey).toBe(`import:${firstWorldId}:${first.id}`);
+    expect(second.dedupeKey).toBe(`import:${secondWorldId}:${second.id}`);
+    expect(second.dedupeKey).not.toBe(first.dedupeKey);
   });
 
   it("同一存档导入两次时为事件生成互不碰撞的 ID 与 dedupeKey", async () => {
@@ -427,6 +475,138 @@ describe("存档导入", () => {
     expect(transactionBodyRan).toBe(true);
     expect(eventWriteAttempted).toBe(true);
     expect(committedWorlds).toEqual([]);
+    expect(mocks.prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { maxWait: 10_000, timeout: 60_000 },
+    );
+  });
+
+  it("Content-Length 超过 10MB 时在读取 JSON 前返回 413", async () => {
+    const response = await importWorld(
+      requestWithHeaders("{}", { "Content-Length": String(10 * 1024 * 1024 + 1) }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("没有 Content-Length 的流式请求超过 10MB 时返回 413", async () => {
+    const response = await importWorld(
+      requestWithHeaders("x".repeat(10 * 1024 * 1024 + 1), {}),
+    );
+
+    expect(response.status).toBe(413);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("限制集合、字符串以及 unknown JSON 字段的大小和深度", async () => {
+    const tooMany = versionTwoArchive();
+    (tooMany.world.timelines[0].entities[0] as { aliases: string[] }).aliases =
+      Array.from({ length: 1001 }, (_, index) => `alias-${index}`);
+    const longString = versionTwoArchive();
+    longString.world.name = "界".repeat(1025);
+    const deepJson = versionTwoArchive();
+    let nested: Record<string, unknown> = {};
+    (deepJson.world as { draftDeck: unknown }).draftDeck = nested;
+    for (let depth = 0; depth < 33; depth += 1) {
+      nested.next = {};
+      nested = nested.next as Record<string, unknown>;
+    }
+    const largeJson = versionTwoArchive();
+    (largeJson.world.timelines[0].chapters[0].messages[0] as { meta: unknown }).meta = {
+      text: "x".repeat(1024 * 1024 + 1),
+    };
+
+    for (const archive of [tooMany, longString, deepJson, largeJson]) {
+      const response = await importWorld(request(archive));
+      expect(response.status).toBe(400);
+    }
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("拒绝空的可选 ID", async () => {
+    const archive = versionTwoArchive();
+    archive.world.timelines[0].entities[2].raceId = "";
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["时间线", (archive: ReturnType<typeof versionTwoArchive>) => {
+      archive.world.timelines[0].worldId = "another-world";
+    }],
+    ["世界书", (archive: ReturnType<typeof versionTwoArchive>) => {
+      (archive.world as { lorebookEntries: Array<Record<string, unknown>> }).lorebookEntries.push({
+        id: "lore-old",
+        worldId: "another-world",
+        keys: [],
+        content: "异界条目",
+        enabled: true,
+        source: "imported",
+      });
+    }],
+  ])("拒绝%s声明跨世界归属", async (_label, mutate) => {
+    const archive = versionTwoArchive();
+    mutate(archive);
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["章节", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].chapters[0].timelineId = "timeline-other"; }],
+    ["消息", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].chapters[0].messages[0].chapterId = "chapter-other"; }],
+    ["实体声明", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].entities[0].timelineId = "timeline-other"; }],
+    ["人物种族", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].entities[2].raceId = "race-other"; }],
+    ["神明声明", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].gods[0].timelineId = "timeline-other"; }],
+    ["神明百科", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].gods[0].codexEntityId = "character-other"; }],
+    ["神明关系", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].gods[0].relations = { "god-other": { label: "敌对" } }; }],
+    ["能力声明", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].abilities[0].timelineId = "timeline-other"; }],
+    ["能力拥有者", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].abilities[1].entityId = "character-other"; }],
+    ["来源能力", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].abilities[1].sourceAbilityId = "race-ability-other"; }],
+    ["成员人物", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].memberships[0].characterId = "character-other"; }],
+    ["成员势力", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].memberships[0].factionId = "faction-other"; }],
+    ["事件能力", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].abilityEvents[0].abilityId = "character-ability-other"; }],
+    ["事件章节", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].abilityEvents[0].chapterId = "chapter-other"; }],
+    ["事件消息", (archive: ReturnType<typeof twoTimelineArchive>) => { archive.world.timelines[0].abilityEvents[0].messageId = "message-other"; }],
+  ])("拒绝跨时间线的%s引用", async (_label, mutate) => {
+    const archive = twoTimelineArchive();
+    mutate(archive);
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["无拥有者", (archive: ReturnType<typeof versionTwoArchive>) => {
+      archive.world.timelines[0].abilities[2].godId = null;
+    }],
+    ["双拥有者", (archive: ReturnType<typeof versionTwoArchive>) => {
+      archive.world.timelines[0].abilities[2].entityId = "character-old";
+    }],
+    ["实体拥有 divine", (archive: ReturnType<typeof versionTwoArchive>) => {
+      archive.world.timelines[0].abilities[2].godId = null;
+      archive.world.timelines[0].abilities[2].entityId = "character-old";
+    }],
+    ["personal 携带来源", (archive: ReturnType<typeof versionTwoArchive>) => {
+      const ability = archive.world.timelines[0].abilities[1];
+      ability.kind = "personal";
+    }],
+  ])("拒绝违反能力所有权不变量：%s", async (_label, mutate) => {
+    const archive = versionTwoArchive();
+    mutate(archive);
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("严格拒绝未知字段与不支持的版本", async () => {
