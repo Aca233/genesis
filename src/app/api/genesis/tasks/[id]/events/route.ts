@@ -33,6 +33,7 @@ export async function GET(
             where: { id, userId: "local" },
             select: {
               id: true,
+              mode: true,
               status: true,
               stage: true,
               completedKeys: true,

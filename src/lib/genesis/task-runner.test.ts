@@ -4,6 +4,7 @@ import { claimGenesisTask, renewGenesisLease, toGenesisTaskDto } from "./task-ru
 function task(overrides: Record<string, unknown> = {}) {
   return {
     id: "task-1",
+    mode: "pantheon",
     status: "running",
     stage: "gods",
     completedKeys: ["worldName", "cosmology", "fusionAxiom"],
@@ -26,6 +27,7 @@ describe("genesis task runner", () => {
 
     expect(dto).toEqual({
       id: "task-1",
+      mode: "pantheon",
       status: "running",
       stage: "gods",
       completedKeys: ["worldName", "cosmology", "fusionAxiom"],
@@ -36,6 +38,11 @@ describe("genesis task runner", () => {
     });
     expect(dto).not.toHaveProperty("rawOutput");
     expect(dto).not.toHaveProperty("decree");
+  });
+
+  it("DTO 通过世界模式 schema 解析持久化值", () => {
+    expect(toGenesisTaskDto(task({ mode: "creator" }) as never)).toMatchObject({ mode: "creator" });
+    expect(() => toGenesisTaskDto(task({ mode: "absolute" }) as never)).toThrow();
   });
 
   it("长时间修补期间只由当前 lease token 续租并刷新心跳", async () => {

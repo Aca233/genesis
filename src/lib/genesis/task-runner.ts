@@ -12,6 +12,7 @@ import { materialConstraintsPrompt } from "@/lib/materials/prompt";
 import { deriveStreamingStage, furthestStage, mergeCompletedKeys } from "./stages";
 import type { GenesisStageId, GenesisTaskStatus } from "./stages";
 import type { GenesisTopLevelKey } from "./json-progress";
+import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
 
 const USER_ID = "local";
 const LEASE_MS = 60 * 1000;
@@ -19,6 +20,7 @@ const CHECKPOINT_MS = 1_000;
 
 export type GenesisTaskDto = {
   id: string;
+  mode: WorldMode;
   status: GenesisTaskStatus;
   stage: GenesisStageId;
   completedKeys: string[];
@@ -30,12 +32,13 @@ export type GenesisTaskDto = {
 
 type PublicTask = Pick<
   GenesisTask,
-  "id" | "status" | "stage" | "completedKeys" | "error" | "worldId" | "createdAt" | "updatedAt"
+  "id" | "mode" | "status" | "stage" | "completedKeys" | "error" | "worldId" | "createdAt" | "updatedAt"
 >;
 
 export function toGenesisTaskDto(task: PublicTask): GenesisTaskDto {
   return {
     id: task.id,
+    mode: WorldModeSchema.parse(task.mode),
     status: task.status as GenesisTaskStatus,
     stage: task.stage as GenesisStageId,
     completedKeys: task.completedKeys,

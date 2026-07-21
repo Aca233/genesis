@@ -16,6 +16,7 @@ model World {
   userId             String     @default("local") @map("user_id")
   name               String
   genesisInput       String     @map("genesis_input") // 原初神谕
+  mode               String     @default("pantheon")
   status             String     @default("draft") // draft | playing | concluded
   draftDeck          Json?      @map("draft_deck") // 创世草稿卡组（开局落地后清空）
   lockedPaths        String[]   @map("locked_paths") // 卡片编辑器 player_locked 字段路径
@@ -24,7 +25,11 @@ model World {
   cosmology          Json? // 宇宙论卡
   fusionAxiom        Json?      @map("fusion_axiom") // 融合公理卡（仅多IP融合）
   activeTimelineId   String?    @map("active_timeline_id")
+  operationKind      String?    @map("operation_kind")
+  operationToken     String?    @map("operation_token")
+  operationLeaseExpiresAt DateTime? @map("operation_lease_expires_at")
   timelines          Timeline[]
+  rewrites           RealityRewrite[]
   lorebookEntries    LorebookEntry[]
   genesisTasks       GenesisTask[]
   materialCards      MaterialCard[]
@@ -44,6 +49,7 @@ model GenesisTask {
   lorebook       Json?
   lorebookName   String?   @map("lorebook_name")
   materialSelection Json?  @map("material_selection")
+  mode           String    @default("pantheon")
   status         String    @default("queued") // queued | running | repairing | completed | failed
   stage          String    @default("oracle")
   completedKeys  String[]  @map("completed_keys")
@@ -68,6 +74,14 @@ model Timeline {
   world       World            @relation(fields: [worldId], references: [id], onDelete: Cascade)
   parentId    String?          @map("parent_id") // 自哪条时间线分叉（M3）
   forkChapter Int?             @map("fork_chapter")
+  branchName      String            @default("原初现实") @map("branch_name")
+  branchSummary   String?           @map("branch_summary")
+  realityState    Json?             @map("reality_state")
+  observerState   Json?             @map("observer_state")
+  forkRewriteId   String?           @unique @map("fork_rewrite_id")
+  forkRewrite     RealityRewrite?   @relation("TimelineForkRewrite", fields: [forkRewriteId], references: [id], onDelete: SetNull)
+  sourceRewrites  RealityRewrite[]  @relation("RewriteSource")
+  resultRewrite   RealityRewrite?   @relation("RewriteResult")
   chapters    Chapter[]
   gods        God[]
   entities    Entity[]
@@ -75,6 +89,7 @@ model Timeline {
   chronicles  ChronicleEntry[]
   omens       OmenQueue[]
   createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
 
   @@index([worldId])
   @@map("timelines")
@@ -182,6 +197,7 @@ model Entity {
   starred          Boolean            @default(false)
   isChosen         Boolean            @default(false) @map("is_chosen") // 神选者：永不降档/压缩
   isMajorCharacter Boolean            @default(false) @map("is_major_character")
+  isCreatorAvatar  Boolean            @default(false) @map("is_creator_avatar")
   raceId           String?            @map("race_id")
   race             Entity?            @relation("CharacterRace", fields: [raceId], references: [id], onDelete: SetNull)
   raceMembers      Entity[]           @relation("CharacterRace")
@@ -200,6 +216,33 @@ model Entity {
   @@index([timelineId, type])
   @@unique([timelineId, materialRef])
   @@map("entities")
+}
+
+model RealityRewrite {
+  id                 String    @id @default(cuid())
+  worldId            String    @map("world_id")
+  world              World     @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  sourceTimelineId   String    @map("source_timeline_id")
+  sourceTimeline     Timeline  @relation("RewriteSource", fields: [sourceTimelineId], references: [id], onDelete: Restrict)
+  resultTimelineId   String?   @unique @map("result_timeline_id")
+  resultTimeline     Timeline? @relation("RewriteResult", fields: [resultTimelineId], references: [id], onDelete: SetNull)
+  forkedTimeline     Timeline? @relation("TimelineForkRewrite")
+  sourceChapterId    String    @map("source_chapter_id")
+  decree             String    @db.Text
+  scope              String    @default("prospective")
+  status             String    @default("planning")
+  plan               Json?
+  summary            String?
+  idempotencyKey     String    @unique @map("idempotency_key")
+  leaseToken         String?   @map("lease_token")
+  leaseExpiresAt     DateTime? @map("lease_expires_at")
+  error              String?
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([worldId, createdAt])
+  @@index([status, leaseExpiresAt])
+  @@map("reality_rewrites")
 }
 
 model Ability {
