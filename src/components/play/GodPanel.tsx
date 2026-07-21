@@ -3,6 +3,7 @@
 import type { GodRow, ThemeCard } from "./types";
 import { rankName, relationName, relationTone } from "./lexicon";
 import { AbilityList } from "./AbilityList";
+import { SaveMaterialVersionButton } from "@/components/materials/SaveMaterialVersionButton";
 
 /**
  * 神格页签：玩家神卡 + 主神列表卡 + 次要神一句话列表。
@@ -22,6 +23,7 @@ function PlayerGodCard({ god, theme }: { god: GodRow; theme: ThemeCard | null })
         <span className="shrink-0 rounded border border-gilt/50 px-2 py-0.5 text-xs text-gilt">
           {rankName(theme, god.rank)}
         </span>
+        <SaveMaterialVersionButton sourceType="god" sourceId={god.id} compact />
       </header>
 
       <dl className="mt-3 grid gap-2 text-sm">
@@ -52,7 +54,7 @@ function PlayerGodCard({ god, theme }: { god: GodRow; theme: ThemeCard | null })
       </dl>
 
       <div className="mt-4 border-t border-gilt/25 pt-3">
-        <AbilityList abilities={god.abilities} kinds={["divine"]} />
+        <AbilityList abilities={god.abilities} kinds={["divine"]} allowMaterialSave />
       </div>
     </section>
   );
@@ -74,6 +76,7 @@ function MajorGodCard({ god, theme }: { god: GodRow; theme: ThemeCard | null }) 
             {relationName(rel?.label)}
           </span>
         </span>
+        <SaveMaterialVersionButton sourceType="god" sourceId={god.id} compact />
       </header>
 
       {god.domains.length > 0 && (
@@ -85,7 +88,7 @@ function MajorGodCard({ god, theme }: { god: GodRow; theme: ThemeCard | null }) 
       )}
 
       <div className="mt-3 border-t border-line pt-2">
-        <AbilityList abilities={god.abilities} kinds={["divine"]} />
+        <AbilityList abilities={god.abilities} kinds={["divine"]} allowMaterialSave />
       </div>
 
       {/* 议程区：揭示前为残卷 */}

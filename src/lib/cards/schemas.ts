@@ -203,6 +203,7 @@ export const RaceCardSchema = z.object({
 });
 
 export const PlaceCardSchema = z.object({
+  ref: StableRefSchema.describe("稳定引用"),
   name: z.string(),
   aliases: z.array(z.string()),
   kind: z.string().describe("大陆/城市/秘境/圣地"),
@@ -297,6 +298,7 @@ type DeckReferenceGraph = {
     abilities: Array<{ ref: string }>;
     racialOverrides: Array<{ ref: string }>;
   }>;
+  places: Array<{ ref: string }>;
 };
 
 function addUniqueRef(
@@ -350,6 +352,9 @@ function validateDeckReferenceUniqueness(
   });
   deck.factions.forEach((faction, index) =>
     addUniqueRef(ctx, cardRefs, faction.ref, ["factions", index, "ref"]),
+  );
+  deck.places.forEach((place, index) =>
+    addUniqueRef(ctx, cardRefs, place.ref, ["places", index, "ref"]),
   );
   deck.majorCharacters.forEach((character, characterIndex) => {
     addUniqueRef(ctx, cardRefs, character.ref, ["majorCharacters", characterIndex, "ref"]);
@@ -458,10 +463,21 @@ export function isLegacyWorldDeck(raw: unknown): boolean {
  * Parses a persisted draft strictly unless its missing fields positively identify
  * it as pre-ability legacy data.
  */
+function normalizeMissingPlaceRefs(raw: unknown): unknown {
+  if (!isLooseRecord(raw) || !Array.isArray(raw.places)) return raw;
+  return {
+    ...raw,
+    places: raw.places.map((rawPlace, index) => {
+      const place = asLooseRecord(rawPlace);
+      return hasOwn(place, "ref") ? place : { ...place, ref: `place-${index + 1}` };
+    }),
+  };
+}
+
 export function parsePersistedWorldDeck(raw: unknown): WorldDeck | LegacyWorldDeck {
   return isLegacyWorldDeck(raw)
     ? normalizeLegacyWorldDeck(raw)
-    : WorldDeckSchema.parse(raw);
+    : WorldDeckSchema.parse(normalizeMissingPlaceRefs(raw));
 }
 
 /**
@@ -513,6 +529,12 @@ export function normalizeLegacyWorldDeck(raw: unknown): LegacyWorldDeck {
         ...(hasOwn(race, "abilities") ? { abilities: normalizeAbilities(race.abilities, prefix) } : { abilities: [] }),
       };
     }),
+    places: Array.isArray(deck.places)
+      ? deck.places.map((rawPlace, index) => {
+        const place = asLooseRecord(rawPlace);
+        return hasOwn(place, "ref") ? place : { ...place, ref: `place-${index + 1}` };
+      })
+      : [],
     majorCharacters: majorCharacters.map((rawCharacter, index) => {
       const character = asLooseRecord(rawCharacter);
       const prefix = `major-character-${index + 1}`;

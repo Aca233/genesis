@@ -10,6 +10,8 @@ type WorldItem = {
   name: string;
   genesisInput: string;
   status: string; // draft | playing | concluded
+  materialArchiveStatus: string;
+  materialArchiveError: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -96,6 +98,16 @@ export default function ArchivesPage() {
   }
 
   /** 删除（二次确认后执行） */
+  async function retryArchive(id: string) {
+    setError(null);
+    try {
+      const res = await fetch(`/api/worlds/${id}/materials/archive`, { method: "POST" });
+      const json: { error?: string } = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "重试归档失败");
+      await load();
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+  }
+
   async function remove(id: string) {
     setDeletingId(id);
     setError(null);
@@ -196,6 +208,12 @@ export default function ArchivesPage() {
                   </time>
                 </div>
 
+                {w.materialArchiveStatus === "failed" && (
+                  <div className="mt-3 rounded border border-cinnabar/30 bg-cinnabar/5 p-2 text-xs text-cinnabar">
+                    万象藏库自动收录失败：{w.materialArchiveError ?? "未知错误"}
+                    <button type="button" onClick={() => void retryArchive(w.id)} className="ml-2 underline">重试收录</button>
+                  </div>
+                )}
                 <div className="mt-4 flex items-center gap-4 border-t border-line pt-3 text-sm">
                   <button
                     onClick={() => router.push(enterHref)}

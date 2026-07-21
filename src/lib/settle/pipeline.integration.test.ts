@@ -3,14 +3,21 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 const responses = vi.hoisted(() => ({
   extract: {} as Record<string, unknown>,
   extractHandler: undefined as undefined | ((user: string) => Record<string, unknown>),
+  modelDelayMs: 0,
 }));
 vi.mock("@/lib/llm/structured", () => ({
   completeStructured: vi.fn(async (_slot: string, request: { task: string; user: string }) => {
-    if (request.task === "extract") return responses.extractHandler?.(request.user) ?? responses.extract;
-    if (request.task === "chronicle") {
-      return { entries: [{ yearLabel: "元年", text: "阿岚习得踏岩步。", entityNames: ["阿岚"], godNames: [] }], epilogue: "传承已续。", chapterTitle: "石阶传承" };
-    }
-    throw new Error(`unexpected ${request.task}`);
+    if (responses.modelDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, responses.modelDelayMs));
+    if (request.task !== "settlement") throw new Error(`unexpected ${request.task}`);
+    return {
+      pantheonTurns: [],
+      extraction: responses.extractHandler?.(request.user) ?? responses.extract,
+      chronicle: {
+        entries: [{ yearLabel: "元年", text: "阿岚习得踏岩步。", entityNames: ["阿岚"], godNames: [] }],
+        epilogue: "传承已续。",
+        chapterTitle: "石阶传承",
+      },
+    };
   }),
 }));
 
@@ -59,17 +66,15 @@ describe("章末 pipeline 习得族群技艺", () => {
 
 afterAll(async () => prisma.$disconnect());
 
-it("整体 extraction 基础设施失败时停留 extract checkpoint 且不运行 chronicle", async () => {
+it("单次模型请求失败时释放占用且不运行后续阶段", async () => {
   const data = await fixture();
   const { completeStructured } = await import("@/lib/llm/structured");
   vi.mocked(completeStructured).mockImplementationOnce(async () => { throw new Error("extract unavailable"); });
   try {
     await expect(settle(data.chapter.id)).rejects.toThrow("extract unavailable");
     const chapter = await prisma.chapter.findUnique({ where: { id: data.chapter.id } });
-    expect(chapter?.settleState).toBe("settling:extract");
-    expect(vi.mocked(completeStructured)).not.toHaveBeenCalledWith(
-      expect.anything(), expect.objectContaining({ task: "chronicle" }),
-    );
+    expect(chapter?.settleState).toBe("open");
+    expect(vi.mocked(completeStructured)).toHaveBeenCalledTimes(1);
   } finally {
     await prisma.world.delete({ where: { id: data.world.id } });
   }
@@ -88,11 +93,13 @@ it("多窗口会抽取早期消息与超长消息前缀中的能力变化", asyn
   await prisma.message.createMany({ data: Array.from({ length: 45 }, (_, offset) => ({ chapterId: data.chapter.id, index: 21 + offset, role: "narrator", content: `中段行旅记录${offset}。`, scale: "scene" })) });
   const long = await prisma.message.create({ data: { chapterId: data.chapter.id, index: 80, role: "narrator", content: "阿岚反复演练听石诀，听石诀变得更加纯熟。" + "山风掠过岩壁。".repeat(1200), scale: "years" } });
   const empty = { newEntities: [], entityUpdates: [], godUpdates: [], revealSections: [], abilityChanges: [] };
-  responses.extractHandler = (user) => {
-    if (user.includes("阿岚苦修凿阵术")) return { ...empty, abilityChanges: [{ abilityId: earlyAbility.id, ownerName: "阿岚", type: "improved", patch: { mastery: "adept" }, evidenceMessageIndex: early.index, evidence: "阿岚苦修凿阵术，终于将凿阵术磨炼得更加纯熟" }] };
-    if (user.includes("阿岚反复演练听石诀")) return { ...empty, abilityChanges: [{ abilityId: prefixAbility.id, ownerName: "阿岚", type: "improved", patch: { mastery: "adept" }, evidenceMessageIndex: long.index, evidence: "阿岚反复演练听石诀，听石诀变得更加纯熟" }] };
-    return empty;
-  };
+  responses.extractHandler = (user) => ({
+    ...empty,
+    abilityChanges: [
+      ...(user.includes("阿岚苦修凿阵术") ? [{ abilityId: earlyAbility.id, ownerName: "阿岚", type: "improved", patch: { mastery: "adept" }, evidenceMessageIndex: early.index, evidence: "阿岚苦修凿阵术，终于将凿阵术磨炼得更加纯熟" }] : []),
+      ...(user.includes("阿岚反复演练听石诀") ? [{ abilityId: prefixAbility.id, ownerName: "阿岚", type: "improved", patch: { mastery: "adept" }, evidenceMessageIndex: long.index, evidence: "阿岚反复演练听石诀，听石诀变得更加纯熟" }] : []),
+    ],
+  });
   try {
     await settle(data.chapter.id);
     const [earlyAfter, prefixAfter, events] = await Promise.all([
@@ -181,20 +188,15 @@ it("多窗口实体更新会累积去重 aliases，标量 section 冲突按窗�
       scale: "scene",
     })),
   });
-  let extractionCall = 0;
-  responses.extractHandler = () => {
-    extractionCall += 1;
-    const first = extractionCall === 1;
-    return {
-      newEntities: [], godUpdates: [], revealSections: [], abilityChanges: [],
-      entityUpdates: [{
-        name: "阿岚",
-        sectionDeltas: [{ key: "overview", title: "近况", text: first ? "第一窗口" : "第二窗口" }],
-        newAliases: first ? ["石行者", "共同别名"] : ["断崖客", "共同别名"],
-        scenePresent: true,
-      }],
-    };
-  };
+  responses.extractHandler = () => ({
+    newEntities: [], godUpdates: [], revealSections: [], abilityChanges: [],
+    entityUpdates: [{
+      name: "阿岚",
+      sectionDeltas: [{ key: "overview", title: "近况", text: "第二窗口" }],
+      newAliases: ["石行者", "断崖客", "共同别名"],
+      scenePresent: true,
+    }],
+  });
   try {
     await settle(data.chapter.id);
     const [entity, section] = await Promise.all([
@@ -329,6 +331,55 @@ it("同章新人物的非法能力逐项拒绝，其他实体、能力与状态�
     }));
   } finally {
     consoleError.mockRestore();
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it("即使有多位主要神，一次结束章节也只发起一个结构化模型调用", async () => {
+  const data = await fixture();
+  await prisma.god.createMany({ data: [
+    { timelineId: data.timeline.id, name: "山岳神", aliases: [], tier: "major", rank: "ascended", domains: ["山岳"] },
+    { timelineId: data.timeline.id, name: "长风神", aliases: [], tier: "major", rank: "nascent", domains: ["长风"] },
+  ] });
+  const { completeStructured } = await import("@/lib/llm/structured");
+  vi.mocked(completeStructured).mockClear();
+  responses.extractHandler = undefined;
+  try {
+    await settle(data.chapter.id);
+    expect(vi.mocked(completeStructured)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(completeStructured)).toHaveBeenCalledWith(
+      "backstage",
+      expect.objectContaining({
+        task: "settlement",
+        maxAttempts: 1,
+        transportMaxAttempts: 1,
+        allowTransportFallback: false,
+      }),
+    );
+    expect(await prisma.chronicleEntry.count({
+      where: { timelineId: data.timeline.id, chapterIndex: 1, source: "pantheon" },
+    })).toBe(2);
+  } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+
+it("同一章节并发结束时全局只发起一次模型请求", async () => {
+  const data = await fixture();
+  const { completeStructured } = await import("@/lib/llm/structured");
+  vi.mocked(completeStructured).mockClear();
+  responses.modelDelayMs = 150;
+  responses.extract = {
+    newEntities: [], entityUpdates: [], godUpdates: [], revealSections: [],
+    majorCharacterPromotions: [], abilityChanges: [],
+  };
+  try {
+    await Promise.all([settle(data.chapter.id), settle(data.chapter.id)]);
+    expect(vi.mocked(completeStructured)).toHaveBeenCalledTimes(1);
+    expect((await prisma.chapter.findUnique({ where: { id: data.chapter.id } }))?.settleState).toBe("settled");
+  } finally {
+    responses.modelDelayMs = 0;
     await prisma.world.delete({ where: { id: data.world.id } });
   }
 });

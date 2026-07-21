@@ -27,6 +27,7 @@ type AbilityCreateData = {
   rumorText: string | null;
   bloodlineJustification: string | null;
   lockedFields: string[];
+  materialRef: string | null;
 };
 
 export interface MaterializeDeckAbilitiesTx extends AbilityValidationTx {
@@ -85,6 +86,7 @@ function abilityData(
     rumorText: ability.rumorText,
     bloodlineJustification,
     lockedFields: ability.lockedFields,
+    materialRef: ability.ref,
   };
 }
 
@@ -171,7 +173,7 @@ export async function materializeDeckAbilities(
       }
       await createValidatedAbility(
         tx,
-        abilityData(timelineId, source, { entityId, godId: null, sourceAbilityId }),
+        { ...abilityData(timelineId, source, { entityId, godId: null, sourceAbilityId }), materialRef: null },
       );
     }
 

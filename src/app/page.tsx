@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/components/theme/useTheme";
+import { MaterialPicker } from "@/components/materials/MaterialPicker";
+import type { MaterialSelectionItem } from "@/lib/materials/types";
 
 /** 首屏：输入神谕 → 创世 → 跳转卡片编辑器（/genesis/[id]） */
 export default function Home() {
@@ -14,6 +16,8 @@ export default function Home() {
   const [decree, setDecree] = useState("");
   const [lorebook, setLorebook] = useState<{ name: string; data: unknown } | null>(null);
   const [creating, setCreating] = useState(false);
+  const [materialSelections, setMaterialSelections] = useState<MaterialSelectionItem[]>([]);
+  const [materialPickerOpen, setMaterialPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   /** 携带典籍：读取 SillyTavern worldbook JSON */
@@ -31,7 +35,7 @@ export default function Home() {
     }
   }
 
-  /** 创世：POST /api/worlds → 跳转卡片编辑器 */
+  /** 创世：持久化任务建立后立刻跳转到可恢复的进度页 */
   async function create() {
     if (creating) return;
     const text = decree.trim();
@@ -42,22 +46,23 @@ export default function Home() {
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch("/api/worlds", {
+      const res = await fetch("/api/genesis/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           decree: text,
-          ...(lorebook ? { lorebook: lorebook.data } : {}),
+          ...(lorebook ? { lorebook: lorebook.data, lorebookName: lorebook.name } : {}),
+          materialSelections,
         }),
       });
-      const json: { worldId?: string; error?: string } = await res.json();
-      if (!res.ok || !json.worldId) {
+      const json: { taskId?: string; error?: string } = await res.json();
+      if (!res.ok || !json.taskId) {
         setError(json.error ?? "创世失败，虚空未曾回应。请稍后再试。");
         setCreating(false);
         return;
       }
       // 成功：保持锁定态直到页面跳转
-      router.push(`/genesis/${json.worldId}`);
+      router.push(`/genesis/progress/${json.taskId}`);
     } catch {
       setError("创世失败：无法抵达彼岸（网络错误）。");
       setCreating(false);
@@ -121,6 +126,10 @@ export default function Home() {
           )}
         </div>
 
+        <button type="button" onClick={() => setMaterialPickerOpen(true)} disabled={creating} className="mt-3 rounded border border-line px-3 py-1.5 text-sm text-gilt hover:border-gilt/50">
+          ✦ 引用创世素材（已选 {materialSelections.length} 项）
+        </button>
+
         {error && <p className="mt-2 text-sm text-cinnabar">{error}</p>}
 
         <div className="mt-3 flex items-center justify-between">
@@ -140,10 +149,15 @@ export default function Home() {
         </div>
       </section>
 
+      {materialPickerOpen && <MaterialPicker value={materialSelections} onChange={setMaterialSelections} onClose={() => setMaterialPickerOpen(false)} />}
+
       <footer className="flex flex-col items-center gap-3 text-xs text-ink-faint">
         <nav className="flex gap-8">
           <Link href="/archives" className="transition hover:text-gilt">
             📜 往昔诸界
+          </Link>
+          <Link href="/materials" className="transition hover:text-gilt">
+            ✦ 万象藏库
           </Link>
           <Link href="/settings" className="transition hover:text-gilt">
             ⚱ 香炉

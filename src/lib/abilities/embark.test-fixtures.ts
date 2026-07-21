@@ -124,7 +124,7 @@ export function completeDeck(): WorldDeck {
       ],
     }],
     majorCharacters: characters,
-    places: [{ name: "晨钟城", aliases: [], kind: "城市", overview: "初启之城", allegiance: "晨钟议会" }],
+    places: [{ ref: "place-city", name: "晨钟城", aliases: [], kind: "城市", overview: "初启之城", allegiance: "晨钟议会" }],
     epochConflict: {
       epochName: "裂光纪",
       yearLabel: "裂光元年",

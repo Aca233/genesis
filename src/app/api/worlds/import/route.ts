@@ -114,6 +114,7 @@ const GodSchema = z
     relations: z.record(IdSchema, BoundedJsonSchema).nullish(),
     faithScope: TextSchema.nullish(),
     codexEntityId: NullableIdSchema,
+    materialRef: ShortStringSchema.nullish(),
     createdAt: z.coerce.date().optional(),
     updatedAt: z.coerce.date().optional(),
   })
@@ -148,6 +149,7 @@ const EntitySchema = z
     scenePresence: z.boolean().default(false),
     summary: TextSchema,
     lockedPaths: StringListSchema.default([]),
+    materialRef: ShortStringSchema.nullish(),
     sections: z.array(EntitySectionSchema).max(MAX_COLLECTION_ITEMS).default([]),
     createdAt: z.coerce.date().optional(),
     updatedAt: z.coerce.date().optional(),
@@ -174,6 +176,7 @@ const AbilitySchema = z
     bloodlineJustification: TextSchema.nullish(),
     lockedFields: StringListSchema.default([]),
     version: z.number().int().positive().default(1),
+    materialRef: ShortStringSchema.nullish(),
     createdAt: z.coerce.date().optional(),
     updatedAt: z.coerce.date().optional(),
   })
@@ -276,6 +279,8 @@ const WorldSchema = z
     cosmology: BoundedJsonSchema.optional(),
     fusionAxiom: BoundedJsonSchema.optional(),
     activeTimelineId: NullableIdSchema,
+    materialArchiveStatus: ShortStringSchema.optional(),
+    materialArchiveError: TextSchema.nullish(),
     timelines: z.array(TimelineSchema).max(100).default([]),
     lorebookEntries: z.array(LorebookEntrySchema).max(MAX_COLLECTION_ITEMS).default([]),
     createdAt: z.coerce.date().optional(),
@@ -741,6 +746,7 @@ export async function POST(request: Request) {
           scenePresence: entity.scenePresence,
           summary: entity.summary,
           lockedPaths: entity.lockedPaths,
+          materialRef: entity.materialRef ?? null,
           createdAt: entity.createdAt,
         });
         for (const section of entity.sections) {
@@ -781,6 +787,7 @@ export async function POST(request: Request) {
           agendaRevealed: god.agendaRevealed,
           relations,
           faithScope: god.faithScope ?? null,
+          materialRef: god.materialRef ?? null,
           codexEntityId: god.codexEntityId != null
             ? remapRequired(entityMap, god.codexEntityId, "神明百科实体")
             : null,
@@ -814,6 +821,7 @@ export async function POST(request: Request) {
           bloodlineJustification: ability.bloodlineJustification ?? null,
           lockedFields: ability.lockedFields,
           version: ability.version,
+          materialRef: ability.materialRef ?? null,
           createdAt: ability.createdAt,
         });
       }
@@ -897,6 +905,8 @@ export async function POST(request: Request) {
           styleCard: json(w.styleCard),
           cosmology: json(w.cosmology),
           fusionAxiom: json(w.fusionAxiom),
+          materialArchiveStatus: w.materialArchiveStatus ?? "pending",
+          materialArchiveError: w.materialArchiveError ?? null,
           activeTimelineId: w.activeTimelineId != null
             ? remapRequired(timelineMap, w.activeTimelineId, "当前时间线")
             : null,

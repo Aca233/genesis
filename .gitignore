@@ -43,3 +43,7 @@ next-env.d.ts
 
 # playwright test artifacts
 .playwright-mcp/
+
+# local agent/runtime state
+/.claude/settings.local.json
+/dev-server.log

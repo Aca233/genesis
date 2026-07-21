@@ -9,6 +9,7 @@ import type {
 } from "./types";
 import { Emblem } from "./Emblem";
 import { AbilityList } from "./AbilityList";
+import { SaveMaterialVersionButton } from "@/components/materials/SaveMaterialVersionButton";
 import { entityTypeName, ENTITY_TYPE_ORDER, sectionName } from "./lexicon";
 import {
   completeCodexDetailLoad,
@@ -273,6 +274,7 @@ function EntityDetailView({
               <span>又称：{detail.aliases.join("、")}</span>
             )}
           </p>
+          <div className="mt-2"><SaveMaterialVersionButton sourceType="entity" sourceId={detail.id} compact /></div>
         </div>
       </header>
 
@@ -294,6 +296,7 @@ function EntityDetailView({
             abilities={detail.abilities}
             historyByAbilityId={abilityHistory}
             kinds={["racial_innate", "racial_tradition"]}
+            allowMaterialSave
           />
         </section>
       )}
@@ -343,6 +346,7 @@ function EntityDetailView({
             abilities={detail.abilities}
             historyByAbilityId={abilityHistory}
             kinds={["racial_innate", "racial_tradition", "personal"]}
+            allowMaterialSave
             labels={{
               racial_innate: "继承来源",
               racial_tradition: "已掌握技艺",

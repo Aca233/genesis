@@ -126,7 +126,7 @@ function completeDeck() {
     ],
     majorCharacters: characters,
     places: [
-      { name: "晨钟城", aliases: [], kind: "城市", overview: "初启之城", allegiance: "晨钟议会" },
+      { ref: "place-city", name: "晨钟城", aliases: [], kind: "城市", overview: "初启之城", allegiance: "晨钟议会" },
     ],
     epochConflict: {
       epochName: "裂光纪",
@@ -294,4 +294,11 @@ describe("WorldDeck 能力与主要人物引用", () => {
     expect(() => parsePersistedWorldDeck(invalidDeck)).toThrow();
   });
 
+});
+
+it("为当前能力版旧草稿中缺少 ref 的地点补确定性引用", () => {
+  const raw = completeDeck();
+  delete (raw.places[0] as Partial<(typeof raw.places)[number]>).ref;
+  const parsed = parsePersistedWorldDeck(raw);
+  expect(parsed.places[0]).toMatchObject({ ref: "place-1", name: "晨钟城" });
 });

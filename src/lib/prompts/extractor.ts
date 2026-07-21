@@ -72,7 +72,7 @@ export type ExtractorChapterMessage = {
   scale: string;
 };
 
-export const ExtractionSchema = z.object({
+export const ExtractionBaseSchema = z.object({
   newEntities: z
     .array(
       z.object({
@@ -168,6 +168,14 @@ export const ExtractionSchema = z.object({
     .array(z.unknown())
     .max(50)
     .describe("逐项校验的能力变化候选；没有变化时为空数组"),
+});
+
+/** Lenient outer contract retained for windowed extraction; candidates are validated one by one. */
+export const ExtractionSchema = ExtractionBaseSchema;
+
+/** Strict contract used when the whole settlement must succeed in one model response. */
+export const StrictExtractionSchema = ExtractionBaseSchema.extend({
+  abilityChanges: z.array(AbilityExtractionChangeSchema).max(50),
 });
 
 export type Extraction = z.infer<typeof ExtractionSchema>;

@@ -5,6 +5,7 @@ import type {
   AbilityState,
   AbilityView,
 } from "./types";
+import { SaveMaterialVersionButton } from "@/components/materials/SaveMaterialVersionButton";
 
 export type { AbilityView } from "./types";
 
@@ -148,9 +149,11 @@ function AbilityHistory({ history }: { history: AbilityEventView[] }) {
 function AbilityCard({
   ability,
   history,
+  allowMaterialSave,
 }: {
   ability: AbilityView;
   history: AbilityEventView[];
+  allowMaterialSave: boolean;
 }) {
   const source = sourceLabel(ability);
   return (
@@ -160,6 +163,7 @@ function AbilityCard({
         {ability.visibility === "rumored" && (
           <span className="fog-text text-[10px] tracking-widest">传闻</span>
         )}
+        {allowMaterialSave && <SaveMaterialVersionButton sourceType="ability" sourceId={ability.id} compact />}
       </header>
       {source && <p className="mt-1 text-xs text-gilt/75">来源：{source}</p>}
       {ability.visibility === "known" && ability.bloodlineJustification && (
@@ -184,12 +188,14 @@ export function AbilityList({
   kinds,
   labels,
   emptyText = "尚无已载能力",
+  allowMaterialSave = false,
 }: {
   abilities: readonly AbilityView[];
   historyByAbilityId?: Readonly<Record<string, AbilityEventView[]>>;
   kinds?: readonly AbilityKind[];
   labels?: Partial<Record<AbilityKind, string>>;
   emptyText?: string;
+  allowMaterialSave?: boolean;
 }) {
   const groups = groupAbilities(abilities, kinds, labels);
   if (groups.length === 0) return <p className="fog-text text-sm">{emptyText}</p>;
@@ -205,6 +211,7 @@ export function AbilityList({
                 key={ability.id}
                 ability={ability}
                 history={historyByAbilityId[ability.id] ?? []}
+                allowMaterialSave={allowMaterialSave}
               />
             ))}
           </ul>

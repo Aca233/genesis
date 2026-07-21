@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { parsePersistedWorldDeck } from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
+import { archiveWorldMaterials } from "@/lib/materials/archive-world";
 import {
   EmbarkConflictError,
   EmbarkDraftError,
@@ -36,6 +37,11 @@ export async function POST(
       validateDeckReferences(deck);
       return deck;
     });
+    try {
+      await archiveWorldMaterials(id);
+    } catch (archiveError) {
+      console.error("Failed to archive initial materials", archiveError);
+    }
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof EmbarkConflictError) {

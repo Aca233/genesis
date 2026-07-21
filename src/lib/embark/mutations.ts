@@ -71,6 +71,7 @@ export async function materializeEmbarkDeck(
         situation: deck.playerGod.situation,
       } as Prisma.InputJsonValue,
       faithScope: deck.playerGod.faithBase,
+      materialRef: deck.playerGod.ref,
     },
   });
   ids.godByRef.set(deck.playerGod.ref, playerGod.id);
@@ -94,6 +95,7 @@ export async function materializeEmbarkDeck(
           },
         } as Prisma.InputJsonValue,
         faithScope: god.faithScope,
+        materialRef: god.ref,
       },
     });
     ids.godByRef.set(god.ref, created.id);
@@ -120,6 +122,7 @@ export async function materializeEmbarkDeck(
         aliases: race.aliases,
         emblemSeed: emblemSeed(race.name),
         summary: race.traits.slice(0, 120),
+        materialRef: race.ref,
         sections: { create: raceSections(race) },
       },
     });
@@ -135,6 +138,7 @@ export async function materializeEmbarkDeck(
         aliases: faction.aliases,
         emblemSeed: emblemSeed(faction.name),
         summary: faction.overview.slice(0, 120),
+        materialRef: faction.ref,
         sections: {
           create: factionSections(faction, deck.majorCharacters) as {
             key: string;
@@ -155,6 +159,7 @@ export async function materializeEmbarkDeck(
         aliases: place.aliases,
         emblemSeed: emblemSeed(place.name),
         summary: place.overview.slice(0, 120),
+        materialRef: place.ref,
         sections: { create: placeSections(place) },
       },
     });
@@ -176,6 +181,7 @@ export async function materializeEmbarkDeck(
         isMajorCharacter: true,
         raceId,
         summary: character.situation.slice(0, 120),
+        materialRef: character.ref,
         sections: { create: characterSections(character) },
       },
     });
