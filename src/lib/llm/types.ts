@@ -16,17 +16,42 @@ export type ModelSlot = z.infer<typeof ModelSlotSchema>;
 
 export type SlotName = "narrative" | "backstage";
 
+export type PromptCacheScope = "global" | "world" | "dynamic";
+
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Internal-only cache stability marker; adapters must strip it from provider payloads. */
+  cacheScope?: PromptCacheScope;
+};
+
+export type PromptCacheRequest = {
+  /** Low-cardinality logical namespace. It is hashed before being sent upstream. */
+  namespace: string;
+};
+
+export type NormalizedUsage = {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+};
+
+export type AdapterCompletionResult = {
+  text: string;
+  usage: NormalizedUsage;
+  cacheRequested: boolean;
+  cacheFallback: boolean;
 };
 
 export type LlmTask =
   | "genesis"
+  | "settlement"
   | "narrative"
   | "pantheon"
   | "extract"
   | "chronicle"
+  | "reroll"
   | "test";
 
 export type CompletionRequest = {
@@ -36,8 +61,16 @@ export type CompletionRequest = {
   maxTokens?: number;
   /** 打日志用 */
   task: LlmTask;
+  /** Enables provider prompt-cache hints when the stable prefix is large enough. */
+  cache?: PromptCacheRequest;
 };
 
 export type StreamChunk =
   | { type: "text"; text: string }
+  | {
+      type: "usage";
+      usage: NormalizedUsage;
+      cacheRequested: boolean;
+      cacheFallback: boolean;
+    }
   | { type: "done" };
