@@ -5,7 +5,6 @@ import {
   applyAbilityExtractionInTransaction,
   type AbilityExtractionTx,
 } from "@/lib/abilities/extraction";
-import { AbilityValidationError } from "@/lib/abilities/validator";
 import { completeStructured } from "@/lib/llm/structured";
 import {
   EXTRACTION_MAX_ABILITIES,
@@ -576,8 +575,6 @@ async function runExtraction(
       byName.set(entity.name, entity);
       for (const alias of entity.aliases) byName.set(alias, entity);
     }
-    const createdOwnerIds = new Set<string>();
-
     // 种族必须先建卡，以便同批新人物按正名或别名解析主种族。
     const orderedNewEntities = [
       ...extraction.newEntities.filter((entity) => entity.type === "race"),
@@ -586,13 +583,18 @@ async function runExtraction(
     for (const ne of orderedNewEntities) {
       if (byName.has(ne.name)) continue;
       if (ne.type !== "character" && ne.raceName !== undefined) {
-        throw new AbilityValidationError("只有新人物可以指定 raceName");
+        console.error("章末新实体被拒绝", { name: ne.name, reason: "只有新人物可以指定 raceName" });
+        continue;
       }
       const race = ne.type === "character" && ne.raceName !== undefined
         ? byName.get(ne.raceName)
         : undefined;
       if (ne.type === "character" && ne.raceName !== undefined && race?.type !== "race") {
-        throw new AbilityValidationError(`新人物 ${ne.name} 的主种族 ${ne.raceName} 不存在`);
+        console.error("章末新实体被拒绝", {
+          name: ne.name,
+          reason: `新人物 ${ne.name} 的主种族 ${ne.raceName} 不存在`,
+        });
+        continue;
       }
       const validKeys = new Set(SECTION_TEMPLATES[ne.type] ?? []);
       const created = await tx.entity.create({
@@ -623,7 +625,6 @@ async function runExtraction(
       });
       byName.set(created.name, created);
       for (const alias of created.aliases) byName.set(alias, created);
-      if (created.type === "race" || created.type === "character") createdOwnerIds.add(created.id);
     }
 
     // 既有实体增量
@@ -694,7 +695,6 @@ async function runExtraction(
       });
       godByName.set(created.name, created);
       for (const alias of created.aliases) godByName.set(alias, created);
-      createdOwnerIds.add(created.id);
     }
     for (const gu of extraction.godUpdates) {
       const target = godByName.get(gu.name);
@@ -777,18 +777,6 @@ async function runExtraction(
         changes: extraction.abilityChanges,
       },
     );
-    const rejectedForNewOwner = result.rejected.find((rejected) => {
-      const change = rejected.change;
-      if (typeof change !== "object" || change === null || !("ownerName" in change)) return false;
-      const ownerName = String(change.ownerName);
-      const owner = owners.find((candidate) =>
-        candidate.name === ownerName || candidate.aliases.includes(ownerName),
-      );
-      return owner !== undefined && createdOwnerIds.has(owner.id);
-    });
-    if (rejectedForNewOwner !== undefined) {
-      throw new AbilityValidationError(`新实体能力无效：${rejectedForNewOwner.reason}`);
-    }
     for (const rejected of result.rejected) {
       console.error("章末能力变化被拒绝", {
         chapterId,
