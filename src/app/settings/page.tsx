@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { PromptCacheStats } from "@/components/settings/PromptCacheStats";
 
 type SlotForm = {
   provider: "openai-compatible" | "anthropic" | "gemini";
@@ -390,6 +391,8 @@ export default function SettingsPage() {
             + 配置幕后模型（可选：诸神回合与结算用便宜模型，省钱提速）
           </button>
         )}
+
+        <PromptCacheStats />
 
         <div className="flex items-center gap-4">
           <button
