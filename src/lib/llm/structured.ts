@@ -44,12 +44,23 @@ export async function completeStructured<T>(
     schema: z.ZodType<T>;
     temperature?: number;
     maxTokens?: number;
+    /** Total semantic attempts. Set to 1 when the caller requires exactly one model response. */
+    maxAttempts?: number;
+    /** Total transport requests made by each semantic attempt. */
+    transportMaxAttempts?: number;
+    /** Allow one non-streaming fallback request after streaming fails. */
+    allowTransportFallback?: boolean;
+    /** Provider prompt-cache namespace for stable global/world messages. */
+    cache?: { namespace: string };
+    /** Stable world-specific context, placed after global system and before dynamic input. */
+    stableContext?: string[];
   },
 ): Promise<T> {
+  const maxAttempts = Math.max(1, opts.maxAttempts ?? STRUCTURED_RETRIES + 1);
   let lastError = "";
   let lastOutput = "";
 
-  for (let attempt = 0; attempt <= STRUCTURED_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const retryNote =
       attempt === 0
         ? ""
@@ -59,10 +70,19 @@ export async function completeStructured<T>(
       task: opts.task,
       temperature: opts.temperature,
       maxTokens: opts.maxTokens,
+      cache: opts.cache,
       messages: [
-        { role: "system", content: opts.system },
-        { role: "user", content: opts.user + retryNote },
+        { role: "system", content: opts.system, cacheScope: "global" },
+        ...(opts.stableContext ?? []).map((content) => ({
+          role: "system" as const,
+          content,
+          cacheScope: "world" as const,
+        })),
+        { role: "user", content: opts.user + retryNote, cacheScope: "dynamic" },
       ],
+    }, {
+      maxAttempts: opts.transportMaxAttempts,
+      allowFallback: opts.allowTransportFallback,
     });
 
     try {
@@ -77,5 +97,5 @@ export async function completeStructured<T>(
     }
   }
 
-  throw new Error(`结构化输出在 ${STRUCTURED_RETRIES + 1} 次尝试后仍未通过校验：${lastError.slice(0, 500)}`);
+  throw new Error(`结构化输出在 ${maxAttempts} 次尝试后仍未通过校验：${lastError.slice(0, 500)}`);
 }

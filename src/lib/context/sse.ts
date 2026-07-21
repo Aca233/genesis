@@ -8,6 +8,7 @@ const TAIL_WINDOW = 10;
 
 export function narratorSSE(opts: {
   messages: ChatMessage[];
+  cacheNamespace?: string;
   signal?: AbortSignal;
   onDone: (result: { prose: string; meta: NarratorMeta; signal: AbortSignal }) => Promise<{ messageId: string }>;
   onFailure?: (error: Error) => Promise<void>;
@@ -64,7 +65,7 @@ export function narratorSSE(opts: {
       try {
         for await (const chunk of llmStream(
           "narrative",
-          { task: "narrative", messages: opts.messages },
+          { task: "narrative", messages: opts.messages, ...(opts.cacheNamespace ? { cache: { namespace: opts.cacheNamespace } } : {}) },
           { signal: upstream.signal },
         )) {
           if (closed || upstream.signal.aborted) return;

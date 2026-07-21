@@ -133,12 +133,12 @@ function outputContract(): string {
 Nothing may follow ${META_END}. Never mention or explain this block inside the prose.`;
 }
 
-/**
- * 组装 Narrator 系统模板：核心规则 + 风格卡 + 主题卡 + 宇宙论 + 融合公理 +
- * 玩家神卡 + 当前尺度规则 + 输出契约。
- */
-export function narratorSystem(opts: {
-  scale: Scale;
+/** World-independent rules and output contract. */
+export function narratorGlobalSystem(): string {
+  return [coreRules("the supplied world"), outputContract()].join("\n\n");
+}
+
+export type NarratorWorldOptions = {
   worldName: string;
   styleCard: unknown;
   themeCard: unknown;
@@ -151,55 +151,60 @@ export function narratorSystem(opts: {
     persona: unknown;
     faithScope: string | null;
   } | null;
-  /** 未消费征兆（诸神幕后行动的世间回声）——至多织入 1-2 条，绝不点破 */
+  gods?: unknown;
+};
+
+/** World-specific cards. This text remains stable across turns until world data changes. */
+export function narratorWorldSystem(opts: NarratorWorldOptions): string {
+  const blocks = [section("WORLD NAME", opts.worldName)];
+  blocks.push(section("STYLE CARD (follow strictly)", opts.styleCard));
+  blocks.push(section("THEME CARD (era naming / rank vocabulary / forms of address)", opts.themeCard));
+  blocks.push(section("COSMOLOGY", opts.cosmology));
+  if (opts.fusionAxiom) blocks.push(section("FUSION AXIOM (binding on any cross-IP rules question)", opts.fusionAxiom));
+  if (opts.playerGod) {
+    blocks.push(section("PLAYER GOD (the protagonist — never act or speak for them)", {
+      name: opts.playerGod.name,
+      rank: opts.playerGod.rank,
+      domains: opts.playerGod.domains,
+      persona: opts.playerGod.persona,
+      faithScope: opts.playerGod.faithScope,
+    }));
+  }
+  if (opts.gods) blocks.push(section("PANTHEON CARDS", opts.gods));
+  return blocks.join("\n\n");
+}
+
+/** Per-turn rules and hidden adjudication; never part of the reusable prefix. */
+export function narratorTurnSystem(opts: {
+  scale: Scale;
   omens?: string[];
-  /** 玩家查探命中的隐藏大事记（id: 文本），由模型裁决揭示程度 */
   hiddenEntries?: { id: string; text: string; godName: string }[];
 }): string {
-  const blocks: string[] = [coreRules(opts.worldName)];
-
-  blocks.push(section("STYLE CARD (follow strictly)", opts.styleCard));
-  blocks.push(
-    section("THEME CARD (era naming / rank vocabulary / forms of address)", opts.themeCard),
-  );
-  blocks.push(section("COSMOLOGY", opts.cosmology));
-  if (opts.fusionAxiom) {
-    blocks.push(
-      section("FUSION AXIOM (binding on any cross-IP rules question)", opts.fusionAxiom),
-    );
-  }
-  if (opts.playerGod) {
-    blocks.push(
-      section("PLAYER GOD (the protagonist — never act or speak for them)", {
-        name: opts.playerGod.name,
-        rank: opts.playerGod.rank,
-        domains: opts.playerGod.domains,
-        persona: opts.playerGod.persona,
-        faithScope: opts.playerGod.faithScope,
-      }),
-    );
-  }
-
-  blocks.push(`== CURRENT SCALE ==\n${SCALE_RULES[opts.scale]}`);
-
-  // ── 征兆队列（OMENS）：诸神幕后行动的世间回声 ──
+  const blocks = [`== CURRENT SCALE ==\n${SCALE_RULES[opts.scale]}`];
   if (opts.omens?.length) {
     blocks.push(`== PENDING OMENS (offstage divine actions' worldly echoes) ==
-Weave AT MOST 1-2 of these into your reply as passing, unexplained details — a dimmed votive fire, an odd tide, a priest's uneasy dream. NEVER flag them, NEVER explain them, NEVER attribute them to a god. They must read as ordinary texture of the world:
-${opts.omens.map((o, i) => `${i + 1}. ${o}`).join("\n")}`);
+Weave AT MOST 1-2 of these into your reply as passing, unexplained details. NEVER flag or explain them:
+${opts.omens.map((omen, index) => `${index + 1}. ${omen}`).join("\n")}`);
   }
-
-  // ── 查探裁决（INVESTIGATION）──
   if (opts.hiddenEntries?.length) {
     blocks.push(`== INVESTIGATION ADJUDICATION ==
-The player god is actively probing (divination / insight / interrogation). The following HIDDEN chronicle entries match their probe. Adjudicate by in-fiction plausibility of their method and power:
-- full reveal, partial glimpse, or a misleading fragment — your call, but something must come back.
-- List the ids of entries you revealed (fully or partially) in the META block's "revealed_event_ids".
-${opts.hiddenEntries.map((e) => `[${e.id}] (${e.godName}) ${e.text}`).join("\n")}`);
+Adjudicate the player's probe by in-fiction plausibility; list revealed ids in META.
+${opts.hiddenEntries.map((entry) => `[${entry.id}] (${entry.godName}) ${entry.text}`).join("\n")}`);
   }
-
-  blocks.push(outputContract());
   return blocks.join("\n\n");
+}
+
+/** Backward-compatible composition for callers outside the cache-aware builder. */
+export function narratorSystem(opts: NarratorWorldOptions & {
+  scale: Scale;
+  omens?: string[];
+  hiddenEntries?: { id: string; text: string; godName: string }[];
+}): string {
+  return [
+    narratorGlobalSystem(),
+    narratorWorldSystem(opts),
+    narratorTurnSystem(opts),
+  ].join("\n\n");
 }
 
 // ───────────────────────── 第一章开场变体 ─────────────────────────

@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import type { ChatMessage } from "@/lib/llm/types";
 import type { Scale } from "@/lib/cards/schemas";
-import { narratorSystem, openingDirective } from "@/lib/prompts/narrator";
+import { narratorGlobalSystem, narratorTurnSystem, narratorWorldSystem, openingDirective } from "@/lib/prompts/narrator";
 import { buildAbilityContext } from "@/lib/abilities/context";
 
 /**
@@ -309,9 +309,9 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
     hiddenEntriesForProbe(chapter.timelineId, probeText),
   ]);
 
-  // ── system 1：narrator 模板 + 风格/主题/宇宙论/融合公理/玩家神/尺度/征兆/查探 ──
-  const system1 = narratorSystem({
-    scale: opts.scale,
+  // ── Stable cache prefix: global rules, then world-specific cards. ──
+  const globalSystem = narratorGlobalSystem();
+  const worldSystem = narratorWorldSystem({
     worldName: world.name,
     styleCard: world.styleCard,
     themeCard: world.themeCard,
@@ -326,12 +326,13 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
           faithScope: playerGod.faithScope,
         }
       : null,
+    gods: godsSystemBlock(gods.filter((god) => !god.isPlayer)),
+  });
+  const turnSystem = narratorTurnSystem({
+    scale: opts.scale,
     omens: omens.texts,
     hiddenEntries,
   });
-
-  // ── system 2：主神卡片集 ──
-  const system2 = godsSystemBlock(gods.filter((g) => !g.isPlayer));
 
   // ── 检索文本（world书/实体卡/编年史共用） ──
   const windowMessages = [...prevTail, ...chapter.messages];
@@ -368,12 +369,15 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
     parts.push(openingDirective);
   }
 
-  const messages: ChatMessage[] = [{ role: "system", content: system1 }];
-  messages.push({ role: "system", content: system2 });
-  if (entityCards) messages.push({ role: "system", content: entityCards });
-  messages.push({ role: "system", content: abilityContext });
-  if (lore) messages.push({ role: "system", content: lore });
-  if (chronicle) messages.push({ role: "system", content: chronicle });
-  messages.push({ role: "user", content: parts.join("\n\n") });
+  const messages: ChatMessage[] = [
+    { role: "system", content: globalSystem, cacheScope: "global" },
+    { role: "system", content: worldSystem, cacheScope: "world" },
+    { role: "system", content: turnSystem, cacheScope: "dynamic" },
+  ];
+  if (entityCards) messages.push({ role: "system", content: entityCards, cacheScope: "dynamic" });
+  messages.push({ role: "system", content: abilityContext, cacheScope: "dynamic" });
+  if (lore) messages.push({ role: "system", content: lore, cacheScope: "dynamic" });
+  if (chronicle) messages.push({ role: "system", content: chronicle, cacheScope: "dynamic" });
+  messages.push({ role: "user", content: parts.join("\n\n"), cacheScope: "dynamic" });
   return messages;
 }

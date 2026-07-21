@@ -47,6 +47,7 @@ export async function POST(request: Request) {
       user: genesisUserPrompt(body.decree, excerpts),
       schema: WorldDeckSchema,
       maxTokens: 16000,
+      cache: { namespace: "genesis:v1" },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -95,6 +96,8 @@ export async function GET() {
       name: true,
       genesisInput: true,
       status: true,
+      materialArchiveStatus: true,
+      materialArchiveError: true,
       createdAt: true,
       updatedAt: true,
     },

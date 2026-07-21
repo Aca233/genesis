@@ -98,7 +98,7 @@ export async function POST(
   let generated: WorldDeck;
   try {
     generated = await completeStructured("narrative", {
-      task: "genesis",
+      task: "reroll",
       system: GENESIS_SYSTEM,
       user: rerollUserPrompt({
         decree: world.genesisInput,
@@ -109,6 +109,7 @@ export async function POST(
       }),
       schema: WorldDeckSchema,
       maxTokens: 16000,
+      cache: { namespace: "reroll:v1" },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -127,7 +128,7 @@ export async function POST(
   if (firstReferenceIssue !== null) {
     try {
       const repaired = await completeStructured("narrative", {
-        task: "genesis",
+        task: "reroll",
         system: GENESIS_SYSTEM,
         user: rerollReferenceRepairPrompt({
           decree: world.genesisInput,
@@ -136,6 +137,7 @@ export async function POST(
         }),
         schema: WorldDeckSchema,
         maxTokens: 16000,
+        cache: { namespace: "reroll:v1" },
       });
       deck = applyLockedPaths(repaired, currentDeck, lockedPaths);
     } catch (err) {

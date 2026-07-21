@@ -136,6 +136,7 @@ export async function POST(request: Request) {
 
   return narratorSSE({
     messages,
+    cacheNamespace: `narrative:${chapter.timeline.worldId}:v1`,
     signal: request.signal,
     onFailure: (error) => markGenerationFailed(
       prisma as unknown as GenerationRequestClient,

@@ -1,6 +1,5 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { buildAbilityContext } from "@/lib/abilities/context";
 import {
   applyAbilityExtractionInTransaction,
   type AbilityExtractionTx,
@@ -9,31 +8,23 @@ import { completeStructured } from "@/lib/llm/structured";
 import {
   EXTRACTION_MAX_ABILITIES,
   EXTRACTION_MAX_ENTITIES,
-  EXTRACTION_MAX_OUTPUT_TOKENS,
-  extractionMessageWindows,
-  mentionedOwnerIds,
 } from "@/lib/settle/extraction-context";
 import {
-  PantheonTurnSchema,
-  pantheonSystem,
-  pantheonUserPrompt,
-} from "@/lib/prompts/pantheon";
-import {
-  ExtractionSchema,
   type Extraction,
-  ChronicleSchema,
-  extractorSystem,
-  extractorUserPrompt,
-  chronicleSystem,
-  chronicleUserPrompt,
   SECTION_TEMPLATES,
 } from "@/lib/prompts/extractor";
+import {
+  ChapterSettlementSchema,
+  settlementSystem,
+  settlementUserPrompt,
+  type ChapterSettlement,
+} from "@/lib/prompts/settlement";
 
 /**
  * 章末结算流水线（docs/02 §4.2）：
- *   诸神回合（位阶高→低串行）→ 状态抽取 → 编年史压缩 → 热度衰减 → 章快照 → 开新章
- * 状态机存 chapter.settleState："open" | "settling:<step>" | "settled"
- * 每步完成即推进状态，幂等可断点续跑；诸神单神失败降级为「静观」不阻塞。
+ *   单次模型响应（诸神行动 + 状态抽取 + 编年史）→ 本地应用 → 热度衰减 → 快照 → 新章
+ * 状态机存 chapter.settleState："open" | "settling:<step>" | "settled"。
+ * 模型响应先持久化，后续步骤幂等应用，断点续跑时不会再次调用模型。
  */
 
 export type SettleStep =
@@ -53,15 +44,14 @@ const STEP_ORDER: SettleStep[] = [
   "done",
 ];
 
-const RANK_ORDER = [
-  "sovereign",
-  "exalted",
-  "ascended",
-  "nascent",
-  "slumbering",
-  "ember",
-  "fallen",
-];
+const MODEL_LEASE_MS = 15 * 60 * 1000;
+const MODEL_WAIT_MS = 250;
+const MODEL_STATE_PREFIX = "settling:model:";
+
+type SettlementModelClaim =
+  | { owner: true; leaseState: string }
+  | { owner: false; settlement: ChapterSettlement };
+
 
 export type SettleProgress = {
   step: SettleStep;
@@ -100,7 +90,7 @@ async function chapterProse(chapterId: string) {
   };
 }
 
-/** 结算主流程：AsyncGenerator 逐步产出进度（SSE 转发用） */
+/** 结算主流程：模型只调用一次；后续进度均为本地结果应用。 */
 export async function* settleChapter(
   chapterId: string,
 ): AsyncGenerator<SettleProgress> {
@@ -116,237 +106,100 @@ export async function* settleChapter(
 
   const timeline = chapter.timeline;
   const world = timeline.world;
-  const startStep = parseState(chapter.settleState);
-  const startIdx = STEP_ORDER.indexOf(startStep);
   const chapterText = await chapterProse(chapterId);
-  const prose = chapterText.prose;
   const scaleNote = await dominantScale(chapterId);
 
-  // ── 1. 诸神回合 ──
-  if (startIdx <= STEP_ORDER.indexOf("pantheon")) {
-    await setState(chapterId, "pantheon");
-    const gods = await prisma.god.findMany({
-      where: { timelineId: timeline.id, tier: "major", isPlayer: false },
-    });
-    gods.sort(
-      (a, b) => RANK_ORDER.indexOf(a.rank) - RANK_ORDER.indexOf(b.rank),
-    );
-
-    // 断点续跑：跳过本章已行动的神（以隐藏大事记为凭）
-    const already = await prisma.chronicleEntry.findMany({
-      where: {
-        timelineId: timeline.id,
-        chapterIndex: chapter.index,
-        source: "pantheon",
-      },
-      select: { godIds: true },
-    });
-    const actedGodIds = new Set(already.flatMap((e) => e.godIds));
-
-    const publicAftermath: string[] = [];
-    for (let i = 0; i < gods.length; i++) {
-      const god = gods[i];
-      yield { step: "pantheon", detail: god.name, index: i + 1, total: gods.length };
-      if (actedGodIds.has(god.id)) continue;
-
+  // Database CAS makes the model request chapter-global: concurrent settlement runners
+  // wait for the winner's persisted response instead of issuing their own request.
+  let settlement = readPendingSettlement(chapter.snapshot);
+  if (!settlement) {
+    const claim = await claimSettlementModel(chapterId);
+    if (claim.owner) {
+      yield { step: "pantheon", detail: "诸神与史官正在共同结算" };
       try {
-        const [relatedEntities, abilityContext] = await Promise.all([
-          entitiesTouchedBy(timeline.id, god.name),
-          buildAbilityContext({
-            timelineId: timeline.id,
-            viewer: "backstage",
-            subjectGodId: god.id,
-            searchText: `${god.name}\n${prose.slice(-6000)}`,
-          }),
-        ]);
-        const turn = await completeStructured("backstage", {
-          task: "pantheon",
-          system: pantheonSystem(god.name),
-          user: pantheonUserPrompt({
-            godCard: JSON.stringify({
-              persona: god.persona,
-              voice: god.voice,
-              agenda: god.agenda,
-              relations: god.relations,
-              rank: god.rank,
-              domains: god.domains,
-              faithScope: god.faithScope,
-            }),
-            chapterChronicle: prose.slice(-6000),
-            relatedEntities,
-            abilityContext,
-            fusionAxiom: world.fusionAxiom
-              ? JSON.stringify(world.fusionAxiom)
-              : undefined,
-            earlierTurnsPublic: publicAftermath.join("\n"),
-          }),
-          schema: PantheonTurnSchema,
-          maxTokens: 2000,
+        const context = await buildSettlementContext(timeline.id, chapterText, scaleNote, world);
+        settlement = await completeStructured("backstage", {
+          task: "settlement",
+          system: settlementSystem(),
+          user: settlementUserPrompt(context),
+          schema: ChapterSettlementSchema,
+          maxTokens: 16000,
+          maxAttempts: 1,
+          transportMaxAttempts: 1,
+          allowTransportFallback: false,
+          cache: { namespace: "settlement:v1" },
         });
-
-        // 行动 → 隐藏大事记
-        await prisma.chronicleEntry.create({
+        const stored = await prisma.chapter.updateMany({
+          where: { id: chapterId, settleState: claim.leaseState },
           data: {
-            timelineId: timeline.id,
-            chapterIndex: chapter.index,
-            yearLabel: "",
-            text: turn.action.description,
-            entityIds: [],
-            godIds: [god.id],
-            revealed: false,
-            source: "pantheon",
+            snapshot: { pendingSettlement: settlement } as unknown as Prisma.InputJsonValue,
+            settleState: "settling:pantheon",
           },
         });
-        // 征兆 → 队列
-        if (turn.omen) {
-          await prisma.omenQueue.create({
-            data: { timelineId: timeline.id, godId: god.id, text: turn.omen },
-          });
-        }
-        // 主动事件 → 也入征兆队列（带钩子前缀，Narrator 开场消费）
-        if (turn.proactiveEvent) {
-          await prisma.omenQueue.create({
-            data: {
-              timelineId: timeline.id,
-              godId: god.id,
-              text: `【主动事件·${turn.proactiveEvent.type}】${turn.proactiveEvent.openingHook}`,
-            },
-          });
-        }
-        // 议程/关系增量
-        const agenda = (god.agenda ?? {}) as Record<string, unknown>;
-        const au = turn.agendaUpdate;
-        if (au.shortTermGoals) agenda.shortTermGoals = au.shortTermGoals;
-        if (au.schemes) agenda.schemes = au.schemes;
-        if (au.stanceToPlayer) agenda.stanceToPlayer = au.stanceToPlayer;
-        const relations = (god.relations ?? {}) as Record<string, unknown>;
-        for (const r of turn.relationsUpdate) {
-          relations[r.target] = { label: r.label, note: r.note };
-        }
-        await prisma.god.update({
-          where: { id: god.id },
-          data: {
-            agenda: agenda as Prisma.InputJsonValue,
-            relations: relations as Prisma.InputJsonValue,
-          },
+        if (stored.count !== 1) throw new Error("章节结算占用已失效");
+      } catch (error) {
+        await prisma.chapter.updateMany({
+          where: { id: chapterId, settleState: claim.leaseState },
+          data: { settleState: "open" },
         });
-        publicAftermath.push(`${god.name}: ${turn.omen}`);
-      } catch {
-        // 单神失败 → 静观，不阻塞结算
-        await prisma.chronicleEntry.create({
-          data: {
-            timelineId: timeline.id,
-            chapterIndex: chapter.index,
-            yearLabel: "",
-            text: `${god.name}静观本章风云，未有所动。`,
-            entityIds: [],
-            godIds: [god.id],
-            revealed: false,
-            source: "pantheon",
-          },
-        });
+        throw error;
       }
+    } else {
+      yield { step: "pantheon", detail: "正在等待同章结算结果" };
+      settlement = claim.settlement;
     }
+  }
+
+  const afterModel = await prisma.chapter.findUniqueOrThrow({
+    where: { id: chapterId },
+    select: { settleState: true },
+  });
+  if (parseState(afterModel.settleState) === "pantheon") {
+    yield { step: "pantheon", detail: "诸神行动落定" };
+    await applyPantheonTurns(timeline.id, chapter.index, settlement.pantheonTurns);
     await setState(chapterId, "extract");
   }
 
-  // ── 2. 状态抽取 ──
+  const current = await prisma.chapter.findUniqueOrThrow({
+    where: { id: chapterId },
+    select: { settleState: true },
+  });
+  const startIdx = STEP_ORDER.indexOf(parseState(current.settleState));
+
   if (startIdx <= STEP_ORDER.indexOf("extract")) {
     yield { step: "extract" };
-    await runExtraction(timeline.id, chapterId, chapterText, scaleNote);
+    await applyExtraction(timeline.id, chapterId, chapterText, settlement.extraction);
     await setState(chapterId, "chronicle");
   }
 
-  // ── 3. 编年史压缩 ──
   if (startIdx <= STEP_ORDER.indexOf("chronicle")) {
     yield { step: "chronicle" };
-    const theme = (world.themeCard ?? {}) as { eraSystem?: string };
-    const lastEntry = await prisma.chronicleEntry.findFirst({
-      where: { timelineId: timeline.id, revealed: true },
-      orderBy: { createdAt: "desc" },
-    });
-    try {
-      const out = await completeStructured("backstage", {
-        task: "chronicle",
-        system: chronicleSystem(),
-        user: chronicleUserPrompt({
-          chapterProse: prose.slice(-16000),
-          eraSystem: theme.eraSystem ?? "纪元",
-          currentYearLabel: lastEntry?.yearLabel ?? "元年",
-          scaleNote,
-        }),
-        schema: ChronicleSchema,
-        maxTokens: 2000,
-      });
-
-      const nameToId = await entityNameMap(timeline.id);
-      const godNameToId = await godNameMap(timeline.id);
-      for (const e of out.entries) {
-        await prisma.chronicleEntry.create({
-          data: {
-            timelineId: timeline.id,
-            chapterIndex: chapter.index,
-            yearLabel: e.yearLabel,
-            text: e.text,
-            entityIds: e.entityNames
-              .map((n) => nameToId.get(n))
-              .filter((x): x is string => Boolean(x)),
-            godIds: e.godNames
-              .map((n) => godNameToId.get(n))
-              .filter((x): x is string => Boolean(x)),
-            revealed: true,
-            source: "narrative",
-          },
-        });
-      }
-      await prisma.chapter.update({
-        where: { id: chapterId },
-        data: {
-          summary: out.epilogue,
-          title: chapter.title ?? out.chapterTitle,
-        },
-      });
-    } catch {
-      // 压缩失败：写一条兜底条目
-      await prisma.chronicleEntry.create({
-        data: {
-          timelineId: timeline.id,
-          chapterIndex: chapter.index,
-          yearLabel: "",
-          text: "此章史料散佚，唯余残页。",
-          entityIds: [],
-          godIds: [],
-          revealed: true,
-          source: "narrative",
-        },
-      });
-    }
+    await applyChronicle(timeline.id, chapterId, chapter.index, chapter.title, settlement.chronicle);
     await setState(chapterId, "decay");
   }
 
-  // ── 4. 热度衰减 ──
   if (startIdx <= STEP_ORDER.indexOf("decay")) {
     yield { step: "decay" };
-    // 连续 3 章未出场且非神选者/标星 → dormant
     const staleBefore = chapter.index - 3;
     if (staleBefore > 0) {
-      const entities = await prisma.entity.findMany({
-        where: {
-          timelineId: timeline.id,
-          heat: "active",
-          isChosen: false,
-          starred: false,
-          scenePresence: false,
-        },
-        select: { id: true },
-      });
-      // 近 3 章被编年史提及的实体保持 active
-      const recent = await prisma.chronicleEntry.findMany({
-        where: { timelineId: timeline.id, chapterIndex: { gt: staleBefore } },
-        select: { entityIds: true },
-      });
-      const recentIds = new Set(recent.flatMap((e) => e.entityIds));
-      const toDormant = entities.filter((e) => !recentIds.has(e.id)).map((e) => e.id);
+      const [entities, recent] = await Promise.all([
+        prisma.entity.findMany({
+          where: {
+            timelineId: timeline.id,
+            heat: "active",
+            isChosen: false,
+            starred: false,
+            scenePresence: false,
+          },
+          select: { id: true },
+        }),
+        prisma.chronicleEntry.findMany({
+          where: { timelineId: timeline.id, chapterIndex: { gt: staleBefore } },
+          select: { entityIds: true },
+        }),
+      ]);
+      const recentIds = new Set(recent.flatMap((entry) => entry.entityIds));
+      const toDormant = entities.filter((entity) => !recentIds.has(entity.id)).map((entity) => entity.id);
       if (toDormant.length) {
         await prisma.entity.updateMany({
           where: { id: { in: toDormant } },
@@ -357,7 +210,6 @@ export async function* settleChapter(
     await setState(chapterId, "snapshot");
   }
 
-  // ── 5. 章快照 + 开新章 ──
   if (startIdx <= STEP_ORDER.indexOf("snapshot")) {
     yield { step: "snapshot" };
     const [gods, entities] = await Promise.all([
@@ -367,24 +219,251 @@ export async function* settleChapter(
         include: { sections: true },
       }),
     ]);
-    await prisma.chapter.update({
-      where: { id: chapterId },
-      data: {
-        snapshot: { gods, entities } as unknown as Prisma.InputJsonValue,
-      },
-    });
-    // 开新章（若尚未存在）
-    await prisma.chapter.upsert({
-      where: {
-        timelineId_index: { timelineId: timeline.id, index: chapter.index + 1 },
-      },
-      create: { timelineId: timeline.id, index: chapter.index + 1 },
-      update: {},
-    });
-    await setState(chapterId, "done");
+    await prisma.$transaction([
+      prisma.chapter.update({
+        where: { id: chapterId },
+        data: {
+          snapshot: { gods, entities, pendingSettlement: settlement } as unknown as Prisma.InputJsonValue,
+          settleState: "settled",
+        },
+      }),
+      prisma.chapter.upsert({
+        where: { timelineId_index: { timelineId: timeline.id, index: chapter.index + 1 } },
+        create: { timelineId: timeline.id, index: chapter.index + 1 },
+        update: {},
+      }),
+    ]);
   }
 
   yield { step: "done" };
+}
+
+type SettlementWorld = {
+  themeCard: Prisma.JsonValue | null;
+  fusionAxiom: Prisma.JsonValue | null;
+};
+
+function modelLeaseExpiry(state: string): number | null {
+  if (!state.startsWith(MODEL_STATE_PREFIX)) return null;
+  const expiry = Number(state.slice(MODEL_STATE_PREFIX.length).split(":", 1)[0]);
+  return Number.isFinite(expiry) ? expiry : 0;
+}
+
+async function claimSettlementModel(chapterId: string): Promise<SettlementModelClaim> {
+  while (true) {
+    const current = await prisma.chapter.findUniqueOrThrow({
+      where: { id: chapterId },
+      select: { snapshot: true, settleState: true },
+    });
+    const pending = readPendingSettlement(current.snapshot);
+    if (pending) return { owner: false, settlement: pending };
+    if (current.settleState === "settled") {
+      throw new Error("章节已经完成结算，但缺少可恢复的结算响应");
+    }
+
+    const leaseExpiry = modelLeaseExpiry(current.settleState);
+    if (leaseExpiry !== null && leaseExpiry > Date.now()) {
+      await new Promise((resolve) => setTimeout(resolve, MODEL_WAIT_MS));
+      continue;
+    }
+
+    const leaseState = `${MODEL_STATE_PREFIX}${Date.now() + MODEL_LEASE_MS}:${crypto.randomUUID()}`;
+    const claimed = await prisma.chapter.updateMany({
+      where: { id: chapterId, settleState: current.settleState },
+      data: { settleState: leaseState },
+    });
+    if (claimed.count === 1) return { owner: true, leaseState };
+  }
+}
+
+function readPendingSettlement(snapshot: Prisma.JsonValue | null): ChapterSettlement | null {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+  const pending = (snapshot as Record<string, unknown>).pendingSettlement;
+  const parsed = ChapterSettlementSchema.safeParse(pending);
+  return parsed.success ? parsed.data : null;
+}
+
+function labelledChapterMessages(messages: Awaited<ReturnType<typeof chapterProse>>["messages"]): string {
+  return messages.map((message) => {
+    const content = message.role === "player" ? `【玩家神谕】${message.content}` : message.content;
+    return `[${message.id} | ${message.index} | ${message.scale}]\n${content}`;
+  }).join("\n\n");
+}
+
+async function buildSettlementContext(
+  timelineId: string,
+  chapterText: Awaited<ReturnType<typeof chapterProse>>,
+  scaleNote: string,
+  world: SettlementWorld,
+): Promise<Parameters<typeof settlementUserPrompt>[0]> {
+  const [entities, gods, abilities, lastEntry] = await Promise.all([
+    prisma.entity.findMany({
+      where: { timelineId },
+      select: {
+        id: true, name: true, type: true, aliases: true, summary: true,
+        lockedPaths: true, raceId: true, scenePresence: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXTRACTION_MAX_ENTITIES,
+    }),
+    prisma.god.findMany({
+      where: { timelineId },
+      select: {
+        id: true, name: true, aliases: true, rank: true, tier: true, isPlayer: true,
+        persona: true, voice: true, agenda: true, relations: true, domains: true, faithScope: true,
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.ability.findMany({
+      where: { timelineId },
+      include: {
+        entity: { select: { name: true, type: true } },
+        god: { select: { name: true } },
+        sourceAbility: { select: { name: true } },
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXTRACTION_MAX_ABILITIES,
+    }),
+    prisma.chronicleEntry.findFirst({
+      where: { timelineId, revealed: true },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+  const theme = (world.themeCard ?? {}) as { eraSystem?: string };
+  const raceName = new Map(entities.map((entity) => [entity.id, entity.name]));
+
+  return {
+    chapterMessages: labelledChapterMessages(chapterText.messages),
+    scaleNote,
+    eraSystem: theme.eraSystem ?? "纪元",
+    currentYearLabel: lastEntry?.yearLabel ?? "元年",
+    entities: entities.map((entity) =>
+      `${entity.name} [${entity.id}] (${entity.type}) race=${entity.raceId ? raceName.get(entity.raceId) ?? entity.raceId : "—"} aliases=[${entity.aliases.join("、")}] present=${entity.scenePresence}: ${entity.summary}`,
+    ).join("\n"),
+    gods: gods.filter((god) => god.tier === "major" && !god.isPlayer).map((god) =>
+      `${god.name} [${god.id}] rank=${god.rank}\n${JSON.stringify({
+        persona: god.persona, voice: god.voice, agenda: god.agenda, relations: god.relations,
+        domains: god.domains, faithScope: god.faithScope,
+      })}`,
+    ).join("\n\n"),
+    abilities: abilities.map((ability) => {
+      const owner = ability.entity?.name ?? ability.god?.name ?? "未知拥有者";
+      const source = ability.sourceAbility ? `${ability.sourceAbility.name} [${ability.sourceAbilityId}]` : "—";
+      return `[${ability.id}] ${owner}·${ability.name} kind=${ability.kind} mastery=${ability.mastery} state=${ability.state} visibility=${ability.visibility} source=${source} locked=[${ability.lockedFields.join(", ")}] effect=${ability.effect} trigger=${ability.trigger} cost=${ability.cost} limitations=${ability.limitations}`;
+    }).join("\n"),
+    lockedPaths: entities.flatMap((entity) => entity.lockedPaths.map((path) => `${entity.name}.${path}`)).join(", "),
+    fusionAxiom: world.fusionAxiom ? JSON.stringify(world.fusionAxiom) : undefined,
+  };
+}
+
+async function applyPantheonTurns(
+  timelineId: string,
+  chapterIndex: number,
+  turns: ChapterSettlement["pantheonTurns"],
+) {
+  const gods = await prisma.god.findMany({
+    where: { timelineId, tier: "major", isPlayer: false },
+    orderBy: { createdAt: "asc" },
+  });
+  const already = await prisma.chronicleEntry.findMany({
+    where: { timelineId, chapterIndex, source: "pantheon" },
+    select: { godIds: true },
+  });
+  const acted = new Set(already.flatMap((entry) => entry.godIds));
+  const turnByName = new Map(turns.map((turn) => [turn.godName, turn]));
+
+  for (const god of gods) {
+    if (acted.has(god.id)) continue;
+    const turn = turnByName.get(god.name);
+    if (!turn) {
+      await prisma.chronicleEntry.create({
+        data: {
+          timelineId, chapterIndex, yearLabel: "",
+          text: `${god.name}静观本章风云，未有所动。`,
+          entityIds: [], godIds: [god.id], revealed: false, source: "pantheon",
+        },
+      });
+      continue;
+    }
+    await prisma.$transaction(async (tx) => {
+      await tx.chronicleEntry.create({
+        data: {
+          timelineId, chapterIndex, yearLabel: "", text: turn.action.description,
+          entityIds: [], godIds: [god.id], revealed: false, source: "pantheon",
+        },
+      });
+      const omens = [
+        turn.omen,
+        turn.proactiveEvent
+          ? `【主动事件·${turn.proactiveEvent.type}】${turn.proactiveEvent.openingHook}`
+          : null,
+      ].filter((value): value is string => Boolean(value));
+      if (omens.length) {
+        await tx.omenQueue.createMany({
+          data: omens.map((text) => ({ timelineId, godId: god.id, text })),
+        });
+      }
+      const agenda = (god.agenda ?? {}) as Record<string, unknown>;
+      if (turn.agendaUpdate.shortTermGoals) agenda.shortTermGoals = turn.agendaUpdate.shortTermGoals;
+      if (turn.agendaUpdate.schemes) agenda.schemes = turn.agendaUpdate.schemes;
+      if (turn.agendaUpdate.stanceToPlayer) agenda.stanceToPlayer = turn.agendaUpdate.stanceToPlayer;
+      const relations = (god.relations ?? {}) as Record<string, unknown>;
+      for (const relation of turn.relationsUpdate) {
+        relations[relation.target] = { label: relation.label, note: relation.note };
+      }
+      await tx.god.update({
+        where: { id: god.id },
+        data: {
+          agenda: agenda as Prisma.InputJsonValue,
+          relations: relations as Prisma.InputJsonValue,
+        },
+      });
+    });
+  }
+}
+
+async function applyChronicle(
+  timelineId: string,
+  chapterId: string,
+  chapterIndex: number,
+  currentTitle: string | null,
+  chronicle: ChapterSettlement["chronicle"],
+) {
+  const [entityMap, godMap] = await Promise.all([
+    entityNameMap(timelineId),
+    godNameMap(timelineId),
+  ]);
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.chronicleEntry.findMany({
+      where: { timelineId, chapterIndex, source: "narrative", revealed: true },
+      select: { yearLabel: true, text: true },
+    });
+    const existingKeys = new Set(existing.map((entry) => `${entry.yearLabel}\u0000${entry.text}`));
+    for (const entry of chronicle.entries) {
+      const key = `${entry.yearLabel}\u0000${entry.text}`;
+      if (existingKeys.has(key)) continue;
+      await tx.chronicleEntry.create({
+        data: {
+          timelineId,
+          chapterIndex,
+          yearLabel: entry.yearLabel,
+          text: entry.text,
+          entityIds: entry.entityNames.map((name) => entityMap.get(name)).filter((id): id is string => Boolean(id)),
+          godIds: entry.godNames.map((name) => godMap.get(name)).filter((id): id is string => Boolean(id)),
+          revealed: true,
+          source: "narrative",
+        },
+      });
+      existingKeys.add(key);
+    }
+    await tx.chapter.update({
+      where: { id: chapterId },
+      data: {
+        summary: chronicle.epilogue,
+        title: currentTitle ?? chronicle.chapterTitle,
+      },
+    });
+  });
 }
 
 // ───────────────────────── 辅助 ─────────────────────────
@@ -405,19 +484,6 @@ async function dominantScale(chapterId: string): Promise<string> {
     epoch: "百年以上跨度",
   };
   return zh[top] ?? top;
-}
-
-async function entitiesTouchedBy(timelineId: string, godName: string): Promise<string> {
-  // 简化：该神信仰相关/关系提及的实体摘要（M2 v1：按名字包含匹配）
-  const entities = await prisma.entity.findMany({
-    where: { timelineId, heat: "active" },
-    select: { name: true, type: true, summary: true },
-    take: 20,
-  });
-  return entities
-    .filter((e) => e.summary.includes(godName))
-    .map((e) => `${e.name}(${e.type}): ${e.summary}`)
-    .join("\n");
 }
 
 async function entityNameMap(timelineId: string): Promise<Map<string, string>> {
@@ -446,122 +512,18 @@ async function godNameMap(timelineId: string): Promise<Map<string, string>> {
   return map;
 }
 
-/** 抽取执行与应用 */
-async function runExtraction(
+/** 应用单次模型响应中的状态抽取；不再发起模型调用。 */
+async function applyExtraction(
   timelineId: string,
   chapterId: string,
   chapterText: Awaited<ReturnType<typeof chapterProse>>,
-  scaleNote: string,
+  extraction: Extraction,
 ) {
-  const messageWindows = extractionMessageWindows(chapterText.messages);
-  const [entityIndex, godIndex] = await Promise.all([
-    prisma.entity.findMany({
-      where: { timelineId },
-      select: { id: true, name: true, type: true, aliases: true, raceId: true },
-    }),
-    prisma.god.findMany({
-      where: { timelineId },
-      select: { id: true, name: true, aliases: true, rank: true, isPlayer: true },
-    }),
-  ]);
-  const relevantIds = mentionedOwnerIds(chapterText.messages, [...entityIndex, ...godIndex.map((god) => ({
-    ...god, type: "god", raceId: null,
-  }))]);
-  const relevantGodIds = godIndex.filter((god) => relevantIds.has(god.id)).map((god) => god.id);
-  const entities = await prisma.entity.findMany({
-    where: {
-      timelineId,
-      OR: [
-        { id: { in: [...relevantIds] } },
-        { type: { notIn: ["race", "character"] }, scenePresence: true },
-      ],
-    },
-    select: {
-      id: true, name: true, type: true, aliases: true, summary: true,
-      lockedPaths: true, raceId: true,
-    },
-    take: EXTRACTION_MAX_ENTITIES,
-  });
-  const gods = godIndex.filter((god) => relevantIds.has(god.id));
-  const entityIds = entities.map((entity) => entity.id);
-  const abilities = entityIds.length || relevantGodIds.length
-    ? await prisma.ability.findMany({
-        where: {
-          timelineId,
-          OR: [
-            ...(entityIds.length ? [{ entityId: { in: entityIds } }] : []),
-            ...(relevantGodIds.length ? [{ godId: { in: relevantGodIds } }] : []),
-            { id: { in: (await prisma.ability.findMany({
-              where: { timelineId, entityId: { in: entityIds }, sourceAbilityId: { not: null } },
-              select: { sourceAbilityId: true },
-              take: EXTRACTION_MAX_ABILITIES,
-            })).flatMap((ability) => ability.sourceAbilityId ? [ability.sourceAbilityId] : []) } },
-          ],
-        },
-        include: {
-          entity: { select: { name: true, type: true } },
-          god: { select: { name: true } },
-          sourceAbility: { select: { name: true } },
-        },
-        orderBy: { createdAt: "asc" },
-        take: EXTRACTION_MAX_ABILITIES,
-      })
-    : [];
-
-  const lockedList = entities
-    .flatMap((e) => e.lockedPaths.map((p) => `${e.name}.${p}`))
-    .join(", ");
-
-  const extraction = {
-    newEntities: [] as Array<Extraction["newEntities"][number]>,
-    newGods: [] as Array<Extraction["newGods"][number]>,
-    entityUpdates: [] as Array<Extraction["entityUpdates"][number]>,
-    godUpdates: [] as Array<Extraction["godUpdates"][number]>,
-    revealSections: [] as Array<Extraction["revealSections"][number]>,
-    majorCharacterPromotions: [] as Array<Extraction["majorCharacterPromotions"][number]>,
-    abilityChanges: [] as unknown[],
+  const normalizedExtraction: Extraction = {
+    ...extraction,
+    newGods: extraction.newGods ?? [],
+    majorCharacterPromotions: extraction.majorCharacterPromotions ?? [],
   };
-  for (const messages of messageWindows) {
-    const windowExtraction = await completeStructured("backstage", {
-      task: "extract",
-      system: extractorSystem(),
-      user: extractorUserPrompt({
-        chapterMessages: messages,
-        knownEntities: entities
-          .map((entity) => {
-            const race = entity.raceId
-              ? entities.find((candidate) => candidate.id === entity.raceId)?.name ?? entity.raceId
-              : "—";
-            return `${entity.name}(${entity.type}) race=${race} 别名[${entity.aliases.join("、")}]: ${entity.summary}`;
-          })
-          .join("\n"),
-        knownGods: gods
-          .map((g) => `${g.name}${g.isPlayer ? "（玩家神）" : ""} rank=${g.rank}`)
-          .join("\n"),
-        knownAbilities: abilities
-          .map((ability) => {
-            const owner = ability.entity?.name ?? ability.god?.name ?? "未知拥有者";
-            const source = ability.sourceAbility
-              ? `${ability.sourceAbility.name} [${ability.sourceAbilityId}]`
-              : "—";
-            return `[${ability.id}] ${owner}·${ability.name} kind=${ability.kind} mastery=${ability.mastery} state=${ability.state} source=${source} locked=[${ability.lockedFields.join(", ")}] version=${ability.version}`;
-          })
-          .join("\n"),
-        lockedPaths: lockedList,
-        scaleNote,
-      }),
-      schema: ExtractionSchema,
-      maxTokens: EXTRACTION_MAX_OUTPUT_TOKENS,
-    });
-    extraction.newEntities.push(...windowExtraction.newEntities);
-    extraction.newGods.push(...(windowExtraction.newGods ?? []));
-    extraction.entityUpdates.push(...windowExtraction.entityUpdates);
-    extraction.godUpdates.push(...windowExtraction.godUpdates);
-    extraction.revealSections.push(...windowExtraction.revealSections);
-    extraction.majorCharacterPromotions.push(...(windowExtraction.majorCharacterPromotions ?? []));
-    extraction.abilityChanges.push(...windowExtraction.abilityChanges);
-  }
-
   await prisma.$transaction(async (tx) => {
     const entityRecords = await tx.entity.findMany({
       where: { timelineId },
@@ -577,8 +539,8 @@ async function runExtraction(
     }
     // 种族必须先建卡，以便同批新人物按正名或别名解析主种族。
     const orderedNewEntities = [
-      ...extraction.newEntities.filter((entity) => entity.type === "race"),
-      ...extraction.newEntities.filter((entity) => entity.type !== "race"),
+      ...normalizedExtraction.newEntities.filter((entity) => entity.type === "race"),
+      ...normalizedExtraction.newEntities.filter((entity) => entity.type !== "race"),
     ];
     for (const ne of orderedNewEntities) {
       if (byName.has(ne.name)) continue;
@@ -628,7 +590,7 @@ async function runExtraction(
     }
 
     // 既有实体增量
-    for (const up of extraction.entityUpdates) {
+    for (const up of normalizedExtraction.entityUpdates) {
       const target = byName.get(up.name);
       if (!target) continue;
       const locked = new Set(target.lockedPaths);
@@ -679,7 +641,7 @@ async function runExtraction(
       godByName.set(god.name, god);
       for (const alias of god.aliases) godByName.set(alias, god);
     }
-    for (const newGod of extraction.newGods) {
+    for (const newGod of normalizedExtraction.newGods) {
       if (godByName.has(newGod.name)) continue;
       const created = await tx.god.create({
         data: {
@@ -696,7 +658,7 @@ async function runExtraction(
       godByName.set(created.name, created);
       for (const alias of created.aliases) godByName.set(alias, created);
     }
-    for (const gu of extraction.godUpdates) {
+    for (const gu of normalizedExtraction.godUpdates) {
       const target = godByName.get(gu.name);
       if (!target) continue;
       const god = await tx.god.findUnique({ where: { id: target.id } });
@@ -717,7 +679,7 @@ async function runExtraction(
 
     // 主要人物晋升：只接受本章连续正文证据，且目标必须是既有 character。
     const messagesByIndex = new Map(chapterText.messages.map((message) => [message.index, message]));
-    for (const promotion of extraction.majorCharacterPromotions) {
+    for (const promotion of normalizedExtraction.majorCharacterPromotions) {
       const target = byName.get(promotion.name);
       const message = messagesByIndex.get(promotion.evidenceMessageIndex);
       const evidence = promotion.evidence.replace(/\s+/gu, "");
@@ -730,7 +692,7 @@ async function runExtraction(
     }
 
     // 迷雾揭示
-    for (const rv of extraction.revealSections) {
+    for (const rv of normalizedExtraction.revealSections) {
       const target = byName.get(rv.entityName);
       if (!target) continue;
       await tx.entitySection.updateMany({
@@ -774,7 +736,7 @@ async function runExtraction(
           ...currentGods.flatMap((god) => [god.name, ...god.aliases]),
         ],
         messages: chapterText.messages,
-        changes: extraction.abilityChanges,
+        changes: normalizedExtraction.abilityChanges,
       },
     );
     for (const rejected of result.rejected) {

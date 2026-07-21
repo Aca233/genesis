@@ -56,5 +56,10 @@ describe("buildNarratorContext ability viewer", () => {
     )).toBe(true);
     expect(messages.filter((message) => message.role === "user")
       .every((message) => !message.content.includes("[hidden] 秘能"))).toBe(true);
+    expect(messages[0]).toMatchObject({ role: "system", cacheScope: "global" });
+    expect(messages[1]).toMatchObject({ role: "system", cacheScope: "world" });
+    const firstDynamic = messages.findIndex((message) => message.cacheScope === "dynamic");
+    expect(firstDynamic).toBeGreaterThan(1);
+    expect(messages.slice(firstDynamic).every((message) => message.cacheScope === "dynamic")).toBe(true);
   });
 });
