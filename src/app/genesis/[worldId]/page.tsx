@@ -3,8 +3,8 @@
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence } from "motion/react";
-import type { WorldDeck, DeckCardKey } from "@/lib/cards/schemas";
-import { DECK_CARD_KEYS } from "@/lib/cards/schemas";
+import type { PantheonWorldDeck, DeckCardKey } from "@/lib/cards/schemas";
+import { DECK_CARD_KEYS, PantheonWorldDeckSchema } from "@/lib/cards/schemas";
 import {
   setPathClone,
   countLockedUnder,
@@ -55,7 +55,7 @@ export default function GenesisEditorPage({
   const router = useRouter();
 
   // ── 世界数据 ──
-  const [deck, setDeck] = useState<WorldDeck | null>(null);
+  const [deck, setDeck] = useState<PantheonWorldDeck | null>(null);
   const [genesisInput, setGenesisInput] = useState("");
   const [lockedPaths, setLockedPaths] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -94,7 +94,7 @@ export default function GenesisEditorPage({
           router.replace(`/play/${worldId}`);
           return;
         }
-        setDeck(world.draftDeck as WorldDeck);
+        setDeck(PantheonWorldDeckSchema.parse(world.draftDeck));
         setGenesisInput(world.genesisInput ?? "");
         setLockedPaths(world.lockedPaths ?? []);
       })
@@ -117,7 +117,7 @@ export default function GenesisEditorPage({
 
   /** 保存手改：PATCH {deck, editedPaths}。返回是否成功。 */
   const save = useCallback(
-    async (current: WorldDeck): Promise<boolean> => {
+    async (current: PantheonWorldDeck): Promise<boolean> => {
       setSaving(true);
       setNotice(null);
       try {
@@ -164,7 +164,7 @@ export default function GenesisEditorPage({
           setNotice({ ok: false, text: `重掷失败:${json.error ?? res.status}` });
           return;
         }
-        setDeck(json.deck as WorldDeck);
+        setDeck(PantheonWorldDeckSchema.parse(json.deck));
         setNotice({ ok: true, text: `✓ ${CARD_KEY_LABELS[cardKey]}已重掷（手改字段保留）` });
       } catch (err) {
         setNotice({ ok: false, text: `重掷失败:${String(err)}` });
@@ -202,7 +202,7 @@ export default function GenesisEditorPage({
         return;
       }
       const minor = deck.minorGods[index];
-      const next: WorldDeck = {
+      const next: PantheonWorldDeck = {
         ...deck,
         majorGods: [...deck.majorGods, promoteMinorGod(minor)],
         minorGods: deck.minorGods.filter((_, i) => i !== index),
@@ -638,7 +638,7 @@ export default function GenesisEditorPage({
 }
 
 /** Modal 标题 */
-function modalTitle(open: OpenCard | null, deck: WorldDeck): string {
+function modalTitle(open: OpenCard | null, deck: PantheonWorldDeck): string {
   if (!open) return "";
   switch (open.kind) {
     case "cosmology":

@@ -416,21 +416,8 @@ export type LegacyWorldDeck = z.infer<typeof LegacyWorldDeckSchema>;
 export type MajorGodCard = z.infer<typeof MajorGodCardSchema>;
 export type CreatorMajorGodCard = z.infer<typeof CreatorMajorGodCardSchema>;
 export type PlayerGodCard = z.infer<typeof PlayerGodCardSchema>;
-
-/**
- * Transitional consumer surface until mode-aware editor/material/embark routing lands.
- * Runtime parsing remains the strict discriminated union; creator output still omits
- * playerGod and player-facing god fields. Dedicated mode types above are authoritative.
- */
-type CreatorMajorGodCompatibility = MajorGodCard & {
-  relations?: CreatorMajorGodCard["relations"];
-};
-type CreatorWorldDeckCompatibility = Omit<CreatorWorldDeck, "majorGods"> & {
-  playerGod: PlayerGodCard;
-  majorGods: CreatorMajorGodCompatibility[];
-};
-export type WorldDeck = PantheonWorldDeck | CreatorWorldDeckCompatibility;
-export const WorldDeckSchema = StrictWorldDeckSchema as unknown as z.ZodType<WorldDeck>;
+export type WorldDeck = PantheonWorldDeck | CreatorWorldDeck;
+export const WorldDeckSchema = StrictWorldDeckSchema;
 
 type LooseRecord = Record<string, unknown>;
 

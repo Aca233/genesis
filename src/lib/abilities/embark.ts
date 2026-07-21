@@ -5,10 +5,7 @@ import {
   validateAbilityOwnership,
 } from "./validator";
 
-type AbilityDeck = Pick<
-  WorldDeck,
-  "playerGod" | "majorGods" | "races" | "majorCharacters"
->;
+type AbilityDeck = WorldDeck;
 
 type AbilityCreateData = {
   timelineId: string;
@@ -134,8 +131,11 @@ export async function materializeDeckAbilities(
     }
   }
 
-  // 2. 玩家神及各主神的神权。
-  for (const god of [deck.playerGod, ...deck.majorGods]) {
+  // 2. 当前模式实际存在的诸神神权。
+  const gods = deck.mode === "pantheon"
+    ? [deck.playerGod, ...deck.majorGods]
+    : deck.majorGods;
+  for (const god of gods) {
     const godId = requireId(ids.godByRef, god.ref, "神明");
     for (const ability of god.abilities) {
       const id = await createValidatedAbility(

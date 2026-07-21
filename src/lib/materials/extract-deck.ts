@@ -1,4 +1,5 @@
-import type { WorldDeck } from "@/lib/cards/schemas";
+import type { DeckAbilitySchema, PantheonWorldDeck } from "@/lib/cards/schemas";
+import type { z } from "zod";
 import type { MaterialVersionContent } from "./schemas";
 import type { MaterialDependency, MaterialKind } from "./types";
 
@@ -17,11 +18,11 @@ const dependency = (
   targetRef: string, label: string, required = true,
 ): MaterialDependency => ({ key: `${relation}:${targetRef}`, relation, targetKind, targetRef, label, required });
 
-export function extractDeckMaterials(deck: WorldDeck): ExtractedMaterial[] {
+export function extractDeckMaterials(deck: PantheonWorldDeck): ExtractedMaterial[] {
   const result: ExtractedMaterial[] = [];
   const add = (item: ExtractedMaterial) => result.push(item);
   const addAbility = (
-    card: WorldDeck["playerGod"]["abilities"][number],
+    card: z.infer<typeof DeckAbilitySchema>,
     owner: { kind: "god" | "character" | "race"; sourceRef: string; name: string },
     extra: MaterialDependency[] = [],
   ) => add({

@@ -1,9 +1,5 @@
 import type { WorldDeck } from "@/lib/cards/schemas";
-import {
-  CreatorWorldDeckSchema,
-  PantheonWorldDeckSchema,
-  WorldDeckSchema,
-} from "@/lib/cards/schemas";
+import { WorldDeckSchema } from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 import { extractJson } from "@/lib/llm/structured";
 import type { GenesisMaterialSnapshot } from "@/lib/materials/types";
@@ -35,10 +31,6 @@ export type GenesisGenerationOptions = {
   onStage: (stage: GenesisStageId) => Promise<void> | void;
 };
 
-function modeSchema(mode: WorldMode) {
-  return mode === "pantheon" ? PantheonWorldDeckSchema : CreatorWorldDeckSchema;
-}
-
 function assertExpectedMode(deck: WorldDeck, expectedMode: WorldMode): void {
   if (deck.mode !== expectedMode) {
     throw new Error(`创世卡组模式不匹配：期望 ${expectedMode}，实际 ${deck.mode}`);
@@ -51,9 +43,8 @@ function validateParsedDeck(
   materialSnapshot: GenesisMaterialSnapshot | null,
 ): WorldDeck {
   // Parse the union first so a valid opposite-mode response yields a clear mode error.
-  const unionDeck = WorldDeckSchema.parse(rawDeck);
-  assertExpectedMode(unionDeck, expectedMode);
-  const deck = modeSchema(expectedMode).parse(unionDeck) as WorldDeck;
+  const deck = WorldDeckSchema.parse(rawDeck);
+  assertExpectedMode(deck, expectedMode);
   validateDeckReferences(deck);
   assertMaterializedDeck(deck, materialSnapshot);
   return deck;

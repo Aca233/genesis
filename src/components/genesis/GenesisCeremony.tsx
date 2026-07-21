@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import type { WorldDeck } from "@/lib/cards/schemas";
+import type { PantheonWorldDeck } from "@/lib/cards/schemas";
 
 /**
  * 创世开局演出（docs/05 §4.1）
@@ -16,7 +16,7 @@ type EmbarkState =
   | { phase: "error"; message: string };
 
 /** 拓印条目：从卡组提炼的名目 */
-function buildStamps(deck: WorldDeck): string[] {
+function buildStamps(deck: PantheonWorldDeck): string[] {
   return [
     "宇宙论 · 已定",
     ...(deck.fusionAxiom ? ["融合公理 · 已缝合"] : []),
@@ -39,7 +39,7 @@ export function GenesisCeremony({
 }: {
   /** 原初神谕 */
   decree: string;
-  deck: WorldDeck;
+  deck: PantheonWorldDeck;
   embark: EmbarkState;
   /** embark 失败：退出演出交还编辑器（编辑器展示错误与重试） */
   onError: (message: string) => void;

@@ -1,6 +1,6 @@
 "use client";
 
-import type { WorldDeck } from "@/lib/cards/schemas";
+import type { PantheonWorldDeck, WorldDeck } from "@/lib/cards/schemas";
 import { RANKS } from "@/lib/cards/schemas";
 import {
   RANK_LABELS,
@@ -27,6 +27,10 @@ type EditorProps = {
   deck: WorldDeck;
   lockedPaths: string[];
   onEdit: (path: string, value: unknown) => void;
+};
+
+type PantheonEditorProps = Omit<EditorProps, "deck"> & {
+  deck: PantheonWorldDeck;
 };
 
 const RANK_OPTIONS = RANKS.map((r) => ({ value: r, label: RANK_LABELS[r] }));
@@ -74,7 +78,7 @@ export function FusionAxiomEditor({ deck, lockedPaths, onEdit }: EditorProps) {
 
 // ───────────────────────── 玩家神 ─────────────────────────
 
-export function PlayerGodEditor({ deck, lockedPaths, onEdit }: EditorProps) {
+export function PlayerGodEditor({ deck, lockedPaths, onEdit }: PantheonEditorProps) {
   const g = deck.playerGod;
   const common = { lockedPaths, onEdit };
   return (
@@ -109,7 +113,7 @@ export function MajorGodEditor({
   onEdit,
   agendaRevealed,
   onRevealAgenda,
-}: EditorProps & {
+}: PantheonEditorProps & {
   index: number;
   agendaRevealed: boolean;
   onRevealAgenda: () => void;

@@ -34,6 +34,9 @@ export async function POST(
       }
 
       const deck = parsePersistedWorldDeck(world.draftDeck);
+      if (deck.mode !== "pantheon") {
+        throw new EmbarkDraftError("当前开局流程尚不支持创世主模式");
+      }
       validateDeckReferences(deck);
       return deck;
     });

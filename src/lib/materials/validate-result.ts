@@ -20,7 +20,9 @@ function isRecord(value: unknown): value is JsonRecord {
 
 function abilitiesOf(deck: WorldDeck): LocatedCard[] {
   return [
-    ...deck.playerGod.abilities.map((card) => ({ card: card as unknown as JsonRecord, ownerKind: "player_god" as const, ownerRef: deck.playerGod.ref })),
+    ...(deck.mode === "pantheon"
+      ? deck.playerGod.abilities.map((card) => ({ card: card as unknown as JsonRecord, ownerKind: "player_god" as const, ownerRef: deck.playerGod.ref }))
+      : []),
     ...deck.majorGods.flatMap((god) => god.abilities.map((card) => ({ card: card as unknown as JsonRecord, ownerKind: "major_god" as const, ownerRef: god.ref }))),
     ...deck.races.flatMap((race) => race.abilities.map((card) => ({ card: card as unknown as JsonRecord, ownerKind: "race" as const, ownerRef: race.ref }))),
     ...deck.majorCharacters.flatMap((character) => [...character.abilities, ...character.racialOverrides].map((card) => ({ card: card as unknown as JsonRecord, ownerKind: "character" as const, ownerRef: character.ref }))),
@@ -35,7 +37,9 @@ function sourceRef(content: MaterialVersionContent): string | undefined {
 function locateDeckCard(deck: WorldDeck, kind: MaterialKind, content: MaterialVersionContent): LocatedCard | undefined {
   const ref = sourceRef(content);
   switch (kind) {
-    case "player_god": return ref === deck.playerGod.ref ? { card: deck.playerGod as unknown as JsonRecord } : undefined;
+    case "player_god": return deck.mode === "pantheon" && ref === deck.playerGod.ref
+      ? { card: deck.playerGod as unknown as JsonRecord }
+      : undefined;
     case "major_god": return deck.majorGods.find((card) => card.ref === ref) ? { card: deck.majorGods.find((card) => card.ref === ref)! as unknown as JsonRecord } : undefined;
     case "character": return deck.majorCharacters.find((card) => card.ref === ref) ? { card: deck.majorCharacters.find((card) => card.ref === ref)! as unknown as JsonRecord } : undefined;
     case "race": return deck.races.find((card) => card.ref === ref) ? { card: deck.races.find((card) => card.ref === ref)! as unknown as JsonRecord } : undefined;

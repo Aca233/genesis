@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import type { WorldDeck } from "@/lib/cards/schemas";
+import type { PantheonWorldDeck } from "@/lib/cards/schemas";
 import { factionSections } from "@/lib/cards/faction-sections";
 import { materializeDeckAbilities } from "@/lib/abilities/embark";
 
@@ -9,7 +9,7 @@ function emblemSeed(name: string): string {
   return h.toString(36);
 }
 
-function raceSections(race: WorldDeck["races"][number]) {
+function raceSections(race: PantheonWorldDeck["races"][number]) {
   return [
     { key: "overview", content: { text: race.traits } },
     { key: "lifespan", content: { text: race.lifespan } },
@@ -18,7 +18,7 @@ function raceSections(race: WorldDeck["races"][number]) {
   ];
 }
 
-function placeSections(place: WorldDeck["places"][number]) {
+function placeSections(place: PantheonWorldDeck["places"][number]) {
   return [
     { key: "overview", content: { text: place.overview } },
     { key: "kind", content: { text: place.kind } },
@@ -26,7 +26,7 @@ function placeSections(place: WorldDeck["places"][number]) {
   ];
 }
 
-function characterSections(character: WorldDeck["majorCharacters"][number]) {
+function characterSections(character: PantheonWorldDeck["majorCharacters"][number]) {
   return [
     { key: "overview", content: { text: character.situation } },
     { key: "identity", content: { text: character.identity } },
@@ -46,7 +46,7 @@ function characterSections(character: WorldDeck["majorCharacters"][number]) {
 export async function materializeEmbarkDeck(
   tx: Prisma.TransactionClient,
   worldId: string,
-  deck: WorldDeck,
+  deck: PantheonWorldDeck,
 ): Promise<{ timelineId: string; chapterId: string }> {
   const timeline = await tx.timeline.create({ data: { worldId } });
   const ids = {
@@ -239,7 +239,7 @@ export async function claimDraftWorld(
 export function runEmbarkTransaction(
   runner: EmbarkTransactionRunner,
   worldId: string,
-  deck: WorldDeck,
+  deck: PantheonWorldDeck,
 ): Promise<{ timelineId: string; chapterId: string }> {
   return runner.$transaction((tx) => materializeEmbarkDeck(tx, worldId, deck));
 }
@@ -251,7 +251,7 @@ export function runEmbarkTransaction(
 export function runClaimedEmbarkTransaction(
   runner: EmbarkTransactionRunner,
   worldId: string,
-  loadDeck: (tx: Prisma.TransactionClient) => Promise<WorldDeck>,
+  loadDeck: (tx: Prisma.TransactionClient) => Promise<PantheonWorldDeck>,
 ): Promise<{ timelineId: string; chapterId: string }> {
   return runner.$transaction(async (tx) => {
     await claimDraftWorld(tx, worldId);

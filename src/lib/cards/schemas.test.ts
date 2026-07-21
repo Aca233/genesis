@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 import {
   CreatorWorldDeckSchema,
@@ -7,6 +7,9 @@ import {
   isLegacyWorldDeck,
   normalizeLegacyWorldDeck,
   parsePersistedWorldDeck,
+  type CreatorMajorGodCard,
+  type CreatorWorldDeck,
+  type WorldDeck,
 } from "./schemas";
 
 function ability(ref: string, kind: "racial_innate" | "racial_tradition" | "personal" | "divine") {
@@ -200,6 +203,13 @@ function completeLegacyDeck(): Record<string, unknown> {
 }
 
 describe("WorldDeck 模式判别联合", () => {
+  it("导出类型与严格 creator 运行时契约一致", () => {
+    type CreatorBranch = Extract<WorldDeck, { mode: "creator" }>;
+
+    expectTypeOf<CreatorBranch>().toEqualTypeOf<CreatorWorldDeck>();
+    expectTypeOf<CreatorBranch["majorGods"][number]>().toEqualTypeOf<CreatorMajorGodCard>();
+  });
+
   it("要求 pantheon 显式声明 mode 并包含 playerGod", () => {
     const pantheon = WorldDeckSchema.parse(completeDeck());
     expect(pantheon.mode).toBe("pantheon");

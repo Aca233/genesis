@@ -119,7 +119,7 @@ type CharacterTraditionRefs = {
 };
 
 type AbilityRefDeck = {
-  playerGod: { abilities: Array<{ ref: string }> };
+  playerGod?: { abilities: Array<{ ref: string }> };
   majorGods: Array<{ abilities: Array<{ ref: string }> }>;
   races: Array<{ abilities: Array<{ ref: string }> }>;
   majorCharacters: Array<{
@@ -240,7 +240,7 @@ export function visibleAbilityIndexes(
 /** 收集卡组内所有能力和先天覆写 ref，供新增项避免全局冲突。 */
 export function abilityRefsInDeck(deck: AbilityRefDeck): string[] {
   return [
-    ...deck.playerGod.abilities,
+    ...(deck.playerGod?.abilities ?? []),
     ...deck.majorGods.flatMap((god) => god.abilities),
     ...deck.races.flatMap((race) => race.abilities),
     ...deck.majorCharacters.flatMap((character) => [

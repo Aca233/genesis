@@ -1,4 +1,4 @@
-import { WorldDeckSchema, type WorldDeck } from "@/lib/cards/schemas";
+import { PantheonWorldDeckSchema, type PantheonWorldDeck } from "@/lib/cards/schemas";
 
 function ability(
   ref: string,
@@ -20,7 +20,7 @@ function ability(
   };
 }
 
-export function completeDeck(): WorldDeck {
+export function completeDeck(): PantheonWorldDeck {
   const characters = Array.from({ length: 6 }, (_, index) => ({
     ref: `character-${index + 1}`,
     name: `人物${index + 1}`,
@@ -47,7 +47,7 @@ export function completeDeck(): WorldDeck {
     ),
   }));
 
-  return WorldDeckSchema.parse({
+  return PantheonWorldDeckSchema.parse({
     mode: "pantheon",
     worldName: "测试界",
     cosmology: {
