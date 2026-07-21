@@ -172,3 +172,33 @@ Chinese output.
 ## 9. 旧世界渐进建档
 
 旧世界不要求模型补造完整能力谱，也不自动生成 6–12 位主要人物。上下文中能力集合为空时照常叙事；后续仅对正文明确展示、且可提供消息级连续证据的能力变化建立结构化记录。禁止为了“补齐卡片”推断未在正文发生的觉醒、学习或神权。章节交互不变：同章可以继续多轮对话，只有玩家手动「结束本章」才触发抽取。
+
+## 创世素材约束块
+
+创世任务把冻结的 `GenesisMaterialSnapshot` 确定性序列化为 `== GENESIS MATERIALS ==` JSON 约束块，并追加到现有 `genesisUserPrompt`。排序先按玩家优先级，再按选择顺序稳定排序。
+
+- `remix`：仅作灵感，允许改写；多项规则冲突时必须生成 `fusionAxiom`。
+- `inherit`：名称、身份、核心背景、能力机制等 `lockedPaths` 必须逐值保持；关系与地域可适配。
+- `locked` / `fullLock`：完整卡片逐字段保持。
+- 依赖决定为 `include | rebuild | omit`；重建不得保留旧稳定 ref。
+- 隐藏议程、暗流、隐藏能力和未揭示栏目只作幕后约束，不得公开泄露或改为 `known`。
+- 独立能力必须落到类型合法的 owner：`divine → god`、`personal → character`、`racial_* → race`。
+
+素材不触发摘要模型或逐卡调用。正式首轮仍只有 `stream("narrative", { task: "genesis" })`；若结构、引用或素材约束失败，统一进入既有的一次 repair，修复后再次执行本地验证，不新增第三次请求。
+
+## Prompt Cache 稳定前缀规范
+
+所有启用厂商 Prompt Cache 的请求严格遵循：
+
+```
+global（跨世界固定） → world（同世界稳定） → dynamic（本轮变化）
+```
+
+一旦出现 `dynamic` 消息，后续消息一律视为动态，不能重新进入稳定前缀。主动缓存提示的连续稳定前缀至少为 4,000 字符；缓存键由 provider、规范化 Base URL、model、低基数 namespace 与稳定消息共同生成 SHA-256 摘要，不包含明文。
+
+- **正文 Narrator**：固定核心规则与输出契约为 global；世界名、风格、主题、宇宙论、融合公理、玩家神和主神卡为 world；当前时之仪尺度、征兆、查探结果、实体/能力、世界书命中、编年史、正文窗口和本轮神谕为 dynamic。
+- **创世**：`GENESIS_SYSTEM` 为 global；原初神谕、素材选择及修复内容为 dynamic，namespace 为 `genesis:v1`。
+- **章末结算**：固定 Settlement Schema/System 为 global；本章上下文为 dynamic，namespace 为 `settlement:v1`，仍只进行一次模型调用。
+- **卡片重掷与引用修复**：固定创世 System 为 global；当前卡组、重掷说明和引用错误为 dynamic，任务与 namespace 均使用 `reroll` / `reroll:v1`。
+
+OpenAI-compatible 使用哈希 `prompt_cache_key`；Anthropic 在 global/world 末尾最多放置两个 `cache_control: ephemeral`；Gemini 不创建显式 `cachedContents`，仅依赖隐式缓存并读取 `cachedContentTokenCount`。缓存的是输入前缀，不是模型答案。
