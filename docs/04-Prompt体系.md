@@ -23,16 +23,23 @@ Tasks:
     persona card, VOICE card (verbal tics, forms of address, catchphrases,
     things they would never say), hidden AGENDA card (goals, stance toward
     player: hostility|rivalry|neutral|cooperation|dependence + motive, schemes).
- 3. Infer the player god's origin from their input (newborn / canonical god /
+ 3. Give the player god 3-6 DIVINE abilities, all player-visible. Give every
+    major god 3-6 DIVINE abilities, at least one known; hidden/rumored items
+    must serve a concrete secret, undercurrent, or agenda.
+ 4. Produce races with 2-5 abilities each: racial_innate (default inherited)
+    or racial_tradition (never auto-learned). Every ability states effect,
+    trigger, cost and limitations.
+ 5. Produce 6-12 majorCharacters with stable refs, primary raceRef, faction
+    memberships, 2-5 personal abilities, explicit learned tradition refs and
+    innate overrides only for exceptions. Faction key figures reference them.
+ 6. Infer the player god's origin from their input (newborn / canonical god /
     reincarnated / usurper...). Give them a starting situation with hooks.
- 4. Produce faction/race/place cards (each with faith alignment), an epoch
-    conflict card (some threads hidden, seeding god agendas), a narrative
-    style card inferred from the player's phrasing, and a theme card
-    (era naming, rank vocabulary matching the world's flavor).
+ 7. Produce faction/place cards, an epoch conflict card, narrative style and
+    theme. All card and ability relationships use stable refs, never names.
 Output: strict JSON per schema. ALL user-facing text in Chinese.
 ```
 
-**卡片重掷**：同模板，附「其余卡组为约束，仅重生成目标卡，保持一致性；`player_locked` 字段原样保留」。
+**卡片重掷**：同模板，附「其余卡组为约束，仅重生成目标卡，保持一致性；稳定 `ref` 与 `player_locked` 字段原样保留；若重掷种族、势力或主要人物，必须同步修复所有受影响引用」。后端再次校验数量、所有者类型、种族来源和跨卡引用；无效草稿不能开局。
 
 ## 2. 叙事主引擎（Narrator）
 
@@ -43,9 +50,10 @@ Output: strict JSON per schema. ALL user-facing text in Chinese.
 1. 系统模板（下）
 2. 风格卡 + 宇宙论 + 融合公理 + 玩家神卡 + 当前尺度档文体规则
 3. 在场实体状态卡（强制）→ 命中实体卡 → 命中神卡（人格+声纹，议程仅注入「外显可推断部分」）
-4. 命中世界书条目（ST keys 规则）
-5. 相关编年史条目 + 未消费征兆队列
-6. 滑动正文窗口
+4. 能力上下文：玩家神自己的全部神权；相关种族/人物/神明的已知能力与传闻；只有当前拥有者在场、被调查或触发相关时，才在作者侧选择性注入隐藏能力
+5. 命中世界书条目（ST keys 规则）
+6. 相关编年史条目 + 未消费征兆队列
+7. 滑动正文窗口
 
 系统模板要点：
 
@@ -60,16 +68,23 @@ Core rules:
  - OMENS: you have a queue of pending omens from offstage god actions.
    Weave AT MOST 1-2 per reply, seamlessly — a passing detail, never flagged,
    never explained. ("Tonight the votive fires in the north burned dimmer.")
+ - ABILITIES: adjudicate effect, trigger, cost, limitations, mastery, state,
+   opponent abilities, divine rank, world law and CURRENT SCALE. An ability is
+   never an automatic win and must not expand beyond its recorded boundary.
+   Do not invent a skill button, cooldown, mana, damage number or success rate.
+ - HIDDEN ABILITIES are author-only. Do not name or explain them before their
+   trigger is clearly witnessed or a plausible investigation confirms them.
+   Emit abilityReveals with abilityId, visibility (rumored|known) and evidence.
  - INVESTIGATION: when the player divines/probes/interrogates, you receive
-   matching HIDDEN CHRONICLE entries. Adjudicate by in-fiction plausibility:
+   matching hidden chronicles/abilities. Adjudicate by in-fiction plausibility:
    full reveal, partial glimpse, or misleading fragment. Mark revealed ids.
  - The world does not orbit the player: NPCs and gods pursue their own ends.
  - Honor fusion axiom on any cross-IP rules question.
  - Dark themes permitted per the world's tone; follow the style card.
  - Output Chinese narrative prose. End with the structured block.
 Structured tail block: { "suggestions": [2-4 short action options],
-  "chapter_break_hint": bool, "revealed_event_ids": [...],
-  "new_chosen": [{name, mark_description}] , "scale_drift_note": string? }
+  "chapterBreakHint": bool, "revealed_event_ids": [...],
+  "ability_reveals": [{abilityId, visibility: "rumored"|"known", evidence}] }
 ```
 
 ## 3. 诸神回合（Pantheon Turn）
@@ -78,8 +93,9 @@ Structured tail block: { "suggestions": [2-4 short action options],
 
 ```
 Role: You are {god_name}, playing YOURSELF — not a narrator.
-Input: your persona+voice+agenda, your relations, this chapter's chronicle,
-       codex cards of entities you touched, fusion axiom, recent pacts
+Input: your persona+voice+agenda, your relations, your complete currently
+       usable divine abilities (including your own author-only secrets), this
+       chapter's chronicle, codex cards you touched, fusion axiom, recent pacts
        (pacts are binding context: allies genuinely help, traitors genuinely betray).
 Task: choose exactly ONE offstage action this chapter that advances your agenda
       (scheme, pact, proxy move, blessing, sabotage, or deliberate stillness).
@@ -112,7 +128,14 @@ Task: extract entity deltas from this chapter's narrative.
  - Player god status: rank change proposal with one-line justification,
    domain drift, faith scope description.
  - Reveal detection: sections whose fog should lift given what was narrated.
-Output: strict JSON deltas. Chinese text fields.
+ - ABILITY CHANGES: awakened|learned|improved|mutated|impaired|sealed|restored|
+   lost|revealed|deprecated. Every item cites one exact message index and a
+   verbatim continuous excerpt (at least 12 Chinese characters). Existing
+   abilities use exact IDs; learning a racial tradition uses its source ID and
+   is valid only for the character's primary race. Never infer an unsupported
+   change, skip locked fields, and advance ordinary training by at most one
+   mastery step.
+Output: strict JSON deltas, including abilityChanges[]. Chinese text fields.
 ```
 
 ## 5. 编年史压缩（Chronicler-Scribe）
@@ -127,7 +150,7 @@ Chinese output.
 
 ## 6. 查探裁决
 
-不设独立调用——作为 Narrator 的内联职责（模板第 2 节 INVESTIGATION 规则）。Context Builder 在玩家输入命中「占卜/窥探/审问/洞察」语义或神选者调查指派时，将相关隐藏编年史条目附入上下文并标注其 id，由叙事模型裁决揭示并在尾块回填 `revealed_event_ids`。
+不设独立调用——作为 Narrator 的内联职责（模板第 2 节 INVESTIGATION 规则）。Context Builder 在玩家输入命中「占卜/窥探/审问/洞察」语义或神选者调查指派时，将相关隐藏编年史与作者侧能力附入上下文。叙事模型分别回填 `revealed_event_ids` 与 `ability_reveals`；服务端校验时间线与当前可见性后，原子执行 `hidden → rumored|known` 或 `rumored → known`，并把消息、证据和该轮时之仪尺度写入 `AbilityEvent(type=revealed)`。普通响应在投影前即过滤隐藏能力。
 
 ## 7. 特殊时刻模板（变体注入）
 
@@ -137,10 +160,15 @@ Chinese output.
 | **化身入世** | 附「玩家现为凡人化身 {描述}：收窄全知视角，神力受限按宇宙论裁决」 |
 | **余烬视角** | 附「玩家神仅余 {媒介}：叙事以微弱、贴地、近乎绝望的口吻；行动裁决从严」 |
 | **陨灭终章** | 单独调用：「以史诗终章收束此时间线：玩家神之死的余响、诸神格局、世界百年后记」 |
-| **翻章建议** | 非独立调用——`chapter_break_hint` 字段 |
+| **翻章建议** | 非独立调用——`chapterBreakHint` 字段只显示建议；不自动翻章，仍由玩家点击「结束本章」后集中结算 |
 
 ## 8. Token 预算与降级
 
 - 上下文预算按叙事槽 `maxTokens` 反推（默认按 32k 上下文规划，注入区约 8-12k）。
 - 裁剪顺序（先砍后保）：旧正文窗口 → 编年史 → 世界书低优先条目 → 非在场实体卡；**永不裁**：系统模板、风格卡、宇宙论、融合公理、在场实体、待织入征兆。
-- 幕后任务失败降级：诸神回合某神失败 → 该神本章记「静观」（不阻塞结算）；抽取失败 → 该章标记待重抽，玩家可在设置里重跑。
+- 章末能力抽取按消息窗口分片；每条变化最终使用证据消息自己的 `scale`，整章主尺度只作辅助背景。非法能力项逐条拒绝，不阻断同章其他合法结算；事件 `dedupeKey` 保证断点续跑幂等。
+- 幕后任务失败降级：诸神回合某神失败 → 该神本章记「静观」（不阻塞结算）；抽取失败 → 该章保留断点，重新点击结算可续跑。
+
+## 9. 旧世界渐进建档
+
+旧世界不要求模型补造完整能力谱，也不自动生成 6–12 位主要人物。上下文中能力集合为空时照常叙事；后续仅对正文明确展示、且可提供消息级连续证据的能力变化建立结构化记录。禁止为了“补齐卡片”推断未在正文发生的觉醒、学习或神权。章节交互不变：同章可以继续多轮对话，只有玩家手动「结束本章」才触发抽取。
