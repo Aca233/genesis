@@ -19,6 +19,13 @@ import {
 
 const MAX_RETRIES = 3;
 
+export type CompleteOptions = {
+  /** Total upstream streaming requests, including the first request. */
+  maxAttempts?: number;
+  /** Whether a failed streaming request may issue one additional non-streaming request. */
+  allowFallback?: boolean;
+};
+
 class SlotNotConfiguredError extends Error {
   constructor(slot: SlotName) {
     super(
@@ -123,35 +130,44 @@ async function collectStream(
 export async function complete(
   slotName: SlotName,
   req: CompletionRequest,
+  options?: CompleteOptions,
 ): Promise<string> {
   const { slot, apiKey, slotName: used } = await resolveSlot(slotName);
   const adapter = adapters[slot.provider];
   const startedAt = Date.now();
 
+  const maxAttempts = Math.max(1, options?.maxAttempts ?? MAX_RETRIES);
+  const allowFallback = options?.allowFallback ?? true;
   let lastError: unknown;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const text = await collectStream(adapter, slot, req, apiKey);
       await logCall(req.task, used, startedAt, true);
       return text;
     } catch (err) {
       lastError = err;
-      if (!isRetryable(err) || attempt === MAX_RETRIES - 1) break;
+      if (!isRetryable(err) || attempt === maxAttempts - 1) break;
       await backoff(attempt);
     }
   }
 
-  // 流式失败 → 回落非流式再试一次（个别网关只支持非流式）
-  try {
-    const text = await adapter.complete(slot, req, apiKey);
-    await logCall(req.task, used, startedAt, true);
-    return text;
-  } catch (fallbackErr) {
-    const finalErr = lastError ?? fallbackErr;
-    const message = finalErr instanceof Error ? finalErr.message : String(finalErr);
-    await logCall(req.task, used, startedAt, false, message);
-    throw describeError(finalErr);
+  if (allowFallback) {
+    // 流式失败 → 回落非流式再试一次（个别网关只支持非流式）
+    try {
+      const result = await adapter.complete(slot, req, apiKey);
+      await logCall(req.task, used, startedAt, true);
+      return result.text;
+    } catch (fallbackErr) {
+      const finalErr = lastError ?? fallbackErr;
+      const message = finalErr instanceof Error ? finalErr.message : String(finalErr);
+      await logCall(req.task, used, startedAt, false, message);
+      throw describeError(finalErr);
+    }
   }
+
+  const message = lastError instanceof Error ? lastError.message : String(lastError);
+  await logCall(req.task, used, startedAt, false, message);
+  throw describeError(lastError);
 }
 
 /** 流式补全（正文叙事）。流中途出错不重试（避免正文重复），直接抛出。 */
@@ -196,7 +212,7 @@ export async function testSlot(slot: ModelSlot, apiKey: string): Promise<string>
       text = await collectStream(adapter, slot, req, apiKey);
     } catch {
       // 流式失败回落非流式（个别网关只支持其一）
-      text = await adapter.complete(slot, req, apiKey);
+      text = (await adapter.complete(slot, req, apiKey)).text;
     }
     await logCall("test", "narrative", startedAt, true);
     return text;
