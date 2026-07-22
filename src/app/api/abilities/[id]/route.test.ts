@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
     chapter: { findUnique: vi.fn(), findFirst: vi.fn() },
     message: { findUnique: vi.fn() },
     timeline: { findUnique: vi.fn() },
+    realityRewrite: { findFirst: vi.fn() },
     ability: { findUnique: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn(), create: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
     abilityEvent: { findUnique: vi.fn(), create: vi.fn(), findMany: vi.fn(), count: vi.fn() },
     $transaction: vi.fn(),
@@ -56,6 +57,7 @@ describe("能力 API 可见性", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.prisma.chronicleEntry.findMany.mockResolvedValue([]);
+    mocks.prisma.realityRewrite.findFirst.mockResolvedValue(null);
     mocks.prisma.$transaction.mockImplementation(
       async (operation: (tx: typeof mocks.prisma) => unknown) => operation(mocks.prisma),
     );
@@ -98,6 +100,10 @@ describe("能力 API 可见性", () => {
       type: "race",
       sections: [],
       abilities: [knownAbility, hiddenAbility],
+      timeline: {
+        observerState: null,
+        world: { mode: "pantheon" },
+      },
     });
     mocks.projectAbilitiesForPlayer.mockReturnValue([knownAbility]);
 
@@ -131,6 +137,10 @@ describe("能力 API 可见性", () => {
       abilities: [personal],
       race: { id: "race-1", name: "晨裔", summary: "亲近晨光", abilities: [inherited] },
       memberships: [{ role: "守夜人", isPrimary: true, faction: { id: "faction-1", name: "晨钟会" } }],
+      timeline: {
+        observerState: null,
+        world: { mode: "pantheon" },
+      },
     });
     mocks.projectAbilitiesForPlayer.mockImplementation((abilities) => abilities);
 
@@ -156,6 +166,7 @@ describe("能力 API 可见性", () => {
       id: "world-1",
       name: "测试界",
       status: "playing",
+      mode: "pantheon",
       activeTimelineId: "timeline-1",
       genesisInput: "神谕",
       themeCard: null,
@@ -171,6 +182,12 @@ describe("能力 API 可见性", () => {
       messages: [],
     });
     mocks.prisma.chapter.findUnique.mockResolvedValue(null);
+    mocks.prisma.timeline.findUnique.mockResolvedValue({
+      id: "timeline-1",
+      branchName: "原初现实",
+      branchSummary: null,
+      observerState: null,
+    });
     mocks.prisma.god.findMany.mockResolvedValue([
       { id: "god-player", name: "玩家神", isPlayer: true, abilities: [knownAbility, hiddenAbility] },
       { id: "god-major", name: "大敌神", isPlayer: false, abilities: [knownAbility, hiddenAbility] },
