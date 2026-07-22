@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import type { PantheonWorldDeck } from "@/lib/cards/schemas";
+import type { WorldDeck } from "@/lib/cards/schemas";
 
 /**
  * 创世开局演出（docs/05 §4.1）
@@ -16,11 +16,11 @@ type EmbarkState =
   | { phase: "error"; message: string };
 
 /** 拓印条目：从卡组提炼的名目 */
-function buildStamps(deck: PantheonWorldDeck): string[] {
+export function buildCeremonyStamps(deck: WorldDeck): string[] {
   return [
     "宇宙论 · 已定",
     ...(deck.fusionAxiom ? ["融合公理 · 已缝合"] : []),
-    `${deck.playerGod.name} · 汝之神格`,
+    ...(deck.mode === "pantheon" ? [`${deck.playerGod.name} · 汝之神格`] : []),
     ...deck.majorGods.map((g) => `${g.name} · 入谱`),
     ...(deck.minorGods.length ? [`次要神 · ${deck.minorGods.length} 位`] : []),
     `势力 · ${deck.factions.length} 方`,
@@ -39,7 +39,7 @@ export function GenesisCeremony({
 }: {
   /** 原初神谕 */
   decree: string;
-  deck: PantheonWorldDeck;
+  deck: WorldDeck;
   embark: EmbarkState;
   /** embark 失败：退出演出交还编辑器（编辑器展示错误与重试） */
   onError: (message: string) => void;
@@ -55,7 +55,7 @@ export function GenesisCeremony({
   const [skipped, setSkipped] = useState(false);
 
   const chars = useMemo(() => Array.from(decree), [decree]);
-  const stamps = useMemo(() => buildStamps(deck), [deck]);
+  const stamps = useMemo(() => buildCeremonyStamps(deck), [deck]);
 
   // 每字 ~80ms；超 ~150 字加速，压住总时长
   const charInterval = chars.length > 150 ? Math.max(30, 12000 / chars.length) : 80;

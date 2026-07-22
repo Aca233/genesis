@@ -3,13 +3,20 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { completeStructured } from "@/lib/llm/structured";
-import { parsePersistedWorldDeck, WorldDeckSchema, DECK_CARD_KEYS, type WorldDeck } from "@/lib/cards/schemas";
+import {
+  CreatorWorldDeckSchema,
+  PantheonWorldDeckSchema,
+  parsePersistedWorldDeck,
+  DECK_CARD_KEYS,
+  type WorldDeck,
+} from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 import {
-  GENESIS_SYSTEM,
+  genesisSystem,
   rerollReferenceRepairPrompt,
   rerollUserPrompt,
 } from "@/lib/prompts/genesis";
+import { assertModeTransition, WorldModeSchema, type WorldMode } from "@/lib/world-mode";
 
 /**
  * POST /api/worlds/[id]/reroll —— 单卡重掷（其余卡组为约束；player_locked 保留）
@@ -52,17 +59,24 @@ function setPath(obj: unknown, path: string, value: unknown) {
   }
 }
 
+function parseForMode(value: unknown, mode: WorldMode): WorldDeck {
+  return mode === "pantheon"
+    ? PantheonWorldDeckSchema.parse(value)
+    : CreatorWorldDeckSchema.parse(value);
+}
+
 function applyLockedPaths(
-  generated: WorldDeck,
+  generated: unknown,
   currentDeck: unknown,
   lockedPaths: string[],
+  mode: WorldMode,
 ): WorldDeck {
   const merged = JSON.parse(JSON.stringify(generated)) as Record<string, unknown>;
   for (const path of lockedPaths) {
     const oldValue = getPath(currentDeck, path);
     if (oldValue !== undefined) setPath(merged, path, oldValue);
   }
-  return WorldDeckSchema.parse(merged);
+  return parseForMode(merged, mode);
 }
 
 function referenceIssue(deck: WorldDeck): string | null {
@@ -93,32 +107,49 @@ export async function POST(
     return NextResponse.json({ error: "草稿卡组已损坏" }, { status: 500 });
   }
 
+  const mode = WorldModeSchema.parse(world.mode);
+  try {
+    assertModeTransition(mode, currentDeck.mode);
+  } catch {
+    return NextResponse.json({ error: "世界模式不可更改" }, { status: 409 });
+  }
+  if (mode === "creator" && cardKey === "playerGod") {
+    return NextResponse.json({ error: "创世主模式不能重掷玩家神" }, { status: 409 });
+  }
   const lockedPaths = world.lockedPaths;
 
   let generated: WorldDeck;
   try {
-    generated = await completeStructured("narrative", {
-      task: "reroll",
-      system: GENESIS_SYSTEM,
+    const requestOptions = {
+      task: "reroll" as const,
+      system: genesisSystem(mode),
       user: rerollUserPrompt({
+        mode,
         decree: world.genesisInput,
         cardKey,
         currentDeckJson: JSON.stringify(currentDeck),
         lockedNote: lockedPaths.length ? lockedPaths.join(", ") : undefined,
         playerNote: note,
       }),
-      schema: WorldDeckSchema,
       maxTokens: 16000,
-      cache: { namespace: "reroll:v1" },
-    });
+      cache: { namespace: `reroll:v1:${mode}` },
+    };
+    generated = mode === "pantheon"
+      ? await completeStructured("narrative", { ...requestOptions, schema: PantheonWorldDeckSchema })
+      : await completeStructured("narrative", { ...requestOptions, schema: CreatorWorldDeckSchema });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 502 });
   }
+  try {
+    assertModeTransition(mode, generated.mode);
+  } catch {
+    return NextResponse.json({ error: "世界模式不可更改" }, { status: 409 });
+  }
 
   let deck: WorldDeck;
   try {
-    deck = applyLockedPaths(generated, currentDeck, lockedPaths);
+    deck = applyLockedPaths(generated, currentDeck, lockedPaths, mode);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: `重掷结果与锁定字段无法组成有效卡组：${message}` }, { status: 502 });
@@ -127,19 +158,22 @@ export async function POST(
   const firstReferenceIssue = referenceIssue(deck);
   if (firstReferenceIssue !== null) {
     try {
-      const repaired = await completeStructured("narrative", {
-        task: "reroll",
-        system: GENESIS_SYSTEM,
+      const repairOptions = {
+        task: "reroll" as const,
+        system: genesisSystem(mode),
         user: rerollReferenceRepairPrompt({
+          mode,
           decree: world.genesisInput,
           currentDeckJson: JSON.stringify(deck),
           referenceIssue: firstReferenceIssue,
         }),
-        schema: WorldDeckSchema,
         maxTokens: 16000,
-        cache: { namespace: "reroll:v1" },
-      });
-      deck = applyLockedPaths(repaired, currentDeck, lockedPaths);
+        cache: { namespace: `reroll:v1:${mode}` },
+      };
+      const repaired = mode === "pantheon"
+        ? await completeStructured("narrative", { ...repairOptions, schema: PantheonWorldDeckSchema })
+        : await completeStructured("narrative", { ...repairOptions, schema: CreatorWorldDeckSchema });
+      deck = applyLockedPaths(repaired, currentDeck, lockedPaths, mode);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return NextResponse.json({ error: `重掷引用修复失败：${message}` }, { status: 502 });

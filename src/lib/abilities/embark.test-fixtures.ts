@@ -1,4 +1,4 @@
-import { PantheonWorldDeckSchema, type PantheonWorldDeck } from "@/lib/cards/schemas";
+import { CreatorWorldDeckSchema, PantheonWorldDeckSchema, type CreatorWorldDeck, type PantheonWorldDeck } from "@/lib/cards/schemas";
 
 function ability(
   ref: string,
@@ -144,5 +144,36 @@ export function completeDeck(): PantheonWorldDeck {
       },
       addressStyle: "以尊号相称",
     },
+  });
+}
+
+/** Strict Creator-mode fixture derived from the complete shared world graph. */
+export function completeCreatorDeck(): CreatorWorldDeck {
+  const { playerGod: _playerGod, ...shared } = completeDeck();
+  void _playerGod;
+  return CreatorWorldDeckSchema.parse({
+    ...shared,
+    mode: "creator",
+    majorGods: shared.majorGods.map(({
+      agenda,
+      initialRelationToPlayer: _initialRelationToPlayer,
+      ...god
+    }, index, gods) => {
+      void _initialRelationToPlayer;
+      return {
+        ...god,
+        agenda: {
+          longTermGoal: agenda.longTermGoal,
+          shortTermGoals: agenda.shortTermGoals,
+          methods: agenda.methods,
+          schemes: agenda.schemes,
+        },
+        relations: [{
+          targetGodRef: gods[(index + 1) % gods.length]!.ref,
+          label: "rival",
+          note: "世界内诸神竞争",
+        }],
+      };
+    }),
   });
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completeDeck } from "@/lib/abilities/embark.test-fixtures";
+import { completeCreatorDeck, completeDeck } from "@/lib/abilities/embark.test-fixtures";
 import { extractDeckMaterials } from "./extract-deck";
 import { validateMaterializedDeck } from "./validate-result";
 import type { GenesisMaterialSnapshot, GenesisMaterialSnapshotItem } from "./types";
@@ -86,5 +86,15 @@ describe("validateMaterializedDeck", () => {
       expect.objectContaining({ code: "dependency_not_rebuilt", path: "card.raceRef" }),
     ]));
     expect(characterContent.card.raceRef).toBe(deck.majorCharacters[0]!.raceRef);
+  });
+  it("Creator 对玩家神素材返回明确的模式错误", () => {
+    const deck = completeCreatorDeck();
+    const selected = itemFor("player_god");
+    expect(validateMaterializedDeck(deck, snapshot(selected))).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "creator_player_god_material",
+        message: "创世主模式不能引用玩家神素材",
+      }),
+    ]));
   });
 });

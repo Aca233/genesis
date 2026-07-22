@@ -45,6 +45,7 @@ export function TextField({
     <label className="grid gap-1">
       <LabelRow label={label} locked={isPathLocked(lockedPaths, path)} />
       <input
+        name={path}
         value={value}
         placeholder={placeholder}
         onChange={(e) => onEdit(path, e.target.value)}
@@ -66,6 +67,7 @@ export function TextAreaField({
     <label className="grid gap-1">
       <LabelRow label={label} locked={isPathLocked(lockedPaths, path)} />
       <textarea
+        name={path}
         value={value}
         rows={rows}
         onChange={(e) => onEdit(path, e.target.value)}
@@ -90,6 +92,7 @@ export function SelectField({
     <label className="grid gap-1">
       <LabelRow label={label} locked={isPathLocked(lockedPaths, path)} />
       <select
+        name={path}
         value={value}
         onChange={(e) => onEdit(path, e.target.value)}
         className={inputCls}

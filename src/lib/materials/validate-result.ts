@@ -102,6 +102,10 @@ export function validateMaterializedDeck(
   const versionItems = new Map(snapshot.items.map((item) => [item.version.id, item]));
 
   for (const item of snapshot.items) {
+    if (deck.mode === "creator" && item.card.kind === "player_god") {
+      issues.push(issue(item, "creator_player_god_material", "card", "创世主模式不能引用玩家神素材"));
+      continue;
+    }
     const content = parseMaterialVersionContent(item.version.content);
     const located = locateDeckCard(deck, item.card.kind, content);
     if (!located) {

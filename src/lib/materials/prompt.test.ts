@@ -61,4 +61,14 @@ describe("materialConstraintsPrompt", () => {
       .toBeLessThan(materialConstraintsPrompt({ ...base, items: [low, high] }).indexOf("低优先"));
     expect(materialConstraintsPrompt(null)).toBe("");
   });
+  it("Creator 在构建生成约束前明确拒绝玩家神素材", () => {
+    const base = snapshot();
+    const playerGod = extractDeckMaterials(completeDeck()).find((item) => item.kind === "player_god")!;
+    const item = structuredClone(base.items[0]!);
+    item.card.kind = "player_god";
+    item.card.name = playerGod.name;
+    item.version.content = playerGod.content;
+    expect(() => materialConstraintsPrompt({ ...base, items: [item] }, "creator"))
+      .toThrow("创世主模式不能引用玩家神素材");
+  });
 });

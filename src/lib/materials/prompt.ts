@@ -1,5 +1,6 @@
 import { parseMaterialVersionContent } from "./schemas";
 import type { GenesisMaterialSnapshot, GenesisMaterialSnapshotItem, MaterialKind } from "./types";
+import type { WorldMode } from "@/lib/world-mode";
 
 const INHERIT_CORE_PATHS: Record<MaterialKind, readonly string[]> = {
   player_god: ["ref", "name", "origin", "domains", "rank", "abilities"],
@@ -38,8 +39,14 @@ function lockDescriptor(item: GenesisMaterialSnapshotItem) {
 }
 
 /** Deterministically serializes the frozen snapshot into the existing Genesis request. */
-export function materialConstraintsPrompt(snapshot: GenesisMaterialSnapshot | null): string {
+export function materialConstraintsPrompt(
+  snapshot: GenesisMaterialSnapshot | null,
+  mode: WorldMode = "pantheon",
+): string {
   if (!snapshot || snapshot.items.length === 0) return "";
+  if (mode === "creator" && snapshot.items.some((item) => item.card.kind === "player_god")) {
+    throw new Error("创世主模式不能引用玩家神素材");
+  }
   const items = snapshot.items
     .map((item, stableIndex) => ({ item, stableIndex }))
     .sort((a, b) => b.item.selection.priority - a.item.selection.priority || a.stableIndex - b.stableIndex)

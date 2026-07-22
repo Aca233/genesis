@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { completeCreatorDeck } from "@/lib/abilities/embark.test-fixtures";
 import {
   abilityRefsInDeck,
   availableRacialInnateAbilityRefs,
@@ -11,6 +12,7 @@ import {
   selectableRacialOverrideSourceRefs,
   traditionAbilityRefsForRace,
   visibleAbilityIndexes,
+  deckCardOrder,
 } from "./deck-utils";
 
 describe("创世人物引用工具", () => {
@@ -158,5 +160,14 @@ describe("创世人物引用工具", () => {
         { sourceAbilityRef: "dragon-breath", bloodlineJustification: null },
       ),
     ).toEqual(["human-inborn"]);
+  });
+});
+
+
+describe("Creator 卡墙顺序", () => {
+  it("从宇宙论与主神开始且不包含玩家神", () => {
+    const deck = completeCreatorDeck();
+    expect(deckCardOrder(deck).slice(0, 2)).toEqual(["cosmology", "majorGods"]);
+    expect(deckCardOrder(deck)).not.toContain("playerGod");
   });
 });

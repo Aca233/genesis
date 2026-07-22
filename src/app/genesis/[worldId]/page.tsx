@@ -3,8 +3,8 @@
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence } from "motion/react";
-import type { PantheonWorldDeck, DeckCardKey } from "@/lib/cards/schemas";
-import { DECK_CARD_KEYS, PantheonWorldDeckSchema } from "@/lib/cards/schemas";
+import type { WorldDeck, DeckCardKey } from "@/lib/cards/schemas";
+import { DECK_CARD_KEYS, parsePersistedWorldDeck } from "@/lib/cards/schemas";
 import {
   setPathClone,
   countLockedUnder,
@@ -55,7 +55,7 @@ export default function GenesisEditorPage({
   const router = useRouter();
 
   // ── 世界数据 ──
-  const [deck, setDeck] = useState<PantheonWorldDeck | null>(null);
+  const [deck, setDeck] = useState<WorldDeck | null>(null);
   const [genesisInput, setGenesisInput] = useState("");
   const [lockedPaths, setLockedPaths] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -94,7 +94,9 @@ export default function GenesisEditorPage({
           router.replace(`/play/${worldId}`);
           return;
         }
-        setDeck(PantheonWorldDeckSchema.parse(world.draftDeck));
+        const parsedDeck = parsePersistedWorldDeck(world.draftDeck);
+        if (parsedDeck.mode !== world.mode) throw new Error("世界模式与草稿卡组不一致");
+        setDeck(parsedDeck);
         setGenesisInput(world.genesisInput ?? "");
         setLockedPaths(world.lockedPaths ?? []);
       })
@@ -117,7 +119,7 @@ export default function GenesisEditorPage({
 
   /** 保存手改：PATCH {deck, editedPaths}。返回是否成功。 */
   const save = useCallback(
-    async (current: PantheonWorldDeck): Promise<boolean> => {
+    async (current: WorldDeck): Promise<boolean> => {
       setSaving(true);
       setNotice(null);
       try {
@@ -164,7 +166,9 @@ export default function GenesisEditorPage({
           setNotice({ ok: false, text: `重掷失败:${json.error ?? res.status}` });
           return;
         }
-        setDeck(PantheonWorldDeckSchema.parse(json.deck));
+        const rerolled = parsePersistedWorldDeck(json.deck);
+        if (rerolled.mode !== deck.mode) throw new Error("世界模式不可更改");
+        setDeck(rerolled);
         setNotice({ ok: true, text: `✓ ${CARD_KEY_LABELS[cardKey]}已重掷（手改字段保留）` });
       } catch (err) {
         setNotice({ ok: false, text: `重掷失败:${String(err)}` });
@@ -202,11 +206,17 @@ export default function GenesisEditorPage({
         return;
       }
       const minor = deck.minorGods[index];
-      const next: PantheonWorldDeck = {
-        ...deck,
-        majorGods: [...deck.majorGods, promoteMinorGod(minor)],
-        minorGods: deck.minorGods.filter((_, i) => i !== index),
-      };
+      const next: WorldDeck = deck.mode === "pantheon"
+        ? {
+            ...deck,
+            majorGods: [...deck.majorGods, promoteMinorGod(minor, "pantheon")],
+            minorGods: deck.minorGods.filter((_, i) => i !== index),
+          }
+        : {
+            ...deck,
+            majorGods: [...deck.majorGods, promoteMinorGod(minor, "creator", deck.majorGods[0]?.ref)],
+            minorGods: deck.minorGods.filter((_, i) => i !== index),
+          };
       setDeck(next);
       setStructDirty(true);
       setNotice({
@@ -319,18 +329,22 @@ export default function GenesisEditorPage({
         </>
       )}
 
-      {/* ── 玩家神 ── */}
-      <GroupHeader title="汝之神格" cardKey="playerGod" rerolling={rerolling === "playerGod"} disabled={busy} onReroll={reroll} />
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <DeckCard
-          title={deck.playerGod.name}
-          subtitle={`${RANK_LABELS[deck.playerGod.rank]} · ${deck.playerGod.domains.join("、")}`}
-          lines={[clip(`出身：${deck.playerGod.origin}`), clip(`处境：${deck.playerGod.situation}`)]}
-          lockedCount={countLockedUnder(lockedPaths, "playerGod")}
-          rerolling={rerolling === "playerGod"}
-          onOpen={() => setOpenCard({ kind: "playerGod" })}
-        />
-      </div>
+      {/* ── 玩家神（仅诸神共世） ── */}
+      {deck.mode === "pantheon" && (
+        <>
+          <GroupHeader title="汝之神格" cardKey="playerGod" rerolling={rerolling === "playerGod"} disabled={busy} onReroll={reroll} />
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <DeckCard
+              title={deck.playerGod.name}
+              subtitle={`${RANK_LABELS[deck.playerGod.rank]} · ${deck.playerGod.domains.join("、")}`}
+              lines={[clip(`出身：${deck.playerGod.origin}`), clip(`处境：${deck.playerGod.situation}`)]}
+              lockedCount={countLockedUnder(lockedPaths, "playerGod")}
+              rerolling={rerolling === "playerGod"}
+              onOpen={() => setOpenCard({ kind: "playerGod" })}
+            />
+          </div>
+        </>
+      )}
 
       {/* ── 主神 ── */}
       <GroupHeader
@@ -344,18 +358,31 @@ export default function GenesisEditorPage({
       />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <AnimatePresence>
-          {deck.majorGods.map((g, i) => (
-            <DeckCard
-              key={`${i}-${g.name}`}
-              title={g.name}
-              subtitle={`${RANK_LABELS[g.rank]} · ${g.domains.join("、")} · 关系：${RELATION_LABELS[g.initialRelationToPlayer.label]}`}
-              lines={[clip(g.persona)]}
-              lockedCount={countLockedUnder(lockedPaths, `majorGods.${i}`)}
-              sealed={!revealed.has(`majorGods.${i}`)}
-              rerolling={rerolling === "majorGods"}
-              onOpen={() => setOpenCard({ kind: "majorGod", index: i })}
-            />
-          ))}
+          {deck.mode === "pantheon"
+            ? deck.majorGods.map((god, index) => (
+                <DeckCard
+                  key={`${index}-${god.name}`}
+                  title={god.name}
+                  subtitle={`${RANK_LABELS[god.rank]} · ${god.domains.join("、")} · 关系：${RELATION_LABELS[god.initialRelationToPlayer.label]}`}
+                  lines={[clip(god.persona)]}
+                  lockedCount={countLockedUnder(lockedPaths, `majorGods.${index}`)}
+                  sealed={!revealed.has(`majorGods.${index}`)}
+                  rerolling={rerolling === "majorGods"}
+                  onOpen={() => setOpenCard({ kind: "majorGod", index })}
+                />
+              ))
+            : deck.majorGods.map((god, index) => (
+                <DeckCard
+                  key={`${index}-${god.name}`}
+                  title={god.name}
+                  subtitle={`${RANK_LABELS[god.rank]} · ${god.domains.join("、")} · 神际关系：${god.relations.length} 条`}
+                  lines={[clip(god.persona)]}
+                  lockedCount={countLockedUnder(lockedPaths, `majorGods.${index}`)}
+                  sealed={!revealed.has(`majorGods.${index}`)}
+                  rerolling={rerolling === "majorGods"}
+                  onOpen={() => setOpenCard({ kind: "majorGod", index })}
+                />
+              ))}
         </AnimatePresence>
       </div>
 
@@ -524,7 +551,7 @@ export default function GenesisEditorPage({
         {openCard?.kind === "fusionAxiom" && (
           <FusionAxiomEditor deck={deck} lockedPaths={lockedPaths} onEdit={handleEdit} />
         )}
-        {openCard?.kind === "playerGod" && (
+        {openCard?.kind === "playerGod" && deck.mode === "pantheon" && (
           <PlayerGodEditor deck={deck} lockedPaths={lockedPaths} onEdit={handleEdit} />
         )}
         {openCard?.kind === "majorGod" && (
@@ -611,11 +638,12 @@ export default function GenesisEditorPage({
             <button
               type="button"
               onClick={embark}
-              disabled={saving || busy || ceremony?.phase === "pending"}
+              disabled={deck.mode === "creator" || saving || busy || ceremony?.phase === "pending"}
+              title={deck.mode === "creator" ? "创世主开局将在后续开放" : undefined}
               className="rounded-md border border-gilt bg-gilt/10 px-10 py-2 text-lg tracking-widest text-gilt transition hover:bg-gilt/20 disabled:opacity-40"
               style={{ fontFamily: "var(--font-display)" }}
             >
-              创　世
+              {deck.mode === "creator" ? "开局待启" : "创　世"}
             </button>
           </div>
         </div>
@@ -623,7 +651,7 @@ export default function GenesisEditorPage({
 
       {/* ── 创世演出 ── */}
       <AnimatePresence>
-        {ceremony && ceremony.phase !== "error" && (
+        {deck.mode === "pantheon" && ceremony && ceremony.phase !== "error" && (
           <GenesisCeremony
             decree={genesisInput || `${deck.worldName}，自此有史。`}
             deck={deck}
@@ -638,7 +666,7 @@ export default function GenesisEditorPage({
 }
 
 /** Modal 标题 */
-function modalTitle(open: OpenCard | null, deck: PantheonWorldDeck): string {
+function modalTitle(open: OpenCard | null, deck: WorldDeck): string {
   if (!open) return "";
   switch (open.kind) {
     case "cosmology":
@@ -646,7 +674,7 @@ function modalTitle(open: OpenCard | null, deck: PantheonWorldDeck): string {
     case "fusionAxiom":
       return "融合公理";
     case "playerGod":
-      return `汝之神格 · ${deck.playerGod.name}`;
+      return deck.mode === "pantheon" ? `汝之神格 · ${deck.playerGod.name}` : "";
     case "majorGod":
       return `主神 · ${deck.majorGods[open.index]?.name ?? ""}`;
     case "minorGods":

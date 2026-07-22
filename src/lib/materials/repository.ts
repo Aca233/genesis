@@ -1,13 +1,13 @@
 import type { MaterialVersion, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import type { PantheonWorldDeck } from "@/lib/cards/schemas";
+import type { WorldDeck } from "@/lib/cards/schemas";
 import { extractDeckMaterials } from "./extract-deck";
 import { MATERIAL_SCHEMA_VERSION, parseMaterialVersionContent, type MaterialVersionContent } from "./schemas";
 import { MaterialDependencySchema, type MaterialDependency } from "./types";
 
 export async function archiveInitialDeck(
   tx: Prisma.TransactionClient,
-  input: { worldId: string; worldName: string; deck: PantheonWorldDeck },
+  input: { worldId: string; worldName: string; deck: WorldDeck },
 ): Promise<void> {
   for (const material of extractDeckMaterials(input.deck)) {
     const sourceRef = `${input.worldId}:${material.sourceKind}:${material.sourceRef}`;

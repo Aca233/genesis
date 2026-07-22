@@ -1,7 +1,7 @@
 "use client";
 
 import type { AbilityKind } from "@/lib/abilities/types";
-import type { PantheonWorldDeck } from "@/lib/cards/schemas";
+import type { WorldDeck } from "@/lib/cards/schemas";
 import {
   canAddAbility,
   canEditAbilityVisibility,
@@ -11,7 +11,7 @@ import {
 } from "./deck-utils";
 import { TextAreaField, TextField, SelectField, Sect } from "./fields";
 
-type DeckAbility = PantheonWorldDeck["playerGod"]["abilities"][number];
+type DeckAbility = WorldDeck["majorGods"][number]["abilities"][number];
 
 export type AbilityEditorProps = {
   abilities: readonly DeckAbility[];

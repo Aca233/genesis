@@ -1,4 +1,4 @@
-import type { WorldDeck, MajorGodCard, DeckCardKey } from "@/lib/cards/schemas";
+import type { WorldDeck, MajorGodCard, CreatorMajorGodCard, DeckCardKey } from "@/lib/cards/schemas";
 import { RANKS } from "@/lib/cards/schemas";
 
 /** 卡片编辑器共用工具：路径读写、枚举中文映射、升格模板 */
@@ -56,6 +56,28 @@ export const CARD_KEY_LABELS: Record<DeckCardKey, string> = {
   style: "叙事风格",
   theme: "主题措辞",
 };
+
+const SHARED_DECK_CARD_ORDER = [
+  "cosmology",
+  "majorGods",
+  "minorGods",
+  "factions",
+  "races",
+  "majorCharacters",
+  "places",
+  "epochConflict",
+  "style",
+  "theme",
+] as const satisfies readonly DeckCardKey[];
+
+/** Card-wall order follows the real mode shape; Creator never receives a player-god section. */
+export function deckCardOrder(deck: WorldDeck): DeckCardKey[] {
+  const order: DeckCardKey[] = ["cosmology"];
+  if (deck.fusionAxiom) order.push("fusionAxiom");
+  if (deck.mode === "pantheon") order.push("playerGod");
+  order.push(...SHARED_DECK_CARD_ORDER.slice(1));
+  return order;
+}
 
 /** 按点分路径读值（"majorGods.2.persona"） */
 export function getPath(obj: unknown, path: string): unknown {
@@ -312,14 +334,25 @@ const PLACEHOLDER = "（待补：可用重掷或手改完善）";
 /** 次要神升格为主神——占位模板确保过 WorldDeckSchema 校验 */
 export function promoteMinorGod(
   minor: WorldDeck["minorGods"][number],
-): MajorGodCard {
+  mode: "pantheon",
+): MajorGodCard;
+export function promoteMinorGod(
+  minor: WorldDeck["minorGods"][number],
+  mode: "creator",
+  relationTargetRef?: string,
+): CreatorMajorGodCard;
+export function promoteMinorGod(
+  minor: WorldDeck["minorGods"][number],
+  mode: WorldDeck["mode"] = "pantheon",
+  relationTargetRef?: string,
+): MajorGodCard | CreatorMajorGodCard {
   const ref = `god-${minor.name}`;
-  return {
+  const shared = {
     ref,
     name: minor.name,
     aliases: [],
     domains: [PLACEHOLDER],
-    rank: "nascent",
+    rank: "nascent" as const,
     persona: minor.brief || PLACEHOLDER,
     voice: {
       verbalTics: [],
@@ -327,14 +360,6 @@ export function promoteMinorGod(
       catchphrases: [],
       neverSays: [],
     },
-    agenda: {
-      longTermGoal: PLACEHOLDER,
-      shortTermGoals: [],
-      methods: PLACEHOLDER,
-      stanceToPlayer: { level: "neutral", motive: PLACEHOLDER },
-      schemes: [],
-    },
-    initialRelationToPlayer: { label: "unknown", note: PLACEHOLDER },
     faithScope: PLACEHOLDER,
     abilities: Array.from({ length: 3 }, (_, index) => ({
       ref: `${ref}-ability-${index + 1}`,
@@ -350,6 +375,31 @@ export function promoteMinorGod(
       rumorText: null,
       lockedFields: [],
     })),
+  };
+  if (mode === "pantheon") {
+    return {
+      ...shared,
+      agenda: {
+        longTermGoal: PLACEHOLDER,
+        shortTermGoals: [],
+        methods: PLACEHOLDER,
+        stanceToPlayer: { level: "neutral", motive: PLACEHOLDER },
+        schemes: [],
+      },
+      initialRelationToPlayer: { label: "unknown", note: PLACEHOLDER },
+    };
+  }
+  return {
+    ...shared,
+    agenda: {
+      longTermGoal: PLACEHOLDER,
+      shortTermGoals: [],
+      methods: PLACEHOLDER,
+      schemes: [],
+    },
+    relations: relationTargetRef
+      ? [{ targetGodRef: relationTargetRef, label: "unknown", note: PLACEHOLDER }]
+      : [],
   };
 }
 

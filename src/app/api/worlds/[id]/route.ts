@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { parsePersistedWorldDeck, WorldDeckSchema } from "@/lib/cards/schemas";
+import {
+  CreatorWorldDeckSchema,
+  PantheonWorldDeckSchema,
+  parsePersistedWorldDeck,
+  type WorldDeck,
+} from "@/lib/cards/schemas";
+import { assertModeTransition, WorldModeSchema } from "@/lib/world-mode";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 
 /**
@@ -44,11 +50,34 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const body = PatchSchema.parse(await request.json());
+  const world = await prisma.world.findUnique({
+    where: { id },
+    select: { mode: true, lockedPaths: true },
+  });
+  if (!world) return NextResponse.json({ error: "不存在" }, { status: 404 });
 
-  let deck;
+  let body: z.infer<typeof PatchSchema>;
   try {
-    deck = WorldDeckSchema.parse(body.deck);
+    body = PatchSchema.parse(await request.json());
+  } catch {
+    return NextResponse.json({ error: "卡组校验失败" }, { status: 400 });
+  }
+
+  const mode = WorldModeSchema.parse(world.mode);
+  const submittedMode = body.deck && typeof body.deck === "object"
+    ? (body.deck as { mode?: unknown }).mode
+    : undefined;
+  try {
+    assertModeTransition(mode, WorldModeSchema.parse(submittedMode));
+  } catch {
+    return NextResponse.json({ error: "世界模式不可更改" }, { status: 409 });
+  }
+
+  let deck: WorldDeck;
+  try {
+    deck = mode === "pantheon"
+      ? PantheonWorldDeckSchema.parse(body.deck)
+      : CreatorWorldDeckSchema.parse(body.deck);
     validateDeckReferences(deck);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -57,9 +86,6 @@ export async function PATCH(
       { status: 400 },
     );
   }
-
-  const world = await prisma.world.findUnique({ where: { id } });
-  if (!world) return NextResponse.json({ error: "不存在" }, { status: 404 });
 
   const lockedPaths = [...new Set([...world.lockedPaths, ...body.editedPaths])];
   await prisma.world.update({

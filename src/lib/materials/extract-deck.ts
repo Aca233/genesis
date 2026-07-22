@@ -1,4 +1,4 @@
-import type { DeckAbilitySchema, PantheonWorldDeck } from "@/lib/cards/schemas";
+import type { DeckAbilitySchema, WorldDeck } from "@/lib/cards/schemas";
 import type { z } from "zod";
 import type { MaterialVersionContent } from "./schemas";
 import type { MaterialDependency, MaterialKind } from "./types";
@@ -18,7 +18,7 @@ const dependency = (
   targetRef: string, label: string, required = true,
 ): MaterialDependency => ({ key: `${relation}:${targetRef}`, relation, targetKind, targetRef, label, required });
 
-export function extractDeckMaterials(deck: PantheonWorldDeck): ExtractedMaterial[] {
+export function extractDeckMaterials(deck: WorldDeck): ExtractedMaterial[] {
   const result: ExtractedMaterial[] = [];
   const add = (item: ExtractedMaterial) => result.push(item);
   const addAbility = (
@@ -38,8 +38,10 @@ export function extractDeckMaterials(deck: PantheonWorldDeck): ExtractedMaterial
   add({ kind: "style", sourceKind: "world_card", sourceRef: "world:style", name: deck.style.presetName, summary: deck.style.toneNotes.slice(0, 160), content: { schemaVersion: 1, origin: "deck", kind: "style", card: deck.style }, dependencies: [] });
   add({ kind: "theme", sourceKind: "world_card", sourceRef: "world:theme", name: `${deck.worldName}·主题`, summary: deck.theme.addressStyle.slice(0, 160), content: { schemaVersion: 1, origin: "deck", kind: "theme", card: deck.theme }, dependencies: [] });
 
-  add({ kind: "player_god", sourceKind: "god", sourceRef: deck.playerGod.ref, name: deck.playerGod.name, summary: deck.playerGod.situation.slice(0, 160), content: { schemaVersion: 1, origin: "deck", kind: "player_god", card: deck.playerGod }, dependencies: [] });
-  deck.playerGod.abilities.forEach((ability) => addAbility(ability, { kind: "god", sourceRef: deck.playerGod.ref, name: deck.playerGod.name }));
+  if (deck.mode === "pantheon") {
+    add({ kind: "player_god", sourceKind: "god", sourceRef: deck.playerGod.ref, name: deck.playerGod.name, summary: deck.playerGod.situation.slice(0, 160), content: { schemaVersion: 1, origin: "deck", kind: "player_god", card: deck.playerGod }, dependencies: [] });
+    deck.playerGod.abilities.forEach((ability) => addAbility(ability, { kind: "god", sourceRef: deck.playerGod.ref, name: deck.playerGod.name }));
+  }
   deck.majorGods.forEach((god) => {
     add({ kind: "major_god", sourceKind: "god", sourceRef: god.ref, name: god.name, summary: god.persona.slice(0, 160), content: { schemaVersion: 1, origin: "deck", kind: "major_god", card: god }, dependencies: [] });
     god.abilities.forEach((ability) => addAbility(ability, { kind: "god", sourceRef: god.ref, name: god.name }));

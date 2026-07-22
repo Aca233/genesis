@@ -21,7 +21,6 @@ export async function archiveWorldMaterials(worldId: string): Promise<void> {
       const world = await tx.world.findUniqueOrThrow({ where: { id: worldId }, select: { id: true, name: true, draftDeck: true } });
       if (!world.draftDeck) throw new Error("世界缺少可归档的最终创世卡组");
       const deck = parsePersistedWorldDeck(world.draftDeck);
-      if (deck.mode !== "pantheon") throw new Error("当前素材归档尚不支持创世主模式");
       await archiveInitialDeck(tx, { worldId: world.id, worldName: world.name, deck });
       await tx.world.update({ where: { id: world.id }, data: { materialArchiveStatus: "completed", materialArchiveError: null } });
     }, { isolationLevel: "Serializable" });

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
   CosmologyCardSchema, DeckAbilitySchema, EpochConflictCardSchema,
-  FactionCardSchema, FusionAxiomCardSchema, MajorCharacterCardSchema,
+  CreatorMajorGodCardSchema, FactionCardSchema, FusionAxiomCardSchema, MajorCharacterCardSchema,
   MajorGodCardSchema, PlaceCardSchema, PlayerGodCardSchema, RaceCardSchema,
   StyleCardSchema, ThemeCardSchema,
 } from "@/lib/cards/schemas";
@@ -17,7 +17,7 @@ const withOrigins = <T extends z.ZodType>(deck: T) => z.union([
 ]);
 
 export const PlayerGodMaterialSchema = withOrigins(PlayerGodCardSchema).and(z.object({ kind: z.literal("player_god") }));
-export const MajorGodMaterialSchema = withOrigins(MajorGodCardSchema).and(z.object({ kind: z.literal("major_god") }));
+export const MajorGodMaterialSchema = withOrigins(z.union([MajorGodCardSchema, CreatorMajorGodCardSchema])).and(z.object({ kind: z.literal("major_god") }));
 export const CharacterMaterialSchema = withOrigins(MajorCharacterCardSchema).and(z.object({ kind: z.literal("character") }));
 export const RaceMaterialSchema = withOrigins(RaceCardSchema).and(z.object({ kind: z.literal("race") }));
 export const FactionMaterialSchema = withOrigins(FactionCardSchema).and(z.object({ kind: z.literal("faction") }));

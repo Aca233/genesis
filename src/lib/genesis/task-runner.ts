@@ -180,8 +180,8 @@ async function runGenesisTask(taskId: string): Promise<void> {
     const materialSnapshot: GenesisMaterialSnapshot | null = task.materialSelection == null
       ? null
       : GenesisMaterialSnapshotSchema.parse(task.materialSelection);
-    const materialText = materialConstraintsPrompt(materialSnapshot);
     const mode = WorldModeSchema.parse(task.mode);
+    const materialText = materialConstraintsPrompt(materialSnapshot, mode);
     const genesisRequest = buildGenesisRequest({
       mode,
       decree: task.decree,

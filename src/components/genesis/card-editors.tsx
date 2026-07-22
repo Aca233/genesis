@@ -106,56 +106,56 @@ export function PlayerGodEditor({ deck, lockedPaths, onEdit }: PantheonEditorPro
 
 // ───────────────────────── 主神（单卡） ─────────────────────────
 
-export function MajorGodEditor({
+export function MajorGodEditor(props: EditorProps & {
+  index: number;
+  agendaRevealed: boolean;
+  onRevealAgenda: () => void;
+}) {
+  return props.deck.mode === "pantheon"
+    ? <PantheonMajorGodEditor {...props} deck={props.deck} />
+    : <CreatorMajorGodEditor {...props} deck={props.deck} />;
+}
+
+function MajorGodSharedFields({
   deck,
   index,
   lockedPaths,
   onEdit,
   agendaRevealed,
   onRevealAgenda,
-}: PantheonEditorProps & {
+  relationFields,
+  stanceFields,
+}: EditorProps & {
   index: number;
   agendaRevealed: boolean;
   onRevealAgenda: () => void;
+  relationFields: React.ReactNode;
+  stanceFields: React.ReactNode;
 }) {
-  const g = deck.majorGods[index];
-  if (!g) return null;
+  const god = deck.majorGods[index];
+  if (!god) return null;
   const base = `majorGods.${index}`;
   const common = { lockedPaths, onEdit };
   return (
     <>
-      <TextField label="名号" path={`${base}.name`} value={g.name} {...common} />
-      <ListField label="别名与称号" path={`${base}.aliases`} values={g.aliases} {...common} />
-      <ListField label="领域" path={`${base}.domains`} values={g.domains} {...common} />
-      <SelectField label="位阶" path={`${base}.rank`} value={g.rank} options={RANK_OPTIONS} {...common} />
-      <TextAreaField label="性情与外显形象" path={`${base}.persona`} value={g.persona} rows={3} {...common} />
-      <TextAreaField label="信仰范围" path={`${base}.faithScope`} value={g.faithScope} rows={2} {...common} />
+      <TextField label="名号" path={`${base}.name`} value={god.name} {...common} />
+      <ListField label="别名与称号" path={`${base}.aliases`} values={god.aliases} {...common} />
+      <ListField label="领域" path={`${base}.domains`} values={god.domains} {...common} />
+      <SelectField label="位阶" path={`${base}.rank`} value={god.rank} options={RANK_OPTIONS} {...common} />
+      <TextAreaField label="性情与外显形象" path={`${base}.persona`} value={god.persona} rows={3} {...common} />
+      <TextAreaField label="信仰范围" path={`${base}.faithScope`} value={god.faithScope} rows={2} {...common} />
 
       <Sect title="声纹" />
-      <ListField label="语癖" path={`${base}.voice.verbalTics`} values={g.voice.verbalTics} {...common} />
-      <TextField label="称呼习惯" path={`${base}.voice.address`} value={g.voice.address} {...common} />
-      <ListField label="口头禅" path={`${base}.voice.catchphrases`} values={g.voice.catchphrases} {...common} />
-      <ListField label="绝不会说的话" path={`${base}.voice.neverSays`} values={g.voice.neverSays} {...common} />
+      <ListField label="语癖" path={`${base}.voice.verbalTics`} values={god.voice.verbalTics} {...common} />
+      <TextField label="称呼习惯" path={`${base}.voice.address`} value={god.voice.address} {...common} />
+      <ListField label="口头禅" path={`${base}.voice.catchphrases`} values={god.voice.catchphrases} {...common} />
+      <ListField label="绝不会说的话" path={`${base}.voice.neverSays`} values={god.voice.neverSays} {...common} />
 
-      <Sect title="与玩家神的初始关系" />
-      <SelectField
-        label="关系"
-        path={`${base}.initialRelationToPlayer.label`}
-        value={g.initialRelationToPlayer.label}
-        options={RELATION_OPTIONS}
-        {...common}
-      />
-      <TextAreaField
-        label="备注"
-        path={`${base}.initialRelationToPlayer.note`}
-        value={g.initialRelationToPlayer.note}
-        rows={2}
-        {...common}
-      />
+      {relationFields}
 
       <AbilitySection title="神权" />
       <AbilityEditor
-        abilities={g.abilities}
+        abilities={god.abilities}
         basePath={`${base}.abilities`}
         allowedKinds={["divine"]}
         lockedPaths={lockedPaths}
@@ -175,25 +175,107 @@ export function MajorGodEditor({
         />
       ) : (
         <>
-          <TextAreaField label="长期目标" path={`${base}.agenda.longTermGoal`} value={g.agenda.longTermGoal} rows={2} {...common} />
-          <ListField label="短期目标" path={`${base}.agenda.shortTermGoals`} values={g.agenda.shortTermGoals} {...common} />
-          <TextAreaField label="手段偏好" path={`${base}.agenda.methods`} value={g.agenda.methods} rows={2} {...common} />
-          <SelectField
-            label="对玩家神的真实态度"
-            path={`${base}.agenda.stanceToPlayer.level`}
-            value={g.agenda.stanceToPlayer.level}
-            options={STANCE_OPTIONS}
-            {...common}
-          />
-          <TextField
-            label="态度动机（一句话）"
-            path={`${base}.agenda.stanceToPlayer.motive`}
-            value={g.agenda.stanceToPlayer.motive}
-            {...common}
-          />
-          <ListField label="进行中的密谋" path={`${base}.agenda.schemes`} values={g.agenda.schemes} {...common} />
+          <TextAreaField label="长期目标" path={`${base}.agenda.longTermGoal`} value={god.agenda.longTermGoal} rows={2} {...common} />
+          <ListField label="短期目标" path={`${base}.agenda.shortTermGoals`} values={god.agenda.shortTermGoals} {...common} />
+          <TextAreaField label="手段偏好" path={`${base}.agenda.methods`} value={god.agenda.methods} rows={2} {...common} />
+          {stanceFields}
+          <ListField label="进行中的密谋" path={`${base}.agenda.schemes`} values={god.agenda.schemes} {...common} />
         </>
       )}
+    </>
+  );
+}
+
+function PantheonMajorGodEditor(props: Omit<EditorProps, "deck"> & {
+  deck: PantheonWorldDeck;
+  index: number;
+  agendaRevealed: boolean;
+  onRevealAgenda: () => void;
+}) {
+  const god = props.deck.majorGods[props.index];
+  if (!god) return null;
+  const base = `majorGods.${props.index}`;
+  const common = { lockedPaths: props.lockedPaths, onEdit: props.onEdit };
+  return (
+    <MajorGodSharedFields
+      {...props}
+      relationFields={<>
+        <Sect title="与玩家神的初始关系" />
+        <SelectField label="关系" path={`${base}.initialRelationToPlayer.label`} value={god.initialRelationToPlayer.label} options={RELATION_OPTIONS} {...common} />
+        <TextAreaField label="备注" path={`${base}.initialRelationToPlayer.note`} value={god.initialRelationToPlayer.note} rows={2} {...common} />
+      </>}
+      stanceFields={<>
+        <SelectField label="对玩家神的真实态度" path={`${base}.agenda.stanceToPlayer.level`} value={god.agenda.stanceToPlayer.level} options={STANCE_OPTIONS} {...common} />
+        <TextField label="态度动机（一句话）" path={`${base}.agenda.stanceToPlayer.motive`} value={god.agenda.stanceToPlayer.motive} {...common} />
+      </>}
+    />
+  );
+}
+
+function CreatorMajorGodEditor(props: Omit<EditorProps, "deck"> & {
+  deck: Extract<WorldDeck, { mode: "creator" }>;
+  index: number;
+  agendaRevealed: boolean;
+  onRevealAgenda: () => void;
+}) {
+  return (
+    <MajorGodSharedFields
+      {...props}
+      relationFields={<CreatorGodRelationsEditor {...props} />}
+      stanceFields={null}
+    />
+  );
+}
+
+function CreatorGodRelationsEditor({
+  deck,
+  index,
+  lockedPaths,
+  onEdit,
+}: EditorProps & { index: number }) {
+  if (deck.mode !== "creator") return null;
+  const god = deck.majorGods[index];
+  if (!god) return null;
+  const path = `majorGods.${index}.relations`;
+  const targets = deck.majorGods
+    .filter((_, targetIndex) => targetIndex !== index)
+    .map((target) => ({ value: target.ref, label: `${target.name} · ${target.ref}` }));
+  const common = { lockedPaths, onEdit };
+  return (
+    <>
+      <Sect title="与世界内诸神的关系" />
+      {god.relations.map((relation, relationIndex) => {
+        const relationPath = `${path}.${relationIndex}`;
+        return (
+          <div key={`${relation.targetGodRef}-${relationIndex}`} className="grid gap-3 rounded-md border border-line bg-paper p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-ink-faint">关系 {relationIndex + 1}</span>
+              <button
+                type="button"
+                onClick={() => onEdit(path, god.relations.filter((_, itemIndex) => itemIndex !== relationIndex))}
+                className="rounded-md border border-line px-2.5 py-0.5 text-xs text-ink-faint transition hover:border-cinnabar/50 hover:text-cinnabar"
+              >
+                删除
+              </button>
+            </div>
+            <SelectField label="目标神明" path={`${relationPath}.targetGodRef`} value={relation.targetGodRef} options={targets} {...common} />
+            <SelectField label="关系" path={`${relationPath}.label`} value={relation.label} options={RELATION_OPTIONS} {...common} />
+            <TextAreaField label="备注" path={`${relationPath}.note`} value={relation.note} rows={2} {...common} />
+          </div>
+        );
+      })}
+      <button
+        type="button"
+        disabled={targets.length === 0}
+        onClick={() => {
+          const target = targets.find((option) => !god.relations.some((relation) => relation.targetGodRef === option.value));
+          if (!target) return;
+          onEdit(path, [...god.relations, { targetGodRef: target.value, label: "unknown", note: "" }]);
+        }}
+        className="justify-self-start rounded-md border border-dashed border-line px-4 py-1.5 text-sm text-ink-faint transition hover:border-gilt/40 hover:text-gilt disabled:opacity-40"
+      >
+        ＋ 添一条神际关系
+      </button>
     </>
   );
 }

@@ -83,13 +83,18 @@ export function genesisRepairPrompt(opts: {
 
 /** 单卡重掷：其余卡组为约束 */
 export function rerollUserPrompt(opts: {
+  mode: WorldMode;
   decree: string;
   cardKey: string;
   currentDeckJson: string;
   lockedNote?: string;
   playerNote?: string;
 }) {
-  return `Primordial decree: """${opts.decree}"""
+  const modeGuard = opts.mode === "creator"
+    ? 'Frozen world mode: mode="creator". Never add playerGod, stanceToPlayer, or initialRelationToPlayer; preserve world-internal relations.'
+    : 'Frozen world mode: mode="pantheon". Keep playerGod and all player-god relationship fields.';
+  return `${modeGuard}
+Primordial decree: """${opts.decree}"""
 
 Current world deck (all other cards are CONSTRAINTS — stay consistent with them):
 ${opts.currentDeckJson}
@@ -105,11 +110,16 @@ Output ONLY the JSON object for the full world deck with "${opts.cardKey}" repla
 
 /** A single targeted retry for a structurally valid but cross-reference-invalid reroll. */
 export function rerollReferenceRepairPrompt(opts: {
+  mode: WorldMode;
   decree: string;
   currentDeckJson: string;
   referenceIssue: string;
 }) {
-  return `Primordial decree: """${opts.decree}"""
+  const modeGuard = opts.mode === "creator"
+    ? 'Frozen world mode: mode="creator". Never introduce playerGod or player-facing god relation fields.'
+    : 'Frozen world mode: mode="pantheon". Preserve playerGod and player-facing god relation fields.';
+  return `${modeGuard}
+Primordial decree: """${opts.decree}"""
 
 The following full world deck matches the field schema but has an invalid cross-card reference:
 ${opts.currentDeckJson}

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { genesisRepairPrompt, genesisSystem, genesisUserPrompt } from "./genesis";
+import {
+  genesisRepairPrompt,
+  genesisSystem,
+  genesisUserPrompt,
+  rerollReferenceRepairPrompt,
+  rerollUserPrompt,
+} from "./genesis";
 
 describe("genesis mode prompts", () => {
   it("pantheon 保留玩家神规则和 pantheon schema", () => {
@@ -35,5 +41,24 @@ describe("genesis mode prompts", () => {
     expect(repair).toContain("preserving valid content");
     expect(repair).toContain("locked path");
     expect(repair).toContain("do not reveal hidden material");
+  });
+
+  it("Creator 重掷与引用修补 prompt 冻结模式并禁止玩家神字段", () => {
+    const reroll = rerollUserPrompt({
+      mode: "creator",
+      decree: "创造星海",
+      cardKey: "majorGods",
+      currentDeckJson: '{"mode":"creator"}',
+    });
+    const repair = rerollReferenceRepairPrompt({
+      mode: "creator",
+      decree: "创造星海",
+      currentDeckJson: '{"mode":"creator"}',
+      referenceIssue: "relation missing",
+    });
+    expect(reroll).toContain('mode="creator"');
+    expect(reroll).toContain("Never add playerGod");
+    expect(repair).toContain('mode="creator"');
+    expect(repair).toContain("Never introduce playerGod");
   });
 });
