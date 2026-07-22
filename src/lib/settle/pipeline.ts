@@ -21,6 +21,12 @@ import {
 } from "@/lib/prompts/settlement";
 import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
 import { RealityStateSchema, type RealityState } from "@/lib/reality/schemas";
+import {
+  WorldOperationConflictError,
+  claimWorldOperation,
+  releaseWorldOperation,
+  type WorldOperationClient,
+} from "@/lib/reality/operation-lock";
 
 /**
  * 章末结算流水线（docs/02 §4.2）：
@@ -92,8 +98,48 @@ async function chapterProse(chapterId: string, mode: WorldMode) {
   };
 }
 
-/** 结算主流程：模型只调用一次；后续进度均为本地结果应用。 */
+export type SettlementOperationLease = {
+  worldId: string;
+  token: string;
+  claimed: true;
+};
+
+/** 获取世界级结算租约，并保证 runner 的所有退出路径都会按 token 释放。 */
 export async function* settleChapter(
+  chapterId: string,
+  lease?: SettlementOperationLease,
+): AsyncGenerator<SettleProgress> {
+  const operationDb = prisma as unknown as WorldOperationClient;
+  const token = lease?.token ?? crypto.randomUUID();
+  let worldId = lease?.worldId;
+  let ownsLease = lease?.claimed ?? false;
+
+  try {
+    const chapter = await prisma.chapter.findUnique({
+      where: { id: chapterId },
+      include: { timeline: { select: { id: true, worldId: true, world: { select: { activeTimelineId: true } } } } },
+    });
+    if (!chapter) throw new Error("章节不存在");
+    assertActiveReality(chapter.timeline.world.activeTimelineId, chapter.timeline.id);
+    if (worldId && worldId !== chapter.timeline.worldId) throw new Error("结算租约与章节世界不匹配");
+    worldId = chapter.timeline.worldId;
+
+    if (!ownsLease) {
+      const claimed = await claimWorldOperation(operationDb, worldId, "settlement", token);
+      if (!claimed.acquired) throw new WorldOperationConflictError(claimed.activeKind);
+      ownsLease = true;
+    }
+
+    yield* settleChapterWithLease(chapterId);
+  } finally {
+    if (ownsLease && worldId) {
+      await releaseWorldOperation(operationDb, worldId, "settlement", token);
+    }
+  }
+}
+
+/** 结算主流程：模型只调用一次；后续进度均为本地结果应用。 */
+async function* settleChapterWithLease(
   chapterId: string,
 ): AsyncGenerator<SettleProgress> {
   const chapter = await prisma.chapter.findUnique({

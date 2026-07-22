@@ -54,6 +54,70 @@ describe("narratorSSE", () => {
     }));
   });
 
+  it("流打开期间按配置周期续租，并在完成后停止续租", async () => {
+    vi.useFakeTimers();
+    try {
+      let finish!: () => void;
+      mocks.stream.mockImplementation(async function* () {
+        yield { type: "text", text: "第一段足够长以便立即稳定流出正文内容" };
+        await new Promise<void>((resolve) => { finish = resolve; });
+      });
+      const onHeartbeat = vi.fn().mockResolvedValue(undefined);
+      const response = narratorSSE({
+        messages: [],
+        onDone: vi.fn().mockResolvedValue({ messageId: "message-1" }),
+        onHeartbeat,
+        heartbeatMs: 100,
+      });
+      const reader = response.body!.getReader();
+      await reader.read();
+
+      await vi.advanceTimersByTimeAsync(250);
+      expect(onHeartbeat).toHaveBeenCalledTimes(2);
+      finish();
+      while (!(await reader.read()).done) { /* drain */ }
+      await vi.runAllTimersAsync();
+      expect(onHeartbeat).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("续租失败会执行单次失败回调并关闭响应流", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.stream.mockImplementation(async function* (_slot, _req, opts) {
+        yield { type: "text", text: "第一段足够长以便立即稳定流出正文内容" };
+        await new Promise<void>((resolve) => {
+          opts?.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+      });
+      let finishFailure!: () => void;
+      const onFailure = vi.fn(() => new Promise<void>((resolve) => { finishFailure = resolve; }));
+      const response = narratorSSE({
+        messages: [],
+        onDone: vi.fn().mockResolvedValue({ messageId: "message-1" }),
+        onFailure,
+        onHeartbeat: vi.fn().mockRejectedValue(new Error("世界操作租约已失效")),
+        heartbeatMs: 100,
+      });
+      const reader = response.body!.getReader();
+      await reader.read();
+      let ended = false;
+      const ending = reader.read().then((result) => { ended = result.done; return result; });
+
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+      expect(onFailure).toHaveBeenCalledTimes(1);
+      expect(ended).toBe(false);
+      finishFailure();
+      await ending;
+      expect(ended).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("取消响应会 abort 上游且不执行持久化回调", async () => {
     let upstreamSignal: AbortSignal | undefined;
     mocks.stream.mockImplementation(async function* (_slot, _req, opts) {

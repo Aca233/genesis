@@ -16,6 +16,14 @@ import {
   FrozenRealityError,
   type GenerationRequestClient,
 } from "@/lib/chat/request";
+import {
+  OPERATION_LEASE_RENEW_MS,
+  WorldOperationConflictError,
+  claimWorldOperation,
+  releaseWorldOperation,
+  renewWorldOperation,
+  type WorldOperationClient,
+} from "@/lib/reality/operation-lock";
 
 /**
  * POST /api/chat —— 叙事主循环（SSE 流）
@@ -72,6 +80,27 @@ export async function POST(request: Request) {
   if (mode === "say" && !content?.trim()) {
     return NextResponse.json({ error: "神谕不能为空" }, { status: 400 });
   }
+
+  const operationDb = prisma as unknown as WorldOperationClient;
+  const operation = await claimWorldOperation(
+    operationDb,
+    chapter.timeline.worldId,
+    "chat",
+    generationId,
+  );
+  if (!operation.acquired) {
+    return NextResponse.json(
+      { error: new WorldOperationConflictError(operation.activeKind).message },
+      { status: 409 },
+    );
+  }
+  const releaseOperation = () => releaseWorldOperation(
+    operationDb,
+    chapter.timeline.worldId,
+    "chat",
+    generationId,
+  );
+
   // 在任何玩家消息写入前，以 generationId 原子校验/保留整次请求协议。
   const proposedPlayerIndex = mode === "say" ? lastIndex + 1 : null;
   const proposedNarratorIndex = mode === "opening" ? 1 : lastIndex + (mode === "say" ? 2 : 1);
@@ -94,12 +123,14 @@ export async function POST(request: Request) {
       },
     );
   } catch (error) {
+    await releaseOperation();
     if (error instanceof OpeningGenerationConflictError || error instanceof FrozenRealityError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
     throw error;
   }
   if (prepared.state === "completed") {
+    await releaseOperation();
     return narratorCompletionSSE({ completion: prepared.completion, signal: request.signal });
   }
   if (prepared.state === "pending") {
@@ -139,12 +170,16 @@ export async function POST(request: Request) {
       beforeIndex: mode === "say" ? narratorIndex - 1 : undefined,
     });
   } catch (error) {
-    await markGenerationFailed(
-      prisma as unknown as GenerationRequestClient,
-      generationId,
-      prepared.attempt!,
-      error,
-    );
+    try {
+      await markGenerationFailed(
+        prisma as unknown as GenerationRequestClient,
+        generationId,
+        prepared.attempt!,
+        error,
+      );
+    } finally {
+      await releaseOperation();
+    }
     if (error instanceof FrozenRealityError ||
         (error instanceof Error && error.message === "该现实已被冻结")) {
       return NextResponse.json({ error: "该现实已被冻结" }, { status: 409 });
@@ -156,39 +191,59 @@ export async function POST(request: Request) {
     messages,
     cacheNamespace: `narrative:${chapter.timeline.worldId}:v1`,
     signal: request.signal,
-    onFailure: (error) => markGenerationFailed(
-      prisma as unknown as GenerationRequestClient,
-      generationId,
-      prepared.attempt!,
-      error,
-    ),
-    onDone: async ({ prose, meta, signal }) => {
-      const result = await finalizeNarration(
-        prisma as unknown as NarrationFinalizationClient,
-        {
-          generationId,
-          chapterId,
-          chapterIndex: chapter.index,
-          timelineId: chapter.timeline.id,
-          worldId: chapter.timeline.worldId,
-          expectedActiveTimelineId: chapter.timeline.id,
-          narratorIndex,
-          attempt: prepared.attempt,
-          requestMeta: prepared.meta,
-          prose,
-          meta,
-          scale,
-          signal,
-          logInvalidReveal: ({ abilityId }) => {
-            console.warn("[chat] 跳过非法能力揭示", {
-              abilityId,
-              timelineId: chapter.timeline.id,
-              generationId,
-            });
-          },
-        },
+    heartbeatMs: OPERATION_LEASE_RENEW_MS,
+    onHeartbeat: async () => {
+      const renewed = await renewWorldOperation(
+        operationDb,
+        chapter.timeline.worldId,
+        "chat",
+        generationId,
       );
-      return { messageId: result.messageId };
+      if (!renewed) throw new Error("世界操作租约已失效");
+    },
+    onFailure: async (error) => {
+      try {
+        await markGenerationFailed(
+          prisma as unknown as GenerationRequestClient,
+          generationId,
+          prepared.attempt!,
+          error,
+        );
+      } finally {
+        await releaseOperation();
+      }
+    },
+    onDone: async ({ prose, meta, signal }) => {
+      try {
+        const result = await finalizeNarration(
+          prisma as unknown as NarrationFinalizationClient,
+          {
+            generationId,
+            chapterId,
+            chapterIndex: chapter.index,
+            timelineId: chapter.timeline.id,
+            worldId: chapter.timeline.worldId,
+            expectedActiveTimelineId: chapter.timeline.id,
+            narratorIndex,
+            attempt: prepared.attempt,
+            requestMeta: prepared.meta,
+            prose,
+            meta,
+            scale,
+            signal,
+            logInvalidReveal: ({ abilityId }) => {
+              console.warn("[chat] 跳过非法能力揭示", {
+                abilityId,
+                timelineId: chapter.timeline.id,
+                generationId,
+              });
+            },
+          },
+        );
+        return { messageId: result.messageId };
+      } finally {
+        await releaseOperation();
+      }
     },
   });
 }

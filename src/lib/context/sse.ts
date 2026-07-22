@@ -12,18 +12,32 @@ export function narratorSSE(opts: {
   signal?: AbortSignal;
   onDone: (result: { prose: string; meta: NarratorMeta; signal: AbortSignal }) => Promise<{ messageId: string }>;
   onFailure?: (error: Error) => Promise<void>;
+  onHeartbeat?: () => Promise<void>;
+  heartbeatMs?: number;
 }): Response {
   const encoder = new TextEncoder();
   const upstream = new AbortController();
   let closed = false;
-  const abort = () => {
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let failure: Promise<void> | undefined;
+  const stopHeartbeat = () => {
+    if (heartbeat !== undefined) clearInterval(heartbeat);
+    heartbeat = undefined;
+  };
+  const reportFailure = (error: Error) => {
+    failure ??= opts.onFailure?.(error).catch(() => undefined) ?? Promise.resolve();
+    return failure;
+  };
+  const abort = (error = new Error("叙事生成已取消")) => {
     if (closed) return;
     closed = true;
+    stopHeartbeat();
     upstream.abort();
-    void opts.onFailure?.(new Error("叙事生成已取消"));
+    void reportFailure(error);
   };
+  const abortFromSignal = () => abort();
   if (opts.signal?.aborted) abort();
-  else opts.signal?.addEventListener("abort", abort, { once: true });
+  else opts.signal?.addEventListener("abort", abortFromSignal, { once: true });
 
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -35,6 +49,13 @@ export function narratorSSE(opts: {
       let full = "";
       let pending = "";
       let holdingCandidate = false;
+      if (!closed && opts.onHeartbeat) {
+        heartbeat = setInterval(() => {
+          void opts.onHeartbeat!().catch((error) => {
+            abort(error instanceof Error ? error : new Error(String(error)));
+          });
+        }, opts.heartbeatMs ?? 100_000);
+      }
 
       const flush = () => {
         if (holdingCandidate) {
@@ -84,16 +105,16 @@ export function narratorSSE(opts: {
         const { messageId } = await opts.onDone({ ...parsed, signal: upstream.signal });
         if (!closed && !upstream.signal.aborted) send({ type: "done", messageId, meta: parsed.meta });
       } catch (error) {
-        await opts.onFailure?.(error instanceof Error ? error : new Error(String(error)));
+        await reportFailure(error instanceof Error ? error : new Error(String(error)));
         if (!closed && !upstream.signal.aborted) {
           send({ type: "error", message: error instanceof Error ? error.message : String(error) });
         }
       } finally {
-        if (!closed) {
-          closed = true;
-          try { controller.close(); } catch { /* cancelled */ }
-        }
-        opts.signal?.removeEventListener("abort", abort);
+        stopHeartbeat();
+        await failure;
+        closed = true;
+        try { controller.close(); } catch { /* cancelled */ }
+        opts.signal?.removeEventListener("abort", abortFromSignal);
       }
     },
     cancel() { abort(); },

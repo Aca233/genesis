@@ -74,6 +74,9 @@ it("单次模型请求失败时释放占用且不运行后续阶段", async () =
     await expect(settle(data.chapter.id)).rejects.toThrow("extract unavailable");
     const chapter = await prisma.chapter.findUnique({ where: { id: data.chapter.id } });
     expect(chapter?.settleState).toBe("open");
+    expect(await prisma.world.findUnique({ where: { id: data.world.id } })).toMatchObject({
+      operationKind: null, operationToken: null, operationLeaseExpiresAt: null,
+    });
     expect(vi.mocked(completeStructured)).toHaveBeenCalledTimes(1);
   } finally {
     await prisma.world.delete({ where: { id: data.world.id } });
@@ -375,15 +378,47 @@ it("同一章节并发结束时全局只发起一次模型请求", async () => {
     majorCharacterPromotions: [], abilityChanges: [],
   };
   try {
-    await Promise.all([settle(data.chapter.id), settle(data.chapter.id)]);
+    const results = await Promise.allSettled([settle(data.chapter.id), settle(data.chapter.id)]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toEqual([
+      expect.objectContaining({ reason: expect.objectContaining({ activeKind: "settlement" }) }),
+    ]);
     expect(vi.mocked(completeStructured)).toHaveBeenCalledTimes(1);
     expect((await prisma.chapter.findUnique({ where: { id: data.chapter.id } }))?.settleState).toBe("settled");
+    expect(await prisma.world.findUnique({ where: { id: data.world.id } })).toMatchObject({
+      operationKind: null, operationToken: null, operationLeaseExpiresAt: null,
+    });
   } finally {
     responses.modelDelayMs = 0;
     await prisma.world.delete({ where: { id: data.world.id } });
   }
 });
 
+
+
+it("rejects settlement while chat owns the world and names the active operation in Chinese", async () => {
+  const data = await fixture();
+  await prisma.world.update({
+    where: { id: data.world.id },
+    data: {
+      operationKind: "chat",
+      operationToken: "generation-live",
+      operationLeaseExpiresAt: new Date(Date.now() + 60_000),
+    },
+  });
+  const { completeStructured } = await import("@/lib/llm/structured");
+  vi.mocked(completeStructured).mockClear();
+  try {
+    await expect(settle(data.chapter.id)).rejects.toMatchObject({
+      activeKind: "chat",
+      message: expect.stringContaining("叙事生成"),
+    });
+    expect(vi.mocked(completeStructured)).not.toHaveBeenCalled();
+    expect((await prisma.chapter.findUnique({ where: { id: data.chapter.id } }))?.settleState).toBe("open");
+  } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
 
 it("rejects settlement on a frozen non-active timeline without calling the model", async () => {
   const data = await fixture();

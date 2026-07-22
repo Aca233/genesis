@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
   prepareGenerationRequest: vi.fn(),
   readGenerationCompletion: vi.fn(),
   markGenerationFailed: vi.fn(),
+  claimWorldOperation: vi.fn(),
+  renewWorldOperation: vi.fn(),
+  releaseWorldOperation: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mocks.prisma }));
@@ -27,6 +30,19 @@ vi.mock("@/lib/context/sse", () => ({
 }));
 vi.mock("@/lib/chat/finalize", () => ({
   finalizeNarration: mocks.finalizeNarration,
+}));
+vi.mock("@/lib/reality/operation-lock", () => ({
+  OPERATION_LEASE_RENEW_MS: 100_000,
+  claimWorldOperation: mocks.claimWorldOperation,
+  renewWorldOperation: mocks.renewWorldOperation,
+  releaseWorldOperation: mocks.releaseWorldOperation,
+  WorldOperationConflictError: class WorldOperationConflictError extends Error {
+    activeKind: string;
+    constructor(activeKind: string) {
+      super(`世界正在进行${activeKind === "settlement" ? "章节结算" : activeKind}，请稍后再试`);
+      this.activeKind = activeKind;
+    }
+  },
 }));
 vi.mock("@/lib/chat/request", () => ({
   prepareGenerationRequest: mocks.prepareGenerationRequest,
@@ -54,6 +70,10 @@ describe("POST /api/chat", () => {
       headers: { "Content-Type": "text/event-stream; charset=utf-8" },
     }));
     mocks.finalizeNarration.mockResolvedValue({ messageId: "generation-1", reused: false });
+    mocks.claimWorldOperation.mockResolvedValue({ acquired: true });
+    mocks.renewWorldOperation.mockResolvedValue(true);
+    mocks.releaseWorldOperation.mockResolvedValue(true);
+    mocks.markGenerationFailed.mockResolvedValue(undefined);
     mocks.prepareGenerationRequest.mockResolvedValue({
       state: "owner",
       attempt: 1,
@@ -298,6 +318,100 @@ describe("POST /api/chat", () => {
       worldId: "world-1",
       expectedActiveTimelineId: "timeline-1",
     }));
+  });
+
+  it("claims the world with generationId before reserving generation", async () => {
+    const order: string[] = [];
+    mocks.claimWorldOperation.mockImplementation(async () => { order.push("claim"); return { acquired: true }; });
+    mocks.prepareGenerationRequest.mockImplementation(async () => {
+      order.push("prepare");
+      return {
+        state: "owner", attempt: 1,
+        meta: {
+          type: "chat-generation-request", chapterId: "chapter-1", mode: "continue", scale: "scene",
+          content: null, directive: null, playerMessageId: null, narratorMessageId: "generation-1",
+          playerIndex: null, narratorIndex: 4,
+        },
+      };
+    });
+
+    await POST(new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ chapterId: "chapter-1", scale: "scene", mode: "continue", generationId: "generation-1" }),
+    }));
+
+    expect(order).toEqual(["claim", "prepare"]);
+    expect(mocks.claimWorldOperation).toHaveBeenCalledWith(mocks.prisma, "world-1", "chat", "generation-1");
+  });
+
+  it("returns a Chinese 409 naming the active operation before generation reservation", async () => {
+    mocks.claimWorldOperation.mockResolvedValue({ acquired: false, activeKind: "settlement" });
+
+    const response = await POST(new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ chapterId: "chapter-1", scale: "scene", mode: "continue", generationId: "generation-1" }),
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "世界正在进行章节结算，请稍后再试" });
+    expect(mocks.prepareGenerationRequest).not.toHaveBeenCalled();
+  });
+
+  it("releases a completed retry immediately but does not release a pending duplicate owner", async () => {
+    mocks.prepareGenerationRequest.mockResolvedValueOnce({
+      state: "completed", meta: {},
+      completion: { messageId: "generation-1", meta: { suggestions: [], chapterBreakHint: false } },
+    });
+    const makeRequest = () => new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ chapterId: "chapter-1", scale: "scene", mode: "continue", generationId: "generation-1" }),
+    });
+
+    await POST(makeRequest());
+    expect(mocks.releaseWorldOperation).toHaveBeenCalledWith(mocks.prisma, "world-1", "chat", "generation-1");
+
+    mocks.releaseWorldOperation.mockClear();
+    mocks.prepareGenerationRequest.mockResolvedValueOnce({ state: "pending", meta: { narratorIndex: 4 } });
+    await POST(makeRequest());
+    expect(mocks.releaseWorldOperation).not.toHaveBeenCalled();
+  });
+
+  it("renews while streaming and releases after successful finalization", async () => {
+    await POST(new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ chapterId: "chapter-1", scale: "scene", mode: "continue", generationId: "generation-1" }),
+    }));
+    const [{ onHeartbeat, onDone }] = mocks.narratorSSE.mock.calls[0];
+
+    await onHeartbeat();
+    await onDone({ prose: "正文", meta: { suggestions: [], chapterBreakHint: false } });
+
+    expect(mocks.renewWorldOperation).toHaveBeenCalledWith(mocks.prisma, "world-1", "chat", "generation-1");
+    expect(mocks.releaseWorldOperation).toHaveBeenCalledWith(mocks.prisma, "world-1", "chat", "generation-1");
+    expect(mocks.finalizeNarration.mock.invocationCallOrder[0]).toBeLessThan(mocks.releaseWorldOperation.mock.invocationCallOrder[0]);
+  });
+
+  it("releases after stream failure even when marking the generation failed throws", async () => {
+    mocks.markGenerationFailed.mockRejectedValueOnce(new Error("mark failed"));
+    await POST(new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ chapterId: "chapter-1", scale: "scene", mode: "continue", generationId: "generation-1" }),
+    }));
+    const [{ onFailure }] = mocks.narratorSSE.mock.calls[0];
+
+    await expect(onFailure(new Error("upstream failed"))).rejects.toThrow("mark failed");
+    expect(mocks.releaseWorldOperation).toHaveBeenCalledWith(mocks.prisma, "world-1", "chat", "generation-1");
+  });
+
+  it("releases when context assembly fails before the stream is established", async () => {
+    mocks.buildNarratorContext.mockRejectedValue(new Error("context unavailable"));
+    const request = new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ chapterId: "chapter-1", scale: "scene", mode: "continue", generationId: "generation-1" }),
+    });
+
+    await expect(POST(request)).rejects.toThrow("context unavailable");
+    expect(mocks.releaseWorldOperation).toHaveBeenCalledWith(mocks.prisma, "world-1", "chat", "generation-1");
   });
 
 });
