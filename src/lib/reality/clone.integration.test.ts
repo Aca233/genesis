@@ -188,7 +188,15 @@ async function fixture() {
       role: "player",
       content: "加入观星会。",
       scale: "years",
-      meta: { command: "join" },
+      meta: {
+        command: "join",
+        generationRequest: {
+          type: "chat-generation-request",
+          chapterId: chapterTwo.id,
+          playerMessageId: messageOne.id,
+          narratorMessageId: "uncloned-generation-request-id",
+        },
+      },
     },
   });
   const sourceAbility = await prisma.ability.create({
@@ -243,7 +251,7 @@ async function fixture() {
   await prisma.entityMembership.create({
     data: { characterId: avatar.id, factionId: faction.id, role: "观星者", isPrimary: true },
   });
-  await prisma.abilityEvent.create({
+  const abilityEvent = await prisma.abilityEvent.create({
     data: {
       abilityId: learnedAbility.id,
       chapterId: chapterOne.id,
@@ -256,7 +264,7 @@ async function fixture() {
       dedupeKey: `${chapterOne.id}:${learnedAbility.id}:learned:${messageOne.id}`,
     },
   });
-  await prisma.chronicleEntry.create({
+  const chronicle = await prisma.chronicleEntry.create({
     data: {
       timelineId: timeline.id,
       chapterIndex: 1,
@@ -267,6 +275,44 @@ async function fixture() {
       revealed: false,
       revealedAtChapter: 2,
       source: "pantheon",
+    },
+  });
+  await prisma.message.update({
+    where: { id: messageOne.id },
+    data: {
+      variants: [{
+        content: "雪夜有回声",
+        chosen: false,
+        meta: {
+          abilityReveals: [{ abilityId: learnedAbility.id, evidence: "旧闻" }],
+          revealedEventIds: [chronicle.id],
+          evidenceEventId: abilityEvent.id,
+          linkedEntityId: avatar.id,
+          linkedGodId: dawnGod.id,
+          chapterId: chapterOne.id,
+          messageId: messageOne.id,
+        },
+      }],
+      meta: {
+        tags: ["origin"],
+        linkedEntityId: avatar.id,
+        linkedGodId: dawnGod.id,
+        abilityReveals: [{ abilityId: learnedAbility.id, evidence: "旧闻" }],
+        revealedEventIds: [chronicle.id],
+        evidenceEventId: abilityEvent.id,
+        chapterId: chapterOne.id,
+        playerMessageId: messageTwo.id,
+      },
+    },
+  });
+  await prisma.chapter.update({
+    where: { id: chapterOne.id },
+    data: {
+      snapshot: {
+        gods: [{ id: dawnGod.id, relations: { [duskGod.id]: { label: "rival" } } }],
+        entities: [{ id: avatar.id, raceId: race.id }],
+        pendingSettlement: { evidenceMessageId: messageOne.id, abilityId: learnedAbility.id },
+      },
     },
   });
   await prisma.omenQueue.create({
@@ -299,7 +345,11 @@ async function fixture() {
     },
   });
   await prisma.world.update({ where: { id: world.id }, data: { activeTimelineId: timeline.id } });
-  return { world, timeline, rewrite, chapterTwo, dawnGod, duskGod, race, faction, avatar, sourceAbility, learnedAbility };
+  return {
+    world, timeline, rewrite, chapterOne, chapterTwo, messageOne, messageTwo,
+    dawnGod, duskGod, race, faction, avatar, sourceAbility, learnedAbility,
+    abilityEvent, chronicle,
+  };
 }
 
 describe("cloneTimelineGraph", () => {
@@ -398,12 +448,41 @@ describe("cloneTimelineGraph", () => {
           expect(message.id).toBe(result.maps.messageIds.get(sourceMessage.id));
           expect(message.id).not.toBe(sourceMessage.id);
           expect(message.chapterId).toBe(chapter.id);
-          expect(message.meta).toEqual(sourceMessage.meta);
+          expect(message.meta).not.toHaveProperty("generationRequest");
           expect(message.meta).not.toHaveProperty("realityOrigin");
           expect(message.meta).not.toHaveProperty("previousReality");
           expect(message.meta).not.toHaveProperty("sourceMessageId");
         }
       }
+
+      const clonedChapterOne = cloned.timeline.chapters.find((item) => item.index === 1)!;
+      const clonedMessageOne = clonedChapterOne.messages.find((item) => item.index === 0)!;
+      const clonedMessageTwo = cloned.timeline.chapters.find((item) => item.index === 2)!.messages[0]!;
+      expect(clonedChapterOne.snapshot).toMatchObject({
+        gods: [{ id: result.maps.godIds.get(data.dawnGod.id) }],
+        entities: [{ id: result.maps.entityIds.get(data.avatar.id), raceId: result.maps.entityIds.get(data.race.id) }],
+        pendingSettlement: {
+          evidenceMessageId: result.maps.messageIds.get(data.messageOne.id),
+          abilityId: result.maps.abilityIds.get(data.learnedAbility.id),
+        },
+      });
+      expect(clonedMessageOne.meta).toMatchObject({
+        linkedEntityId: result.maps.entityIds.get(data.avatar.id),
+        linkedGodId: result.maps.godIds.get(data.dawnGod.id),
+        abilityReveals: [{ abilityId: result.maps.abilityIds.get(data.learnedAbility.id) }],
+        chapterId: result.maps.chapterIds.get(data.chapterOne.id),
+        playerMessageId: result.maps.messageIds.get(data.messageTwo.id),
+      });
+      expect(clonedMessageTwo.meta).not.toHaveProperty("generationRequest");
+      expect(clonedMessageOne.variants).toMatchObject([{
+        meta: {
+          linkedEntityId: result.maps.entityIds.get(data.avatar.id),
+          linkedGodId: result.maps.godIds.get(data.dawnGod.id),
+          abilityReveals: [{ abilityId: result.maps.abilityIds.get(data.learnedAbility.id) }],
+          chapterId: result.maps.chapterIds.get(data.chapterOne.id),
+          messageId: result.maps.messageIds.get(data.messageOne.id),
+        },
+      }]);
 
       const clonedRace = cloned.timeline.entities.find((item) => item.name === data.race.name)!;
       const clonedFaction = cloned.timeline.entities.find((item) => item.name === data.faction.name)!;

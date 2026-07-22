@@ -8,6 +8,8 @@ export type TimelineCloneMaps = {
   godIds: Map<string, string>;
   entityIds: Map<string, string>;
   abilityIds: Map<string, string>;
+  abilityEventIds: Map<string, string>;
+  chronicleIds: Map<string, string>;
 };
 
 type CloneInput = {
@@ -32,6 +34,45 @@ function requiredJson(value: Prisma.JsonValue) {
   return value === null
     ? Prisma.JsonNull
     : deepCopyJson(value) as Prisma.InputJsonValue;
+}
+
+/**
+ * Runtime snapshots and narration metadata embed graph IDs in both values and
+ * relation-map keys. Remap exact source IDs and remove request-only metadata;
+ * the corresponding GenerationRequest rows deliberately do not cross realities.
+ */
+function remapRuntimeJson(
+  value: Prisma.JsonValue | null,
+  idMap: ReadonlyMap<string, string>,
+  sourceIds: ReadonlySet<string>,
+  label: string,
+): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  if (value === null) return Prisma.DbNull;
+
+  const visit = (node: Prisma.JsonValue, path: string): Prisma.InputJsonValue => {
+    if (typeof node === "string") {
+      const mapped = idMap.get(node);
+      if (mapped !== undefined) return mapped;
+      if (sourceIds.has(node)) throw new Error(`${label}仍含未映射源 ID：${path}`);
+      return node;
+    }
+    if (node === null) return Prisma.JsonNull;
+    if (typeof node !== "object") return node;
+    if (Array.isArray(node)) return node.map((item, index) => visit(item, `${path}[${index}]`));
+
+    const output: Record<string, Prisma.InputJsonValue> = {};
+    for (const [key, child] of Object.entries(node)) {
+      if (key === "generationRequest" || child === undefined) continue;
+      const mappedKey = idMap.get(key) ?? key;
+      if (sourceIds.has(mappedKey) && mappedKey === key) {
+        throw new Error(`${label}对象键仍含未映射源 ID：${path}.${key}`);
+      }
+      output[mappedKey] = visit(child, `${path}.${key}`);
+    }
+    return output;
+  };
+
+  return visit(value, "$");
 }
 
 function requireMapped(
@@ -150,7 +191,10 @@ export async function cloneTimelineGraph(
         orderBy: { createdAt: "asc" },
         include: { sections: { orderBy: { key: "asc" } } },
       },
-      abilities: { orderBy: { createdAt: "asc" } },
+      abilities: {
+        orderBy: { createdAt: "asc" },
+        include: { events: { orderBy: { createdAt: "asc" } } },
+      },
       chronicles: { orderBy: [{ chapterIndex: "asc" }, { createdAt: "asc" }] },
       omens: { orderBy: { createdAt: "asc" } },
     },
@@ -174,11 +218,17 @@ export async function cloneTimelineGraph(
   }
 
   const maps: TimelineCloneMaps = {
-    chapterIds: new Map(),
-    messageIds: new Map(),
-    godIds: new Map(),
-    entityIds: new Map(),
-    abilityIds: new Map(),
+    chapterIds: new Map(source.chapters.map((row) => [row.id, crypto.randomUUID()])),
+    messageIds: new Map(source.chapters.flatMap((chapter) =>
+      chapter.messages.map((row) => [row.id, crypto.randomUUID()] as const)
+    )),
+    godIds: new Map(source.gods.map((row) => [row.id, crypto.randomUUID()])),
+    entityIds: new Map(source.entities.map((row) => [row.id, crypto.randomUUID()])),
+    abilityIds: new Map(source.abilities.map((row) => [row.id, crypto.randomUUID()])),
+    abilityEventIds: new Map(source.abilities.flatMap((ability) =>
+      ability.events.map((row) => [row.id, crypto.randomUUID()] as const)
+    )),
+    chronicleIds: new Map(source.chronicles.map((row) => [row.id, crypto.randomUUID()])),
   };
 
   // Pass 1: create the child and identity-bearing roots. Forward references are
@@ -195,25 +245,40 @@ export async function cloneTimelineGraph(
       observerState: Prisma.DbNull,
     },
   });
+  const idMap = new Map<string, string>([
+    [source.id, child.id],
+    ...maps.chapterIds,
+    ...maps.messageIds,
+    ...maps.godIds,
+    ...maps.entityIds,
+    ...maps.abilityIds,
+    ...maps.abilityEventIds,
+    ...maps.chronicleIds,
+  ]);
+  const sourceIds = new Set(idMap.keys());
 
   for (const chapter of source.chapters) {
     const cloned = await tx.chapter.create({
       data: {
+        id: requireMapped(maps.chapterIds, chapter.id, "章节"),
         timelineId: child.id,
         index: chapter.index,
         title: chapter.title,
         summary: chapter.summary,
         settleState: chapter.settleState,
-        snapshot: nullableJson(chapter.snapshot),
+        snapshot: remapRuntimeJson(chapter.snapshot, idMap, sourceIds, "章节快照"),
         createdAt: chapter.createdAt,
       },
     });
-    maps.chapterIds.set(chapter.id, cloned.id);
+    if (cloned.id !== requireMapped(maps.chapterIds, chapter.id, "章节")) {
+      throw new Error("章节预分配 ID 不一致");
+    }
   }
 
   for (const entity of source.entities) {
     const cloned = await tx.entity.create({
       data: {
+        id: requireMapped(maps.entityIds, entity.id, "实体"),
         timelineId: child.id,
         type: entity.type,
         name: entity.name,
@@ -234,12 +299,15 @@ export async function cloneTimelineGraph(
         updatedAt: entity.updatedAt,
       },
     });
-    maps.entityIds.set(entity.id, cloned.id);
+    if (cloned.id !== requireMapped(maps.entityIds, entity.id, "实体")) {
+      throw new Error("实体预分配 ID 不一致");
+    }
   }
 
   for (const god of source.gods) {
     const cloned = await tx.god.create({
       data: {
+        id: requireMapped(maps.godIds, god.id, "神明"),
         timelineId: child.id,
         name: god.name,
         aliases: [...god.aliases],
@@ -259,7 +327,9 @@ export async function cloneTimelineGraph(
         updatedAt: god.updatedAt,
       },
     });
-    maps.godIds.set(god.id, cloned.id);
+    if (cloned.id !== requireMapped(maps.godIds, god.id, "神明")) {
+      throw new Error("神明预分配 ID 不一致");
+    }
   }
 
   for (const entity of source.entities) {
@@ -295,17 +365,20 @@ export async function cloneTimelineGraph(
     for (const message of chapter.messages) {
       const cloned = await tx.message.create({
         data: {
+          id: requireMapped(maps.messageIds, message.id, "消息"),
           chapterId: requireMapped(maps.chapterIds, message.chapterId, "消息章节"),
           index: message.index,
           role: message.role,
           content: message.content,
           scale: message.scale,
-          variants: nullableJson(message.variants),
-          meta: nullableJson(message.meta),
+          variants: remapRuntimeJson(message.variants, idMap, sourceIds, "消息异文"),
+          meta: remapRuntimeJson(message.meta, idMap, sourceIds, "消息元数据"),
           createdAt: message.createdAt,
         },
       });
-      maps.messageIds.set(message.id, cloned.id);
+      if (cloned.id !== requireMapped(maps.messageIds, message.id, "消息")) {
+        throw new Error("消息预分配 ID 不一致");
+      }
     }
   }
 
@@ -328,6 +401,7 @@ export async function cloneTimelineGraph(
   for (const ability of source.abilities) {
     const cloned = await tx.ability.create({
       data: {
+        id: requireMapped(maps.abilityIds, ability.id, "能力"),
         timelineId: child.id,
         entityId: ability.entityId === null
           ? null
@@ -354,7 +428,9 @@ export async function cloneTimelineGraph(
         updatedAt: ability.updatedAt,
       },
     });
-    maps.abilityIds.set(ability.id, cloned.id);
+    if (cloned.id !== requireMapped(maps.abilityIds, ability.id, "能力")) {
+      throw new Error("能力预分配 ID 不一致");
+    }
   }
   for (const ability of source.abilities) {
     if (ability.sourceAbilityId !== null) {
@@ -392,17 +468,9 @@ export async function cloneTimelineGraph(
     });
   }
 
-  const events = await tx.abilityEvent.findMany({
-    where: {
-      OR: [
-        { ability: { timelineId: source.id } },
-        { chapter: { timelineId: source.id } },
-      ],
-    },
-    orderBy: { createdAt: "asc" },
-  });
+  const events = source.abilities.flatMap((ability) => ability.events);
   for (const event of events) {
-    const clonedEventId = crypto.randomUUID();
+    const clonedEventId = requireMapped(maps.abilityEventIds, event.id, "能力事件");
     await tx.abilityEvent.create({
       data: {
         id: clonedEventId,
@@ -412,8 +480,8 @@ export async function cloneTimelineGraph(
           ? null
           : requireMapped(maps.messageIds, event.messageId, "能力事件消息"),
         type: event.type,
-        before: nullableJson(event.before),
-        after: nullableJson(event.after),
+        before: remapRuntimeJson(event.before, idMap, sourceIds, "能力事件前态"),
+        after: remapRuntimeJson(event.after, idMap, sourceIds, "能力事件后态"),
         evidence: event.evidence,
         scale: event.scale,
         dedupeKey: remapEventDedupeKey(event, clonedEventId, child.id, maps),
@@ -425,6 +493,7 @@ export async function cloneTimelineGraph(
   for (const chronicle of source.chronicles) {
     await tx.chronicleEntry.create({
       data: {
+        id: requireMapped(maps.chronicleIds, chronicle.id, "编年史"),
         timelineId: child.id,
         chapterIndex: chronicle.chapterIndex,
         yearLabel: chronicle.yearLabel,
