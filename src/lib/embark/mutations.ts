@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { WorldDeck } from "@/lib/cards/schemas";
+import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
 import { factionSections } from "@/lib/cards/faction-sections";
 import { materializeDeckAbilities } from "@/lib/abilities/embark";
 import {
@@ -43,6 +44,72 @@ function characterSections(character: WorldDeck["majorCharacters"][number]) {
   ];
 }
 
+export class EmbarkModeMismatchError extends Error {
+  override name = "EmbarkModeMismatchError";
+}
+
+export async function materializeMajorGods(
+  tx: Prisma.TransactionClient,
+  timelineId: string,
+  deck: WorldDeck,
+  godByRef: Map<string, string>,
+): Promise<void> {
+  const createMajorGod = async (
+    god: WorldDeck["majorGods"][number],
+    relations: Prisma.InputJsonValue,
+  ) => {
+    const created = await tx.god.create({
+      data: {
+        timelineId,
+        name: god.name,
+        aliases: god.aliases,
+        tier: "major",
+        rank: god.rank,
+        domains: god.domains,
+        persona: { text: god.persona } as Prisma.InputJsonValue,
+        voice: god.voice as Prisma.InputJsonValue,
+        agenda: god.agenda as Prisma.InputJsonValue,
+        relations,
+        faithScope: god.faithScope,
+        materialRef: god.ref,
+      },
+    });
+    godByRef.set(god.ref, created.id);
+  };
+
+  if (deck.mode === "pantheon") {
+    for (const god of deck.majorGods) {
+      await createMajorGod(god, {
+        player: {
+          label: god.initialRelationToPlayer.label,
+          note: god.initialRelationToPlayer.note,
+        },
+      } as Prisma.InputJsonValue);
+    }
+    return;
+  }
+
+  // Creator relations can point forward, so first persist the complete god set.
+  for (const god of deck.majorGods) {
+    await createMajorGod(god, {} as Prisma.InputJsonValue);
+  }
+  for (const god of deck.majorGods) {
+    const godId = godByRef.get(god.ref);
+    if (godId === undefined) throw new Error(`无法解析神明引用 "${god.ref}"`);
+    const relations = Object.fromEntries(god.relations.map((relation) => {
+      const targetId = godByRef.get(relation.targetGodRef);
+      if (targetId === undefined) {
+        throw new Error(`无法解析神明引用 "${relation.targetGodRef}"`);
+      }
+      return [targetId, { label: relation.label, note: relation.note }];
+    }));
+    await tx.god.update({
+      where: { id: godId },
+      data: { relations: relations as Prisma.InputJsonValue },
+    });
+  }
+}
+
 /**
  * Creates every opening record from a validated card deck. It deliberately does
  * all reference resolution through maps built from this transaction's new IDs,
@@ -52,7 +119,11 @@ export async function materializeEmbarkDeck(
   tx: Prisma.TransactionClient,
   worldId: string,
   deck: WorldDeck,
+  expectedMode: WorldMode,
 ): Promise<{ timelineId: string; chapterId: string }> {
+  if (deck.mode !== expectedMode) {
+    throw new EmbarkModeMismatchError("世界模式不可更改");
+  }
   const timeline = await tx.timeline.create({
     data: {
       worldId,
@@ -91,71 +162,7 @@ export async function materializeEmbarkDeck(
     ids.godByRef.set(deck.playerGod.ref, playerGod.id);
   }
 
-  // Creator relations target real database IDs, so every major god must exist first.
-  if (deck.mode === "pantheon") {
-    for (const god of deck.majorGods) {
-      const created = await tx.god.create({
-        data: {
-          timelineId: timeline.id,
-          name: god.name,
-          aliases: god.aliases,
-          tier: "major",
-          rank: god.rank,
-          domains: god.domains,
-          persona: { text: god.persona } as Prisma.InputJsonValue,
-          voice: god.voice as Prisma.InputJsonValue,
-          agenda: god.agenda as Prisma.InputJsonValue,
-          relations: {
-            player: {
-              label: god.initialRelationToPlayer.label,
-              note: god.initialRelationToPlayer.note,
-            },
-          } as Prisma.InputJsonValue,
-          faithScope: god.faithScope,
-          materialRef: god.ref,
-        },
-      });
-      ids.godByRef.set(god.ref, created.id);
-    }
-  } else {
-    for (const god of deck.majorGods) {
-      const created = await tx.god.create({
-        data: {
-          timelineId: timeline.id,
-          name: god.name,
-          aliases: god.aliases,
-          tier: "major",
-          rank: god.rank,
-          domains: god.domains,
-          persona: { text: god.persona } as Prisma.InputJsonValue,
-          voice: god.voice as Prisma.InputJsonValue,
-          agenda: god.agenda as Prisma.InputJsonValue,
-          relations: {} as Prisma.InputJsonValue,
-          faithScope: god.faithScope,
-          materialRef: god.ref,
-        },
-      });
-      ids.godByRef.set(god.ref, created.id);
-    }
-  }
-
-  if (deck.mode === "creator") {
-    for (const god of deck.majorGods) {
-      const godId = ids.godByRef.get(god.ref);
-      if (godId === undefined) throw new Error(`无法解析神明引用 "${god.ref}"`);
-      const relations = Object.fromEntries(god.relations.map((relation) => {
-        const targetId = ids.godByRef.get(relation.targetGodRef);
-        if (targetId === undefined) {
-          throw new Error(`无法解析神明引用 "${relation.targetGodRef}"`);
-        }
-        return [targetId, { label: relation.label, note: relation.note }];
-      }));
-      await tx.god.update({
-        where: { id: godId },
-        data: { relations: relations as Prisma.InputJsonValue },
-      });
-    }
-  }
+  await materializeMajorGods(tx, timeline.id, deck, ids.godByRef);
 
   for (const god of deck.minorGods) {
     await tx.god.create({
@@ -296,8 +303,9 @@ export function runEmbarkTransaction(
   runner: EmbarkTransactionRunner,
   worldId: string,
   deck: WorldDeck,
+  expectedMode: WorldMode,
 ): Promise<{ timelineId: string; chapterId: string }> {
-  return runner.$transaction((tx) => materializeEmbarkDeck(tx, worldId, deck));
+  return runner.$transaction((tx) => materializeEmbarkDeck(tx, worldId, deck, expectedMode));
 }
 
 /**
@@ -311,7 +319,13 @@ export function runClaimedEmbarkTransaction(
 ): Promise<{ timelineId: string; chapterId: string }> {
   return runner.$transaction(async (tx) => {
     await claimDraftWorld(tx, worldId);
+    const claimedWorld = await tx.world.findUnique({
+      where: { id: worldId },
+      select: { mode: true },
+    });
+    if (claimedWorld === null) throw new EmbarkDraftError("世界草稿不存在");
+    const expectedMode = WorldModeSchema.parse(claimedWorld.mode);
     const deck = await loadDeck(tx);
-    return materializeEmbarkDeck(tx, worldId, deck);
+    return materializeEmbarkDeck(tx, worldId, deck, expectedMode);
   });
 }

@@ -41,7 +41,7 @@ describe("POST /api/worlds/[id]/reroll", () => {
   it("Creator 使用准确 schema、prompt 和缓存命名空间重掷", async () => {
     const deck = completeCreatorDeck();
     mocks.findUnique.mockResolvedValue({
-      id: "world-1", mode: "creator", updatedAt: new Date("2026-07-22T00:00:00.123Z"), draftDeck: deck, lockedPaths: [], genesisInput: "创造星海",
+      id: "world-1", mode: "creator", status: "draft", updatedAt: new Date("2026-07-22T00:00:00.123Z"), draftDeck: deck, lockedPaths: [], genesisInput: "创造星海",
     });
     mocks.completeStructured.mockResolvedValue(deck);
     const response = await POST(request(), context);
@@ -57,9 +57,28 @@ describe("POST /api/worlds/[id]/reroll", () => {
     }));
   });
 
+  it("拒绝重掷已开局世界且不调用模型", async () => {
+    mocks.findUnique.mockResolvedValue({
+      id: "world-1",
+      mode: "creator",
+      status: "playing",
+      updatedAt: new Date("2026-07-22T00:00:00.123Z"),
+      draftDeck: null,
+      lockedPaths: [],
+      genesisInput: "创造星海",
+    });
+
+    const response = await POST(request(), context);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "世界已开局，不可修改卡组" });
+    expect(mocks.completeStructured).not.toHaveBeenCalled();
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it("Creator 明确拒绝 playerGod 重掷且不调用模型", async () => {
     mocks.findUnique.mockResolvedValue({
-      id: "world-1", mode: "creator", updatedAt: new Date("2026-07-22T00:00:00.123Z"), draftDeck: completeCreatorDeck(), lockedPaths: [], genesisInput: "创造星海",
+      id: "world-1", mode: "creator", status: "draft", updatedAt: new Date("2026-07-22T00:00:00.123Z"), draftDeck: completeCreatorDeck(), lockedPaths: [], genesisInput: "创造星海",
     });
     const response = await POST(request("playerGod"), context);
     expect(response.status).toBe(409);
@@ -71,7 +90,7 @@ describe("POST /api/worlds/[id]/reroll", () => {
     const loadedAt = new Date("2026-07-22T00:00:00.123Z");
     const deck = completeCreatorDeck();
     mocks.findUnique.mockResolvedValue({
-      id: "world-1", mode: "creator", updatedAt: loadedAt, draftDeck: deck, lockedPaths: [], genesisInput: "创造星海",
+      id: "world-1", mode: "creator", status: "draft", updatedAt: loadedAt, draftDeck: deck, lockedPaths: [], genesisInput: "创造星海",
     });
     mocks.completeStructured.mockResolvedValue(deck);
     mocks.updateMany.mockResolvedValue({ count: 0 });
@@ -81,10 +100,31 @@ describe("POST /api/worlds/[id]/reroll", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "卡组已被其他操作更新，请刷新后重试" });
     expect(mocks.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "world-1", mode: "creator", updatedAt: loadedAt },
+      where: { id: "world-1", mode: "creator", status: "draft", updatedAt: loadedAt },
     }));
     expect(mocks.updateMany).toHaveBeenCalledTimes(1);
     expect(mocks.txFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("模型生成期间世界开局时原子写入失败并返回已开局冲突", async () => {
+    const loadedAt = new Date("2026-07-22T00:00:00.123Z");
+    const deck = completeCreatorDeck();
+    mocks.findUnique
+      .mockResolvedValueOnce({
+        id: "world-1", mode: "creator", status: "draft", updatedAt: loadedAt,
+        draftDeck: deck, lockedPaths: [], genesisInput: "创造星海",
+      })
+      .mockResolvedValueOnce({ status: "playing" });
+    mocks.completeStructured.mockResolvedValue(deck);
+    mocks.updateMany.mockResolvedValue({ count: 0 });
+
+    const response = await POST(request(), context);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "世界已开局，不可修改卡组" });
+    expect(mocks.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "world-1", mode: "creator", status: "draft", updatedAt: loadedAt },
+    }));
   });
 
   it("Creator 引用修补继续使用精确 schema/cache、保留锁定字段并拒绝修补改模式", async () => {
@@ -95,7 +135,7 @@ describe("POST /api/worlds/[id]/reroll", () => {
     invalid.majorGods[0]!.relations[0]!.targetGodRef = "missing-god";
     const oppositeMode = completeDeck();
     mocks.findUnique.mockResolvedValue({
-      id: "world-1", mode: "creator", updatedAt: new Date("2026-07-22T00:00:00.123Z"),
+      id: "world-1", mode: "creator", status: "draft", updatedAt: new Date("2026-07-22T00:00:00.123Z"),
       draftDeck: current, lockedPaths: ["cosmology.origin"], genesisInput: "创造星海",
     });
     mocks.completeStructured.mockResolvedValueOnce(invalid).mockResolvedValueOnce(oppositeMode);
@@ -125,7 +165,7 @@ describe("POST /api/worlds/[id]/reroll", () => {
     const repaired = structuredClone(current);
     repaired.cosmology.origin = "repair 再次篡改";
     mocks.findUnique.mockResolvedValue({
-      id: "world-1", mode: "creator", updatedAt: new Date("2026-07-22T00:00:00.123Z"),
+      id: "world-1", mode: "creator", status: "draft", updatedAt: new Date("2026-07-22T00:00:00.123Z"),
       draftDeck: current, lockedPaths: ["cosmology.origin"], genesisInput: "创造星海",
     });
     mocks.completeStructured.mockResolvedValueOnce(invalid).mockResolvedValueOnce(repaired);
@@ -148,7 +188,7 @@ describe("POST /api/worlds/[id]/reroll", () => {
 
   it("拒绝生成结果把卡组改离世界模式", async () => {
     mocks.findUnique.mockResolvedValue({
-      id: "world-1", mode: "creator", updatedAt: new Date("2026-07-22T00:00:00.123Z"), draftDeck: completeCreatorDeck(), lockedPaths: [], genesisInput: "创造星海",
+      id: "world-1", mode: "creator", status: "draft", updatedAt: new Date("2026-07-22T00:00:00.123Z"), draftDeck: completeCreatorDeck(), lockedPaths: [], genesisInput: "创造星海",
     });
     mocks.completeStructured.mockResolvedValue(completeDeck());
     const response = await POST(request(), context);

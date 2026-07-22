@@ -43,6 +43,26 @@ describe("initial reality and observer state", () => {
     );
   });
 
+  it("rejects unknown keys at the state and established-fact boundaries", () => {
+    expect(RealityStateSchema.safeParse({
+      ...initialRealityState(completeCreatorDeck()),
+      unexpected: true,
+    }).success).toBe(false);
+    expect(RealityStateSchema.safeParse({
+      ...initialRealityState(completeCreatorDeck()),
+      establishedFacts: [{
+        ref: "fact-1",
+        text: "星海已经点燃",
+        establishedByRewriteId: null,
+        unexpected: true,
+      }],
+    }).success).toBe(false);
+    expect(ObserverStateSchema.safeParse({
+      ...initialObserverState(completeCreatorDeck()),
+      unexpected: true,
+    }).success).toBe(false);
+  });
+
   it("validates established facts and non-root observer variants", () => {
     expect(RealityStateSchema.safeParse({
       ...initialRealityState(completeCreatorDeck()),

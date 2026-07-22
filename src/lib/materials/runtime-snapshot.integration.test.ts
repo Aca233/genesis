@@ -14,7 +14,7 @@ describe("runtime material snapshot", () => {
     deck.majorGods[0]!.abilities[0]!.visibility = "hidden";
     const world = await prisma.world.create({ data: { name: `runtime-${crypto.randomUUID()}`, genesisInput: "test", draftDeck: deck, lockedPaths: [] } });
     try {
-      const { timelineId } = await runEmbarkTransaction(prisma, world.id, deck);
+      const { timelineId } = await runEmbarkTransaction(prisma, world.id, deck, "pantheon");
       const god = await prisma.god.findFirstOrThrow({ where: { timelineId, materialRef: deck.majorGods[0]!.ref } });
       const character = await prisma.entity.findFirstOrThrow({ where: { timelineId, materialRef: deck.majorCharacters[0]!.ref } });
       const ability = await prisma.ability.findFirstOrThrow({ where: { timelineId, materialRef: deck.majorGods[0]!.abilities[0]!.ref } });

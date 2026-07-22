@@ -7,6 +7,7 @@ import { archiveWorldMaterials } from "@/lib/materials/archive-world";
 import {
   EmbarkConflictError,
   EmbarkDraftError,
+  EmbarkModeMismatchError,
   runClaimedEmbarkTransaction,
 } from "@/lib/embark/mutations";
 
@@ -14,6 +15,7 @@ export {
   claimDraftWorld,
   EmbarkConflictError,
   EmbarkDraftError,
+  EmbarkModeMismatchError,
   materializeEmbarkDeck,
   runClaimedEmbarkTransaction,
   runEmbarkTransaction,
@@ -22,7 +24,6 @@ export {
 /** POST /api/worlds/[id]/embark —— 开局：草稿卡组物化为时间线+诸神+百科实体+第一章 */
 export const maxDuration = 60;
 
-class EmbarkModeMismatchError extends Error {}
 
 export async function POST(
   _request: Request,

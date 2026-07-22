@@ -41,7 +41,7 @@ describe("/api/worlds/[id]", () => {
   });
 
   it("PATCH 在解析和更新前加载世界并拒绝模式改变", async () => {
-    mocks.findUnique.mockResolvedValue({ id: "world-1", mode: "creator", updatedAt: new Date(initialRevision), lockedPaths: [], draftDeck: completeCreatorDeck() });
+    mocks.findUnique.mockResolvedValue({ id: "world-1", mode: "creator", status: "draft", updatedAt: new Date(initialRevision), lockedPaths: [], draftDeck: completeCreatorDeck() });
     const response = await PATCH(patch(completeDeck()), context);
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "世界模式不可更改" });
@@ -49,8 +49,25 @@ describe("/api/worlds/[id]", () => {
     expect(mocks.updateMany).not.toHaveBeenCalled();
   });
 
+  it("PATCH 拒绝修改已开局世界且不进入事务", async () => {
+    mocks.findUnique.mockResolvedValue({
+      id: "world-1",
+      mode: "creator",
+      status: "playing",
+      updatedAt: new Date(initialRevision),
+      lockedPaths: [],
+      draftDeck: completeCreatorDeck(),
+    });
+
+    const response = await PATCH(patch(completeCreatorDeck()), context);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "世界已开局，不可修改卡组" });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it("PATCH 接受与世界一致的 Creator 卡组", async () => {
-    mocks.findUnique.mockResolvedValue({ id: "world-1", mode: "creator", updatedAt: new Date(initialRevision), lockedPaths: [], draftDeck: completeCreatorDeck() });
+    mocks.findUnique.mockResolvedValue({ id: "world-1", mode: "creator", status: "draft", updatedAt: new Date(initialRevision), lockedPaths: [], draftDeck: completeCreatorDeck() });
     const response = await PATCH(patch(completeCreatorDeck()), context);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -58,7 +75,7 @@ describe("/api/worlds/[id]", () => {
       updatedAt: nextRevision.toISOString(),
     });
     expect(mocks.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "world-1", mode: "creator", updatedAt: new Date(initialRevision) },
+      where: { id: "world-1", mode: "creator", status: "draft", updatedAt: new Date(initialRevision) },
       data: expect.objectContaining({ draftDeck: expect.objectContaining({ mode: "creator" }) }),
     }));
     expect(mocks.txFindUnique).toHaveBeenCalledWith({
@@ -70,7 +87,7 @@ describe("/api/worlds/[id]", () => {
   it("PATCH 用加载时 updatedAt 原子更新并在并发冲突时不部分写入", async () => {
     const loadedAt = new Date("2026-07-22T00:00:02.999Z");
     mocks.findUnique.mockResolvedValue({
-      id: "world-1", mode: "creator", updatedAt: loadedAt, lockedPaths: [], draftDeck: completeCreatorDeck(),
+      id: "world-1", mode: "creator", status: "draft", updatedAt: loadedAt, lockedPaths: [], draftDeck: completeCreatorDeck(),
     });
     mocks.updateMany.mockResolvedValue({ count: 0 });
 
@@ -79,7 +96,7 @@ describe("/api/worlds/[id]", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "卡组已被其他操作更新，请刷新后重试" });
     expect(mocks.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "world-1", mode: "creator", updatedAt: new Date(initialRevision) },
+      where: { id: "world-1", mode: "creator", status: "draft", updatedAt: new Date(initialRevision) },
     }));
     expect(mocks.updateMany).toHaveBeenCalledTimes(1);
     expect(mocks.txFindUnique).not.toHaveBeenCalled();
@@ -97,7 +114,7 @@ describe("/api/worlds/[id]", () => {
 
   it("PATCH 缺少客户端 revision 时拒绝请求", async () => {
     mocks.findUnique.mockResolvedValue({
-      id: "world-1", mode: "creator", updatedAt: new Date(initialRevision), lockedPaths: [],
+      id: "world-1", mode: "creator", status: "draft", updatedAt: new Date(initialRevision), lockedPaths: [],
     });
     const request = new Request("http://localhost/api/worlds/world-1", {
       method: "PATCH",
@@ -115,7 +132,7 @@ describe("/api/worlds/[id]", () => {
     const legacy = structuredClone(completeDeck()) as Record<string, unknown>;
     delete legacy.mode;
     mocks.findUnique.mockResolvedValue({
-      id: "world-1", mode: "pantheon", draftDeck: legacy, timelines: [], lockedPaths: [],
+      id: "world-1", mode: "pantheon", status: "draft", draftDeck: legacy, timelines: [], lockedPaths: [],
     });
     const response = await GET(new Request("http://localhost"), context);
     expect(response.status).toBe(200);

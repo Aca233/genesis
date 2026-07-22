@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { completeCreatorDeck, completeDeck } from "./embark.test-fixtures";
 import {
   EmbarkConflictError,
+  EmbarkModeMismatchError,
   runClaimedEmbarkTransaction,
 } from "@/lib/embark/mutations";
 
@@ -103,6 +104,34 @@ describe("PostgreSQL embark transaction safety", () => {
       });
       expect(playerGods).toHaveLength(1);
       expect(playerGods[0]).toMatchObject({ tier: "player", materialRef: deck.playerGod.ref });
+    } finally {
+      await prisma.world.delete({ where: { id: world.id } });
+    }
+  });
+
+  it("核心事务拒绝持久化模式与回调卡组不一致并完整回滚 claim", async () => {
+    const creatorDeck = completeCreatorDeck();
+    const world = await prisma.world.create({
+      data: {
+        name: `embark-mode-mismatch-${crypto.randomUUID()}`,
+        genesisInput: "模式不一致回滚测试",
+        mode: "creator",
+        draftDeck: creatorDeck,
+        lockedPaths: [],
+      },
+    });
+
+    try {
+      await expect(
+        runClaimedEmbarkTransaction(prisma, world.id, async () => completeDeck()),
+      ).rejects.toBeInstanceOf(EmbarkModeMismatchError);
+
+      const [worldAfter, timelineCount] = await Promise.all([
+        prisma.world.findUniqueOrThrow({ where: { id: world.id } }),
+        prisma.timeline.count({ where: { worldId: world.id } }),
+      ]);
+      expect(worldAfter).toMatchObject({ status: "draft", activeTimelineId: null, mode: "creator" });
+      expect(timelineCount).toBe(0);
     } finally {
       await prisma.world.delete({ where: { id: world.id } });
     }

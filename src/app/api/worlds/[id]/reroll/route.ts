@@ -96,7 +96,13 @@ export async function POST(
   const { cardKey, note } = BodySchema.parse(await request.json());
 
   const world = await prisma.world.findUnique({ where: { id } });
-  if (!world?.draftDeck) {
+  if (world === null) {
+    return NextResponse.json({ error: "世界草稿不存在" }, { status: 404 });
+  }
+  if (world.status !== "draft") {
+    return NextResponse.json({ error: "世界已开局，不可修改卡组" }, { status: 409 });
+  }
+  if (world.draftDeck === null) {
     return NextResponse.json({ error: "世界草稿不存在" }, { status: 404 });
   }
 
@@ -195,7 +201,7 @@ export async function POST(
 
   const updatedAt = await prisma.$transaction(async (tx) => {
     const { count } = await tx.world.updateMany({
-      where: { id, mode, updatedAt: world.updatedAt },
+      where: { id, mode, status: "draft", updatedAt: world.updatedAt },
       data: {
         name: deck.worldName,
         draftDeck: deck as unknown as Prisma.InputJsonValue,
@@ -215,8 +221,13 @@ export async function POST(
     return updated?.updatedAt ?? null;
   });
   if (updatedAt === null) {
+    const latest = await prisma.world.findUnique({ where: { id }, select: { status: true } });
     return NextResponse.json(
-      { error: "卡组已被其他操作更新，请刷新后重试" },
+      {
+        error: latest !== null && latest.status !== "draft"
+          ? "世界已开局，不可修改卡组"
+          : "卡组已被其他操作更新，请刷新后重试",
+      },
       { status: 409 },
     );
   }

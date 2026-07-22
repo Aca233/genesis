@@ -32,6 +32,7 @@ import {
 } from "@/components/genesis/card-editors";
 import { MajorCharacterEditor } from "@/components/genesis/MajorCharacterEditor";
 import { GenesisCeremony } from "@/components/genesis/GenesisCeremony";
+import { canEmbarkMode } from "@/components/genesis/embark-policy";
 import {
   buildDeckPatchPayload,
   parseWorldRevision,
@@ -648,7 +649,7 @@ export default function GenesisEditorPage({
             <button
               type="button"
               onClick={embark}
-              disabled={saving || busy || ceremony?.phase === "pending"}
+              disabled={!canEmbarkMode(deck.mode) || saving || busy || ceremony?.phase === "pending"}
               className="rounded-md border border-gilt bg-gilt/10 px-10 py-2 text-lg tracking-widest text-gilt transition hover:bg-gilt/20 disabled:opacity-40"
               style={{ fontFamily: "var(--font-display)" }}
             >

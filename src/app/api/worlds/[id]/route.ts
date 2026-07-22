@@ -54,9 +54,12 @@ export async function PATCH(
   const { id } = await params;
   const world = await prisma.world.findUnique({
     where: { id },
-    select: { mode: true, lockedPaths: true, updatedAt: true },
+    select: { mode: true, status: true, lockedPaths: true, updatedAt: true },
   });
   if (!world) return NextResponse.json({ error: "不存在" }, { status: 404 });
+  if (world.status !== "draft") {
+    return NextResponse.json({ error: "世界已开局，不可修改卡组" }, { status: 409 });
+  }
 
   let body: z.infer<typeof PatchSchema>;
   try {
@@ -92,7 +95,7 @@ export async function PATCH(
   const lockedPaths = [...new Set([...world.lockedPaths, ...body.editedPaths])];
   const updatedAt = await prisma.$transaction(async (tx) => {
     const { count } = await tx.world.updateMany({
-      where: { id, mode, updatedAt: body.expectedUpdatedAt },
+      where: { id, mode, status: "draft", updatedAt: body.expectedUpdatedAt },
       data: {
         name: deck.worldName,
         draftDeck: deck as unknown as Prisma.InputJsonValue,

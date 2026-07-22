@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { materializeDeckAbilities } from "./embark";
 import {
+  EmbarkModeMismatchError,
   materializeEmbarkDeck,
+  materializeMajorGods,
   runEmbarkTransaction,
 } from "@/lib/embark/mutations";
 
@@ -60,6 +62,71 @@ function fakeTransaction() {
     },
   };
 }
+
+describe("Creator major-god materialization", () => {
+  function creatorGodTransaction() {
+    const events: Array<{ kind: "create" | "update"; data: Record<string, unknown> }> = [];
+    return {
+      events,
+      tx: {
+        god: {
+          create: async ({ data }: { data: Record<string, unknown> }) => {
+            events.push({ kind: "create", data });
+            return { id: `db-${String(data.materialRef)}` };
+          },
+          update: async ({ where, data }: {
+            where: { id: string };
+            data: Record<string, unknown>;
+          }) => {
+            events.push({ kind: "update", data: { ...where, ...data } });
+            return { id: where.id };
+          },
+        },
+      } as unknown as Prisma.TransactionClient,
+    };
+  }
+
+  it("creates every Creator god before mapping forward relations to database IDs", async () => {
+    const deck = completeCreatorDeck();
+    const fake = creatorGodTransaction();
+    const godByRef = new Map<string, string>();
+
+    await materializeMajorGods(fake.tx, "timeline-1", deck, godByRef);
+
+    expect(fake.events.map(({ kind }) => kind)).toEqual([
+      "create", "create", "create", "create",
+      "update", "update", "update", "update",
+    ]);
+    const firstUpdate = fake.events[4]!.data as { id: string; relations: Record<string, unknown> };
+    expect(firstUpdate.id).toBe("db-god-major-1");
+    expect(firstUpdate.relations).toEqual({
+      "db-god-major-2": { label: "rival", note: "世界内诸神竞争" },
+    });
+  });
+
+  it("throws after all Creator gods exist when a relation ref cannot be mapped", async () => {
+    const deck = completeCreatorDeck();
+    deck.majorGods[0]!.relations[0]!.targetGodRef = "missing-god";
+    const fake = creatorGodTransaction();
+
+    await expect(
+      materializeMajorGods(fake.tx, "timeline-1", deck, new Map()),
+    ).rejects.toThrow('无法解析神明引用 "missing-god"');
+    expect(fake.events.map(({ kind }) => kind)).toEqual([
+      "create", "create", "create", "create",
+    ]);
+  });
+
+  it("rejects a mode mismatch before creating the root timeline", async () => {
+    const timelineCreate = vi.fn();
+    const tx = { timeline: { create: timelineCreate } } as unknown as Prisma.TransactionClient;
+
+    await expect(
+      materializeEmbarkDeck(tx, "world-1", completeCreatorDeck(), "pantheon"),
+    ).rejects.toBeInstanceOf(EmbarkModeMismatchError);
+    expect(timelineCreate).not.toHaveBeenCalled();
+  });
+});
 
 describe("materializeDeckAbilities", () => {
   it("物化完整卡组的能力、来源映射与人物势力关系", async () => {
@@ -183,7 +250,7 @@ describe("materializeDeckAbilities", () => {
       world: { update: async () => ({ id: "world-1" }) },
     } as unknown as Prisma.TransactionClient;
 
-    await expect(materializeEmbarkDeck(tx, "world-1", deck)).resolves.toEqual({
+    await expect(materializeEmbarkDeck(tx, "world-1", deck, "pantheon")).resolves.toEqual({
       timelineId: "timeline-1",
       chapterId: "chapter-1",
     });
@@ -292,7 +359,7 @@ describe("materializeDeckAbilities", () => {
       },
     };
 
-    await expect(runEmbarkTransaction(transactionRunner, "world-rollback", deck)).rejects.toThrow(
+    await expect(runEmbarkTransaction(transactionRunner, "world-rollback", deck, "pantheon")).rejects.toThrow(
       '无法解析能力引用 "missing-tradition"',
     );
     expect(committedWrites).toEqual([]);
