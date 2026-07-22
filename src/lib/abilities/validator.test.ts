@@ -5,6 +5,7 @@ import {
   assertUnlockedFields,
   assertValidTransition,
   validateAbilityOwnership,
+  validateAbilityReferenceGraph,
   validateDeckReferences,
 } from "./validator";
 
@@ -101,6 +102,48 @@ describe("validateAbilityOwnership", () => {
     await expect(validateAbilityOwnership(tx, baseInput)).rejects.toThrow(
       /来源必须是种族模板能力/,
     );
+  });
+});
+
+describe("validateAbilityReferenceGraph", () => {
+  it("逐项验证时间线内能力的 owner 与 source 引用", async () => {
+    const base = transaction();
+    const tx = {
+      ...base,
+      entity: {
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          where.id === "race-1"
+            ? { id: "race-1", timelineId: "timeline-1", type: "race", raceId: null }
+            : { id: "character-1", timelineId: "timeline-1", type: "character", raceId: "race-1" },
+      },
+      ability: {
+        ...base.ability,
+        findMany: async () => [{
+          ...baseInput,
+          bloodlineJustification: null,
+        }],
+      },
+    };
+
+    await expect(validateAbilityReferenceGraph(tx, "timeline-1")).resolves.toBeUndefined();
+  });
+
+  it("拒绝最终图中跨时间线的能力 owner", async () => {
+    const base = transaction({
+      entity: { id: "character-1", timelineId: "timeline-2", type: "character", raceId: "race-1" },
+    });
+    const tx = {
+      ...base,
+      ability: {
+        ...base.ability,
+        findMany: async () => [{
+          ...baseInput,
+          bloodlineJustification: null,
+        }],
+      },
+    };
+
+    await expect(validateAbilityReferenceGraph(tx, "timeline-1")).rejects.toThrow(/同一时间线/);
   });
 });
 

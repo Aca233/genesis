@@ -1,8 +1,9 @@
-import type {
-  AbilityChangeInput,
-  AbilityEventType,
-  AbilityInput,
-  AbilityKind,
+import {
+  AbilityKindSchema,
+  type AbilityChangeInput,
+  type AbilityEventType,
+  type AbilityInput,
+  type AbilityKind,
 } from "./types";
 
 export class AbilityValidationError extends Error {
@@ -48,6 +49,20 @@ export interface AbilityValidationTx {
   };
   ability: {
     findUnique(args: { where: { id: string } }): Promise<AbilitySourceRecord | null>;
+  };
+}
+
+export interface AbilityReferenceGraphTx extends AbilityValidationTx {
+  ability: AbilityValidationTx["ability"] & {
+    findMany(args: { where: { timelineId: string } }): Promise<Array<{
+      id: string;
+      timelineId: string;
+      entityId: string | null;
+      godId: string | null;
+      sourceAbilityId: string | null;
+      kind: string;
+      bloodlineJustification: string | null;
+    }>>;
   };
 }
 
@@ -179,6 +194,20 @@ export async function validateAbilityOwnership(
     fail("人物派生种族能力的来源必须是种族模板能力");
   }
   assertSameTimeline(sourceRace, input.timelineId, "能力来源种族");
+}
+
+/** Validates every persisted ability against the final timeline graph. */
+export async function validateAbilityReferenceGraph(
+  tx: AbilityReferenceGraphTx,
+  timelineId: string,
+): Promise<void> {
+  const abilities = await tx.ability.findMany({ where: { timelineId } });
+  for (const ability of abilities) {
+    await validateAbilityOwnership(tx, {
+      ...ability,
+      kind: AbilityKindSchema.parse(ability.kind),
+    });
+  }
 }
 /** Rejects any attempted write to a field protected by the player. */
 export function assertUnlockedFields(
