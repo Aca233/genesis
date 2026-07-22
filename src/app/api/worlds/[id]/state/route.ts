@@ -11,6 +11,7 @@ import {
   isOmniscientViewer,
   observerStateFromPersistence,
   projectGodAgendaForViewer,
+  projectSectionsForViewer,
   realityViewer,
 } from "@/lib/reality/visibility";
 
@@ -59,12 +60,32 @@ export async function GET(
     return NextResponse.json({ error: "时间线尚无章节" }, { status: 404 });
   }
 
-  const [gods, prevChapter, recentRewrite] = await Promise.all([
+  const [gods, avatars, prevChapter, recentRewrite] = await Promise.all([
     prisma.god.findMany({
       where: { timelineId: world.activeTimelineId },
       orderBy: { createdAt: "asc" },
       include: { abilities: true },
     }),
+    mode === "creator"
+      ? prisma.entity.findMany({
+          where: {
+            timelineId: world.activeTimelineId,
+            type: "character",
+            isCreatorAvatar: true,
+          },
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            name: true,
+            summary: true,
+            heat: true,
+            raceId: true,
+            scenePresence: true,
+            sections: true,
+            abilities: true,
+          },
+        })
+      : Promise.resolve([]),
     prisma.chapter.findUnique({
       where: {
         timelineId_index: {
@@ -132,6 +153,13 @@ export async function GET(
         : g.isPlayer
           ? projectAbilitiesForOwner(g.abilities.map(normalizePersistedAbility))
           : projectAbilitiesForPlayer(g.abilities.map(normalizePersistedAbility)),
+    })),
+    avatars: avatars.map((avatar) => ({
+      ...avatar,
+      sections: projectSectionsForViewer(avatar.sections, viewer),
+      abilities: isOmniscientViewer(viewer)
+        ? projectAbilitiesForOmniscient(avatar.abilities.map(normalizePersistedAbility))
+        : projectAbilitiesForPlayer(avatar.abilities.map(normalizePersistedAbility)),
     })),
     currentChapter: {
       id: currentChapter.id,

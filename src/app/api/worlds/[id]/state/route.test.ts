@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   chapterFindFirst: vi.fn(),
   chapterFindUnique: vi.fn(),
   godFindMany: vi.fn(),
+  entityFindMany: vi.fn(),
   rewriteFindFirst: vi.fn(),
 }));
 
@@ -18,6 +19,7 @@ vi.mock("@/lib/db", () => ({
       findUnique: mocks.chapterFindUnique,
     },
     god: { findMany: mocks.godFindMany },
+    entity: { findMany: mocks.entityFindMany },
     realityRewrite: { findFirst: mocks.rewriteFindFirst },
   },
 }));
@@ -95,6 +97,19 @@ describe("GET /api/worlds/[id]/state projections", () => {
       agendaRevealed: false,
       abilities: [hiddenAbility],
     }]);
+    mocks.entityFindMany.mockResolvedValue([{
+      id: "avatar-1",
+      name: "星行者",
+      summary: "群星在人间的旅者",
+      heat: "active",
+      raceId: null,
+      scenePresence: false,
+      sections: [
+        { id: "section-identity", key: "identity", content: { text: "天外来客" }, revealed: false, rumorText: "无名旅者" },
+        { id: "section-appearance", key: "appearance", content: { text: "银发星眸" }, revealed: true, rumorText: null },
+      ],
+      abilities: [hiddenAbility],
+    }]);
     mocks.rewriteFindFirst.mockResolvedValue({
       id: "rewrite-1",
       decree: "令群星倒悬",
@@ -125,6 +140,16 @@ describe("GET /api/worlds/[id]/state projections", () => {
       abilities: [{ name: "暗潮神权", visibility: "known", effect: "令海潮吞没一段历史" }],
     });
     expect(body.recentRewrite).toMatchObject({ id: "rewrite-1", summary: "群星轨迹已经改变" });
+    expect(body.avatars).toEqual([expect.objectContaining({
+      id: "avatar-1",
+      name: "星行者",
+      heat: "active",
+      sections: [
+        expect.objectContaining({ key: "identity", content: { text: "天外来客" } }),
+        expect.objectContaining({ key: "appearance", content: { text: "银发星眸" } }),
+      ],
+      abilities: [expect.objectContaining({ name: "暗潮神权", visibility: "known" })],
+    })]);
   });
 
   it("creator 迷雾状态复用玩家安全投影", async () => {
@@ -139,6 +164,11 @@ describe("GET /api/worlds/[id]/state projections", () => {
 
     expect(body.gods[0].agenda).toBeNull();
     expect(body.gods[0].abilities).toEqual([]);
+    expect(body.avatars[0].sections).toEqual([
+      expect.objectContaining({ key: "identity", content: null }),
+      expect.objectContaining({ key: "appearance", content: { text: "银发星眸" } }),
+    ]);
+    expect(body.avatars[0].abilities).toEqual([]);
   });
 
   it("pantheon 不能用查询参数伪造全知", async () => {
@@ -152,5 +182,6 @@ describe("GET /api/worlds/[id]/state projections", () => {
 
     expect(body.gods[0].agenda).toBeNull();
     expect(body.gods[0].abilities).toEqual([]);
+    expect(body.avatars).toEqual([]);
   });
 });

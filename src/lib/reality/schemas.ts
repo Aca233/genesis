@@ -212,6 +212,58 @@ export const RewriteAbilitySchema = z.object({
   lockedFields: z.array(z.string()),
 }).strict();
 
+export const ObserverFocusTypeSchema = z.enum([
+  "world",
+  "place",
+  "entity",
+  "god",
+  "avatar",
+]);
+
+const SetObserverFocusActionSchema = z.object({
+  action: z.literal("set_focus"),
+  focusType: ObserverFocusTypeSchema,
+  focusId: NonEmptyIdSchema.nullable(),
+}).strict().superRefine((action, ctx) => {
+  const isWorld = action.focusType === "world";
+  if (isWorld !== (action.focusId === null)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["focusId"],
+      message: isWorld
+        ? "世界焦点不能携带 focusId"
+        : "非世界焦点必须携带 focusId",
+    });
+  }
+});
+
+export const ObserverActionSchema = z.discriminatedUnion("action", [
+  SetObserverFocusActionSchema,
+  z.object({
+    action: z.literal("set_viewpoint"),
+    viewpoint: z.enum(["omniscient", "limited"]),
+  }).strict(),
+  z.object({
+    action: z.literal("create_avatar"),
+    name: z.string().trim().min(1).max(80),
+    identity: z.string().max(500),
+    appearance: z.string().max(1000),
+    raceId: NonEmptyIdSchema.nullable(),
+    abilities: z.array(RewriteAbilitySchema).max(12),
+  }).strict(),
+  z.object({
+    action: z.literal("enter_avatar"),
+    avatarId: NonEmptyIdSchema,
+  }).strict(),
+  z.object({ action: z.literal("exit_avatar") }).strict(),
+  z.object({
+    action: z.literal("withdraw_avatar"),
+    avatarId: NonEmptyIdSchema,
+  }).strict(),
+]);
+
+export type ObserverAction = z.infer<typeof ObserverActionSchema>;
+
 const RewriteAbilityChangesSchema = RewriteAbilitySchema.partial()
   .refine(hasKeys, "能力更新 changes 不得为空");
 

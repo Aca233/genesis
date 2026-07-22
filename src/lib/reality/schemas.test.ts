@@ -5,6 +5,7 @@ import {
   ChroniclePatchSchema,
   EntityPatchSchema,
   GodPatchSchema,
+  ObserverActionSchema,
   ObserverStateSchema,
   RealityCardPatchSchema,
   RealityStateSchema,
@@ -269,5 +270,53 @@ describe("absolute reality rewrite schemas", () => {
     ["TwinMoon", false],
   ])("enforces a 4-10 Chinese-character branch name: %s", (branchName, accepted) => {
     expect(RewritePlanSchema.safeParse({ ...emptyRewritePlan, branchName }).success).toBe(accepted);
+  });
+});
+
+describe("creator observer action schemas", () => {
+  it.each([
+    { action: "set_focus", focusType: "world", focusId: null },
+    { action: "set_focus", focusType: "place", focusId: "place-1" },
+    { action: "set_viewpoint", viewpoint: "limited" },
+    { action: "enter_avatar", avatarId: "avatar-1" },
+    { action: "exit_avatar" },
+    { action: "withdraw_avatar", avatarId: "avatar-1" },
+  ])("accepts a strict observer action", (action) => {
+    expect(ObserverActionSchema.safeParse(action).success).toBe(true);
+  });
+
+  it("accepts a bounded avatar definition with rewrite abilities", () => {
+    expect(ObserverActionSchema.safeParse({
+      action: "create_avatar",
+      name: "星行者",
+      identity: "群星在人间的无名旅者",
+      appearance: "银发，瞳中映着星轨",
+      raceId: null,
+      abilities: [{
+        name: "化星为刃",
+        kind: "personal",
+        effect: "凝聚星光",
+        trigger: "主动",
+        cost: "短暂疲惫",
+        limitations: "仅在星空下",
+        mastery: "adept",
+        state: "normal",
+        visibility: "hidden",
+        rumorText: null,
+        bloodlineJustification: null,
+        sourceAbilityRef: null,
+        lockedFields: [],
+      }],
+    }).success).toBe(true);
+  });
+
+  it.each([
+    { action: "set_focus", focusType: "world", focusId: "entity-1" },
+    { action: "set_focus", focusType: "god", focusId: null },
+    { action: "set_viewpoint", viewpoint: "player" },
+    { action: "create_avatar", name: "", identity: "", appearance: "", raceId: null, abilities: [] },
+    { action: "exit_avatar", avatarId: "unexpected" },
+  ])("rejects an invalid or ambiguous observer action", (action) => {
+    expect(ObserverActionSchema.safeParse(action).success).toBe(false);
   });
 });
