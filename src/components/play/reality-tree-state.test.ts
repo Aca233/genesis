@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildRealityTreeRows,
   creatorDrawerTabs,
   getUndoTarget,
+  getRealityTreeKeyboardTarget,
   isRealityNavigationDisabled,
+  switchCreatorReality,
   pantheonDrawerTabs,
   type RealityNodeView,
 } from "./reality-tree-state";
@@ -96,6 +98,43 @@ describe("reality tree state", () => {
       ["codex", "众生录"],
     ]);
   });
+
+  it("implements the basic fully-expanded tree keyboard navigation model", () => {
+    const rows = buildRealityTreeRows(nodes);
+    expect(getRealityTreeKeyboardTarget(rows, "branch-a", "ArrowUp")).toBe("root");
+    expect(getRealityTreeKeyboardTarget(rows, "branch-a", "ArrowDown")).toBe("leaf");
+    expect(getRealityTreeKeyboardTarget(rows, "branch-a", "ArrowLeft")).toBe("root");
+    expect(getRealityTreeKeyboardTarget(rows, "branch-a", "ArrowRight")).toBe("leaf");
+    expect(getRealityTreeKeyboardTarget(rows, "leaf", "ArrowRight")).toBe("leaf");
+    expect(getRealityTreeKeyboardTarget(rows, "leaf", "Home")).toBe("root");
+    expect(getRealityTreeKeyboardTarget(rows, "root", "End")).toBe("branch-b");
+  });
+
+  it("switches to the source reality with expectedActiveId and reloads after success", async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ activeId: "root" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    const reload = vi.fn(async () => undefined);
+
+    await expect(switchCreatorReality({
+      worldId: "world-1",
+      targetTimelineId: "root",
+      expectedActiveId: "leaf",
+      fetcher,
+      reload,
+    })).resolves.toBe("root");
+
+    expect(fetcher).toHaveBeenCalledWith("/api/worlds/world-1/realities", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        action: "switch",
+        targetTimelineId: "root",
+        expectedActiveId: "leaf",
+      }),
+    }));
+    expect(reload).toHaveBeenCalledWith("root");
+  });
 });
 
 it("renders an accessible reality tree with current reality and busy-disabled navigation", async () => {
@@ -106,11 +145,14 @@ it("renders an accessible reality tree with current reality and busy-disabled na
     createElement(RealityTreePanel, {
       worldId: "world-1",
       activeTimelineId: "leaf",
+      initialTree: { nodes, activeId: "leaf" },
       busy: { chat: true, settlement: false, rewrite: false },
       onTimelineChanged: async () => undefined,
     }),
   );
   expect(html).toContain('role="tree"');
+  expect(html).toContain('tabindex="0"');
+  expect(html).toContain('aria-expanded="true"');
   expect(html).toContain("现实树");
   expect(html).toContain("叙事、结算或改写进行中时不可切换现实");
 });

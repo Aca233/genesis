@@ -136,7 +136,12 @@ export function CreatorInputDeck({
             <button type="button" role="tab" aria-selected={rewrite} disabled={busy} onClick={() => setInput((value) => ({ ...value, channel: "rewrite", error: null }))} className={`rounded px-3 py-1 ${rewrite ? "bg-cinnabar/15 text-cinnabar" : "text-ink-faint"}`}>改写现实</button>
           </div>
           {rewrite && (
-            <select aria-label="改写范围" value={input.scope} disabled={busy} onChange={(event) => setInput((value) => ({ ...value, scope: event.target.value as RewriteScope }))} className="rounded border border-cinnabar/30 bg-paper px-2 py-1 text-xs text-cinnabar outline-none">
+            <select aria-label="改写范围" value={input.scope} disabled={busy} onChange={(event) => setInput((value) => ({
+              ...value,
+              scope: event.target.value as RewriteScope,
+              idempotencyKey: null,
+              idempotencyDraft: null,
+            }))} className="rounded border border-cinnabar/30 bg-paper px-2 py-1 text-xs text-cinnabar outline-none">
               {(Object.keys(SCOPE_LABELS) as RewriteScope[]).map((scope) => <option key={scope} value={scope}>{SCOPE_LABELS[scope]}</option>)}
             </select>
           )}
@@ -152,7 +157,13 @@ export function CreatorInputDeck({
           <textarea
             ref={taRef}
             value={input.text}
-            onChange={(event) => setInput((value) => ({ ...value, text: event.target.value, error: null }))}
+            onChange={(event) => setInput((value) => ({
+              ...value,
+              text: event.target.value,
+              error: null,
+              idempotencyKey: value.idempotencyDraft === event.target.value.trim() ? value.idempotencyKey : null,
+              idempotencyDraft: value.idempotencyDraft === event.target.value.trim() ? value.idempotencyDraft : null,
+            }))}
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault();

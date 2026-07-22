@@ -204,8 +204,15 @@ export function MessageBlock({
           {message.meta?.branchName && <p className="mb-3 text-xs text-ink-faint">新现实 · {message.meta.branchName}</p>}
           <Prose text={content} />
           {message.meta?.sourceTimelineId && (
-            <button type="button" className="mt-4 text-xs text-gilt hover:underline" onClick={() => window.dispatchEvent(new CustomEvent("creator:open-realities", { detail: { sourceTimelineId: message.meta?.sourceTimelineId } }))}>
-              返回或查看现实树 →
+            <button
+              type="button"
+              disabled={busy}
+              className="mt-4 text-xs text-gilt hover:underline disabled:opacity-40"
+              onClick={() => window.dispatchEvent(new CustomEvent("creator:return-reality", {
+                detail: { sourceTimelineId: message.meta?.sourceTimelineId },
+              }))}
+            >
+              {busy ? "现实操作进行中…" : "返回前现实 →"}
             </button>
           )}
         </article>

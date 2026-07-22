@@ -17,6 +17,7 @@ import {
   enrichRewriteResultMessages,
   type RealityRewriteView,
 } from "@/components/play/creator-input-state";
+import { switchCreatorReality } from "@/components/play/reality-tree-state";
 import { RuneRail } from "@/components/play/RuneRail";
 import { PlayDrawer } from "@/components/play/PlayDrawer";
 import { SettleCeremony } from "@/components/play/SettleCeremony";
@@ -57,11 +58,6 @@ export default function PlayPage({
   const abortRef = useRef<AbortController | null>(null);
 
   const [drawerTab, setDrawerTab] = useState<DrawerTab | null>(null);
-  useEffect(() => {
-    const openRealities = () => setDrawerTab("realities");
-    window.addEventListener("creator:open-realities", openRealities);
-    return () => window.removeEventListener("creator:open-realities", openRealities);
-  }, []);
   /** 正文实体链接点开时定位的实体（进入众生录详情） */
   const [drawerEntityId, setDrawerEntityId] = useState<string | null>(null);
 
@@ -118,6 +114,32 @@ export default function PlayPage({
       // 索引失败不阻断对局，正文只是无链接
     }
   }, [worldId]);
+
+  useEffect(() => {
+    const returnToReality = (event: Event) => {
+      const sourceTimelineId = (event as CustomEvent<{ sourceTimelineId?: string }>).detail?.sourceTimelineId;
+      const expectedActiveId = state?.timeline.id;
+      if (!sourceTimelineId || !expectedActiveId || anyBusy) return;
+      setRewriteBusy(true);
+      void switchCreatorReality({
+        worldId,
+        targetTimelineId: sourceTimelineId,
+        expectedActiveId,
+        reload: async () => {
+          await reloadState();
+          await syncEntityIndex();
+        },
+      }).then(() => {
+        setDrawerTab("realities");
+      }).catch((reason) => {
+        setGenError(reason instanceof Error ? reason.message : String(reason));
+      }).finally(() => {
+        setRewriteBusy(false);
+      });
+    };
+    window.addEventListener("creator:return-reality", returnToReality);
+    return () => window.removeEventListener("creator:return-reality", returnToReality);
+  }, [anyBusy, reloadState, state?.timeline.id, syncEntityIndex, worldId]);
 
   useEffect(() => {
     // defer：避免 effect 内同步 setState（索引到达前正文只是无链接）

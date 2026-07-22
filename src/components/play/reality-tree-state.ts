@@ -90,6 +90,50 @@ export function getUndoTarget(
   return nodes.find((node) => node.id === activeId)?.parentId ?? null;
 }
 
+export type RealityTreeNavigationKey = "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Home" | "End";
+
+export function getRealityTreeKeyboardTarget(
+  rows: readonly RealityTreeRow[],
+  currentId: string,
+  key: RealityTreeNavigationKey,
+): string {
+  if (rows.length === 0) return currentId;
+  const index = rows.findIndex(({ node }) => node.id === currentId);
+  if (index < 0) return rows[0].node.id;
+  if (key === "Home") return rows[0].node.id;
+  if (key === "End") return rows[rows.length - 1].node.id;
+  if (key === "ArrowUp") return rows[Math.max(0, index - 1)].node.id;
+  if (key === "ArrowDown") return rows[Math.min(rows.length - 1, index + 1)].node.id;
+  if (key === "ArrowLeft") return rows.find(({ node }) => node.id === rows[index].node.parentId)?.node.id ?? currentId;
+  if (rows[index].node.childCount === 0) return currentId;
+  return rows.slice(index + 1).find(({ depth }) => depth === rows[index].depth + 1)?.node.id ?? currentId;
+}
+
+export async function switchCreatorReality({
+  worldId,
+  targetTimelineId,
+  expectedActiveId,
+  fetcher = fetch,
+  reload,
+}: {
+  worldId: string;
+  targetTimelineId: string;
+  expectedActiveId: string;
+  fetcher?: typeof fetch;
+  reload: (timelineId: string) => Promise<void>;
+}): Promise<string> {
+  const response = await fetcher(`/api/worlds/${worldId}/realities`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "switch", targetTimelineId, expectedActiveId }),
+  });
+  const json = (await response.json().catch(() => null)) as { activeId?: string; error?: string } | null;
+  if (!response.ok) throw new Error(json?.error ?? "现实切换失败");
+  const activeId = json?.activeId ?? targetTimelineId;
+  await reload(activeId);
+  return activeId;
+}
+
 export function isRealityNavigationDisabled(busy: BusyKinds): boolean {
   return busy.chat || busy.settlement || busy.rewrite;
 }

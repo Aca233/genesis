@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   buildRealityTreeRows,
+  getRealityTreeKeyboardTarget,
   getUndoTarget,
   isRealityNavigationDisabled,
+  type RealityTreeNavigationKey,
   type BusyKinds,
   type RealityNodeView,
   type RealityTreeView,
@@ -15,13 +17,17 @@ export function RealityTreePanel({
   activeTimelineId,
   busy,
   onTimelineChanged,
+  initialTree = null,
 }: {
   worldId: string;
   activeTimelineId: string;
   busy: BusyKinds;
+  initialTree?: RealityTreeView | null;
   onTimelineChanged: (timelineId: string) => Promise<void>;
 }) {
-  const [tree, setTree] = useState<RealityTreeView | null>(null);
+  const [tree, setTree] = useState<RealityTreeView | null>(initialTree);
+  const [focusedId, setFocusedId] = useState(activeTimelineId);
+  const itemRefs = useRef(new Map<string, HTMLElement>());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inspected, setInspected] = useState<RealityNodeView | null>(null);
@@ -72,6 +78,15 @@ export function RealityTreePanel({
   const rows = buildRealityTreeRows(tree?.nodes ?? []);
   const currentId = tree?.activeId ?? activeTimelineId;
   const undoTarget = getUndoTarget(tree?.nodes ?? [], currentId);
+  const rovingId = rows.some(({ node }) => node.id === focusedId) ? focusedId : currentId;
+
+  function navigateTree(event: KeyboardEvent<HTMLElement>, nodeId: string) {
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const targetId = getRealityTreeKeyboardTarget(rows, nodeId, event.key as RealityTreeNavigationKey);
+    setFocusedId(targetId);
+    itemRefs.current.get(targetId)?.focus();
+  }
 
   return (
     <section className="space-y-4" aria-label="现实树">
@@ -103,7 +118,15 @@ export function RealityTreePanel({
               <article
                 key={node.id}
                 role="treeitem"
+                ref={(element) => {
+                  if (element) itemRefs.current.set(node.id, element);
+                  else itemRefs.current.delete(node.id);
+                }}
+                tabIndex={node.id === rovingId ? 0 : -1}
+                onFocus={() => setFocusedId(node.id)}
+                onKeyDown={(event) => navigateTree(event, node.id)}
                 aria-level={depth + 1}
+                aria-expanded={node.childCount > 0 ? true : undefined}
                 aria-current={current ? "true" : undefined}
                 aria-selected={current}
                 className={`rounded border p-3 ${current ? "border-gilt bg-gilt/5" : "border-line"}`}

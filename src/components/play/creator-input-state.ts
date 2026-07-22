@@ -32,6 +32,8 @@ export type CreatorInputState = {
   stage: RewriteProgressStage | null;
   error: string | null;
   completedRewrite: RealityRewriteView | null;
+  idempotencyKey: string | null;
+  idempotencyDraft: string | null;
 };
 
 export type CreatorInputDependencies = {
@@ -46,7 +48,7 @@ export type CreatorInputDependencies = {
     taskId: string,
     onProgress: (stage: RewriteProgressStage, task: RealityRewriteView | null) => void,
   ) => Promise<RealityRewriteView>;
-  refreshState: () => Promise<void>;
+  refreshState: (completed?: RealityRewriteView) => Promise<void>;
   refreshEntityIndex: () => Promise<void>;
 };
 
@@ -59,6 +61,8 @@ export function createCreatorInputState(): CreatorInputState {
     stage: null,
     error: null,
     completedRewrite: null,
+    idempotencyKey: null,
+    idempotencyDraft: null,
   };
 }
 
@@ -99,15 +103,20 @@ export async function submitCreatorInput(
   }
 
   let taskId: string;
+  const draftKey = state.idempotencyDraft === text && state.idempotencyKey
+    ? state.idempotencyKey
+    : dependencies.createIdempotencyKey();
+  current = { ...current, idempotencyKey: draftKey, idempotencyDraft: text };
+  onState?.(current);
   try {
     const accepted = await dependencies.createRewrite({
       decree: text,
       scope: state.scope,
-      idempotencyKey: dependencies.createIdempotencyKey(),
+      idempotencyKey: draftKey,
     });
     taskId = accepted.taskId;
-    // Once the server accepts a durable task, the decree is safe to clear.
-    current = { ...current, text: "" };
+    // Once the server acknowledges a durable task, the draft and its retry key are safe to clear.
+    current = { ...current, text: "", idempotencyKey: null, idempotencyDraft: null };
     onState?.(current);
   } catch (error) {
     current = { ...current, busy: false, stage: "failed", error: errorMessage(error) };
@@ -134,7 +143,7 @@ export async function submitCreatorInput(
       onState?.(current);
       return current;
     }
-    await Promise.all([dependencies.refreshState(), dependencies.refreshEntityIndex()]);
+    await Promise.all([dependencies.refreshState(completed), dependencies.refreshEntityIndex()]);
     current = {
       ...current,
       busy: false,

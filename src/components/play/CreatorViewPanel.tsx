@@ -10,6 +10,15 @@ import type {
 
 const EMPTY_AVATAR = { name: "", identity: "", appearance: "" };
 
+export async function finishAvatarCreation(
+  create: () => Promise<boolean>,
+  reset: () => void,
+): Promise<boolean> {
+  const succeeded = await create();
+  if (succeeded) reset();
+  return succeeded;
+}
+
 export function CreatorViewPanel({
   worldId,
   timeline,
@@ -32,8 +41,8 @@ export function CreatorViewPanel({
   const [showAvatarForm, setShowAvatarForm] = useState(false);
   const [avatar, setAvatar] = useState(EMPTY_AVATAR);
 
-  async function act(body: Record<string, unknown>) {
-    if (busy || acting) return;
+  async function act(body: Record<string, unknown>): Promise<boolean> {
+    if (busy || acting) return false;
     setActing(true);
     setError(null);
     try {
@@ -47,8 +56,10 @@ export function CreatorViewPanel({
         throw new Error(json?.error ?? "天外视界未能更新");
       }
       await onChanged();
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
+      return false;
     } finally {
       setActing(false);
     }
@@ -132,14 +143,14 @@ export function CreatorViewPanel({
             onSubmit={(event) => {
               event.preventDefault();
               if (!avatar.name.trim()) return;
-              void act({
+              void finishAvatarCreation(() => act({
                 action: "create_avatar",
                 name: avatar.name.trim(),
                 identity: avatar.identity.trim(),
                 appearance: avatar.appearance.trim(),
                 raceId: null,
                 abilities: [],
-              }).then(() => {
+              }), () => {
                 setAvatar(EMPTY_AVATAR);
                 setShowAvatarForm(false);
               });
