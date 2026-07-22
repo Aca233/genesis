@@ -4,9 +4,11 @@ const responses = vi.hoisted(() => ({
   extract: {} as Record<string, unknown>,
   extractHandler: undefined as undefined | ((user: string) => Record<string, unknown>),
   modelDelayMs: 0,
+  beforeModelResponse: undefined as undefined | (() => void | Promise<void>),
 }));
 vi.mock("@/lib/llm/structured", () => ({
   completeStructured: vi.fn(async (_slot: string, request: { task: string; user: string }) => {
+    await responses.beforeModelResponse?.();
     if (responses.modelDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, responses.modelDelayMs));
     if (request.task !== "settlement") throw new Error(`unexpected ${request.task}`);
     return {
@@ -454,29 +456,180 @@ it("creator settlement uses creator schema/prompt and never writes stanceToPlaye
       relations: {},
     },
   });
+  const windGod = await prisma.god.create({
+    data: {
+      timelineId: data.timeline.id, name: "风神", aliases: ["长风"], tier: "major", rank: "nascent", domains: ["风"],
+      agenda: { longTermGoal: "吹散盐雾", shortTermGoals: [], methods: "季风", schemes: [] },
+      relations: {},
+    },
+  });
   const { completeStructured } = await import("@/lib/llm/structured");
   vi.mocked(completeStructured).mockClear();
   vi.mocked(completeStructured).mockResolvedValueOnce({
     pantheonTurns: [{
       godName: "潮神", action: { description: "潮神令盐潮倒灌", targets: ["阿岚"] }, omen: "井水泛咸",
       agendaUpdate: { shortTermGoals: ["控制盐路"], schemes: ["扶植海商"] },
-      relationsUpdate: [{ target: "阿岚", label: "neutral", note: "暂时观察" }],
+      relationsUpdate: [{ target: "长风", label: "neutral", note: "暂时观察" }],
       proactiveEvent: { type: "envoy", openingHook: "海商找到阿岚" },
     }],
-    extraction: { newEntities: [], newGods: [], entityUpdates: [], godUpdates: [], revealSections: [], majorCharacterPromotions: [], abilityChanges: [] },
+    extraction: {
+      newEntities: [], newGods: [], entityUpdates: [], revealSections: [], majorCharacterPromotions: [], abilityChanges: [],
+      godUpdates: [{
+        name: "风神",
+        relationChanges: [{ target: "潮神", label: "rival", note: "争夺海岸气候" }],
+      }],
+    },
     chronicle: { entries: [{ yearLabel: "元年", text: "盐潮倒灌山脚。", entityNames: ["阿岚"], godNames: ["潮神"] }], epilogue: "盐气漫上石阶。", chapterTitle: "盐潮" },
   } as never);
   try {
     await settle(data.chapter.id);
     const updated = await prisma.god.findUniqueOrThrow({ where: { id: god.id } });
+    const updatedWind = await prisma.god.findUniqueOrThrow({ where: { id: windGod.id } });
     expect(updated.agenda).toMatchObject({ shortTermGoals: ["控制盐路"], schemes: ["扶植海商"] });
     expect(updated.agenda).not.toHaveProperty("stanceToPlayer");
+    expect(updated.relations).toEqual({
+      [windGod.id]: { label: "neutral", note: "暂时观察" },
+    });
+    expect(updatedWind.relations).toEqual({
+      [god.id]: { label: "rival", note: "争夺海岸气候" },
+    });
+    const rewrite = await prisma.realityRewrite.create({
+      data: {
+        worldId: data.world.id,
+        sourceTimelineId: data.timeline.id,
+        sourceChapterId: data.chapter.id,
+        decree: "验证关系图可克隆",
+        idempotencyKey: crypto.randomUUID(),
+      },
+    });
+    const { cloneTimelineGraph } = await import("@/lib/reality/clone");
+    const cloned = await prisma.$transaction((tx) => cloneTimelineGraph(tx, {
+      sourceTimelineId: data.timeline.id,
+      worldId: data.world.id,
+      rewriteId: rewrite.id,
+      branchName: "关系回归",
+      branchSummary: "关系键必须为真实 God ID",
+    }));
+    const clonedTide = await prisma.god.findUniqueOrThrow({ where: { id: cloned.maps.godIds.get(god.id)! } });
+    expect(clonedTide.relations).toEqual({
+      [cloned.maps.godIds.get(windGod.id)!]: { label: "neutral", note: "暂时观察" },
+    });
     expect(vi.mocked(completeStructured)).toHaveBeenCalledWith("backstage", expect.objectContaining({
       system: expect.stringContaining("world-external Creator"),
       user: expect.stringContaining(creatorDeck.theme.eraSystem),
       cache: { namespace: "settlement:v1:creator" },
     }));
   } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it.each([
+  { target: "阿岚", expected: /关系目标.*实体|实体.*关系目标/ },
+  { target: "不存在神", expected: /无法解析神明关系目标/ },
+  { target: "长风", expected: /存在歧义/ },
+])("creator settlement rejects invalid relation target $target before relation writes", async ({ target, expected }) => {
+  const data = await fixture();
+  const { completeCreatorDeck } = await import("@/lib/abilities/embark.test-fixtures");
+  const { initialRealityState, initialObserverState } = await import("@/lib/reality/schemas");
+  const creatorDeck = completeCreatorDeck();
+  await prisma.$transaction([
+    prisma.world.update({ where: { id: data.world.id }, data: { mode: "creator" } }),
+    prisma.timeline.update({ where: { id: data.timeline.id }, data: {
+      realityState: initialRealityState(creatorDeck), observerState: initialObserverState(creatorDeck),
+    } }),
+  ]);
+  const tide = await prisma.god.create({ data: {
+    timelineId: data.timeline.id, name: "潮神", aliases: [], tier: "major", rank: "ascended", domains: ["潮汐"], relations: {},
+  } });
+  if (target === "长风") {
+    await prisma.god.createMany({ data: [
+      { timelineId: data.timeline.id, name: "东风神", aliases: ["长风"], tier: "major", rank: "nascent", domains: ["东风"] },
+      { timelineId: data.timeline.id, name: "西风神", aliases: ["长风"], tier: "major", rank: "nascent", domains: ["西风"] },
+    ] });
+  }
+  const { completeStructured } = await import("@/lib/llm/structured");
+  vi.mocked(completeStructured).mockResolvedValueOnce({
+    pantheonTurns: [{
+      godName: "潮神", action: { description: "潮神观察山民", targets: ["阿岚"] }, omen: "井水泛咸",
+      agendaUpdate: {}, relationsUpdate: [{ target, label: "neutral", note: "非法关系目标" }], proactiveEvent: null,
+    }],
+    extraction: { newEntities: [], newGods: [], entityUpdates: [], godUpdates: [], revealSections: [], majorCharacterPromotions: [], abilityChanges: [] },
+    chronicle: { entries: [], epilogue: "未成。", chapterTitle: "拒绝关系" },
+  } as never);
+  try {
+    await expect(settle(data.chapter.id)).rejects.toThrow(expected);
+    expect((await prisma.god.findUniqueOrThrow({ where: { id: tide.id } })).relations).toEqual({});
+    expect(await prisma.chronicleEntry.count({ where: { timelineId: data.timeline.id } })).toBe(0);
+  } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it("renews a long settlement lease so another operation remains blocked past the original expiry", async () => {
+  const data = await fixture();
+  const token = crypto.randomUUID();
+  const originalExpiry = new Date(Date.now() + 40);
+  await prisma.world.update({
+    where: { id: data.world.id },
+    data: {
+      operationKind: "settlement",
+      operationToken: token,
+      operationLeaseExpiresAt: originalExpiry,
+    },
+  });
+  responses.modelDelayMs = 90;
+  try {
+    const running = (async () => {
+      for await (const _progress of settleChapter(data.chapter.id, {
+        worldId: data.world.id,
+        token,
+        claimed: true,
+        heartbeatMs: 10,
+      })) void _progress;
+    })();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const { claimWorldOperation } = await import("@/lib/reality/operation-lock");
+    await expect(claimWorldOperation(prisma, data.world.id, "chat", "intruder")).resolves.toEqual({
+      acquired: false,
+      activeKind: "settlement",
+    });
+    expect((await prisma.world.findUniqueOrThrow({ where: { id: data.world.id } })).operationLeaseExpiresAt!.getTime())
+      .toBeGreaterThan(originalExpiry.getTime());
+    await running;
+  } finally {
+    responses.modelDelayMs = 0;
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it("stops after settlement lease renewal is lost and performs no post-model writes", async () => {
+  const data = await fixture();
+  const token = crypto.randomUUID();
+  const { claimWorldOperation } = await import("@/lib/reality/operation-lock");
+  await expect(claimWorldOperation(prisma, data.world.id, "settlement", token)).resolves.toEqual({ acquired: true });
+  responses.modelDelayMs = 50;
+  responses.beforeModelResponse = async () => {
+    await prisma.world.update({
+      where: { id: data.world.id },
+      data: { operationToken: "replacement-owner" },
+    });
+  };
+  try {
+    await expect((async () => {
+      for await (const _progress of settleChapter(data.chapter.id, {
+        worldId: data.world.id,
+        token,
+        claimed: true,
+        heartbeatMs: 5,
+      } as never)) void _progress;
+    })()).rejects.toThrow("世界操作租约已失效");
+    const chapter = await prisma.chapter.findUniqueOrThrow({ where: { id: data.chapter.id } });
+    expect(chapter.snapshot).toBeNull();
+    expect(await prisma.chronicleEntry.count({ where: { timelineId: data.timeline.id } })).toBe(0);
+  } finally {
+    responses.modelDelayMs = 0;
+    responses.beforeModelResponse = undefined;
     await prisma.world.delete({ where: { id: data.world.id } });
   }
 });

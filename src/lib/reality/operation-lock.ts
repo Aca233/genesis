@@ -107,10 +107,33 @@ export async function renewWorldOperation(
   now = new Date(),
 ): Promise<boolean> {
   const renewed = await db.world.updateMany({
-    where: { id: worldId, operationKind: kind, operationToken: token },
+    where: {
+      id: worldId,
+      operationKind: kind,
+      operationToken: token,
+      operationLeaseExpiresAt: { gt: now },
+    },
     data: { operationLeaseExpiresAt: new Date(now.getTime() + OPERATION_LEASE_MS) },
   });
   return renewed.count === 1;
+}
+
+export async function assertWorldOperationOwner(
+  db: WorldOperationClient,
+  worldId: string,
+  kind: WorldOperationKind,
+  token: string,
+  now = new Date(),
+): Promise<void> {
+  const active = await readLease(db, worldId);
+  if (
+    active?.operationKind !== kind
+    || active.operationToken !== token
+    || active.operationLeaseExpiresAt === null
+    || active.operationLeaseExpiresAt <= now
+  ) {
+    throw new Error("世界操作租约已失效");
+  }
 }
 
 export async function releaseWorldOperation(

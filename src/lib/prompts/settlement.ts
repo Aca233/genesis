@@ -12,9 +12,18 @@ const CreatorAgendaUpdateSchema = z.object({
   schemes: z.array(z.string()).nullish(),
 }).strict();
 
+const CreatorRelationUpdateSchema = PantheonTurnSchema.shape.relationsUpdate.element.extend({
+  target: z.string().trim().min(1).describe(
+    "必须是输入中世界内部神明的精确正名或别名；不得使用实体名、ID 或 Creator",
+  ),
+});
+
 export const SettlementCreatorTurnSchema = SettlementPantheonTurnSchema.extend({
   agendaUpdate: CreatorAgendaUpdateSchema.describe(
     "Creator 世界的议程增量；只能更新世界内部目标和计谋，不存在 stanceToPlayer",
+  ),
+  relationsUpdate: z.array(CreatorRelationUpdateSchema).describe(
+    "世界内部神际关系变化；target 只能是输入中的神明正名或别名",
   ),
   proactiveEvent: z.object({
     type: z.string().describe("dream|envoy|miracle|summons|other"),
@@ -29,6 +38,9 @@ const CreatorEntityUpdateSchema = StrictExtractionSchema.shape.entityUpdates.ele
   becameChosen: z.literal(false).nullish(),
 });
 const CreatorGodUpdateSchema = StrictExtractionSchema.shape.godUpdates.element.extend({
+  relationChanges: z.array(CreatorRelationUpdateSchema).nullish().describe(
+    "世界内部神际关系变化；target 只能是输入中的神明正名或别名",
+  ),
   rankChange: StrictExtractionSchema.shape.godUpdates.element.shape.rankChange.describe(
     "世界内部神明的位阶变更提案，须有本章剧情依据",
   ),
@@ -77,7 +89,8 @@ export function settlementSystem(mode: WorldMode): string {
     ? `The player is the world-external Creator/observer, not a god or target inside the world.
 - pantheonTurns are world-internal turns: each action and proactive event may target only world-internal gods or entities.
 - Observation requests do not cause events by themselves. Never target, address, worship, oppose, rank, embody, or constrain the Creator.
-- Agenda updates may change shortTermGoals and schemes, but must never produce stanceToPlayer. Relations remain between world-internal objects.`
+- Agenda updates may change shortTermGoals and schemes, but must never produce stanceToPlayer.
+- Every relationsUpdate.target and extraction.godUpdates[].relationChanges[].target must be an exact god name or alias listed in the input, never an entity name, ID, or the Creator.`
     : `The player is a god inside the world.
 - A proactive event is required when an action directly targets the player god.`;
   return `You are the single chapter-settlement engine for a god-roleplay narrative game.

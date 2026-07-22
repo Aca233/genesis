@@ -43,6 +43,12 @@ describe("creator settlement contract", () => {
     })).success).toBe(false);
   });
 
+  it("defines relation targets as exact world-internal god names or aliases only", () => {
+    const system = settlementSystem("creator");
+    expect(system).toContain("exact god name or alias");
+    expect(system).toContain("never an entity name");
+  });
+
   it("creator prompt treats observations as world-external and turns as internal", () => {
     const system = settlementSystem("creator");
     const user = settlementUserPrompt({

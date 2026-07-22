@@ -22,9 +22,12 @@ import {
 import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
 import { RealityStateSchema, type RealityState } from "@/lib/reality/schemas";
 import {
+  OPERATION_LEASE_RENEW_MS,
   WorldOperationConflictError,
+  assertWorldOperationOwner,
   claimWorldOperation,
   releaseWorldOperation,
+  renewWorldOperation,
   type WorldOperationClient,
 } from "@/lib/reality/operation-lock";
 
@@ -102,7 +105,52 @@ export type SettlementOperationLease = {
   worldId: string;
   token: string;
   claimed: true;
+  /** Test-only override; production uses OPERATION_LEASE_RENEW_MS. */
+  heartbeatMs?: number;
 };
+
+type SettlementLeaseGuard = {
+  assertOwned(): Promise<void>;
+  stop(): void;
+};
+
+function startSettlementLeaseGuard(
+  db: WorldOperationClient,
+  worldId: string,
+  token: string,
+  heartbeatMs: number,
+): SettlementLeaseGuard {
+  let stopped = false;
+  let failure: Error | null = null;
+  let renewal: Promise<void> | null = null;
+
+  const renew = () => {
+    if (stopped || renewal !== null || failure !== null) return;
+    renewal = renewWorldOperation(db, worldId, "settlement", token)
+      .then((renewed) => {
+        if (!renewed) failure = new Error("世界操作租约已失效");
+      })
+      .catch(() => {
+        failure = new Error("世界操作租约续期失败");
+      })
+      .finally(() => {
+        renewal = null;
+      });
+  };
+  const timer = setInterval(renew, heartbeatMs);
+
+  return {
+    async assertOwned() {
+      if (renewal !== null) await renewal;
+      if (failure !== null) throw failure;
+      await assertWorldOperationOwner(db, worldId, "settlement", token);
+    },
+    stop() {
+      stopped = true;
+      clearInterval(timer);
+    },
+  };
+}
 
 /** 获取世界级结算租约，并保证 runner 的所有退出路径都会按 token 释放。 */
 export async function* settleChapter(
@@ -113,6 +161,7 @@ export async function* settleChapter(
   const token = lease?.token ?? crypto.randomUUID();
   let worldId = lease?.worldId;
   let ownsLease = lease?.claimed ?? false;
+  let leaseGuard: SettlementLeaseGuard | null = null;
 
   try {
     const chapter = await prisma.chapter.findUnique({
@@ -130,8 +179,16 @@ export async function* settleChapter(
       ownsLease = true;
     }
 
-    yield* settleChapterWithLease(chapterId);
+    leaseGuard = startSettlementLeaseGuard(
+      operationDb,
+      worldId,
+      token,
+      lease?.heartbeatMs ?? OPERATION_LEASE_RENEW_MS,
+    );
+    await leaseGuard.assertOwned();
+    yield* settleChapterWithLease(chapterId, leaseGuard.assertOwned);
   } finally {
+    leaseGuard?.stop();
     if (ownsLease && worldId) {
       await releaseWorldOperation(operationDb, worldId, "settlement", token);
     }
@@ -141,6 +198,7 @@ export async function* settleChapter(
 /** 结算主流程：模型只调用一次；后续进度均为本地结果应用。 */
 async function* settleChapterWithLease(
   chapterId: string,
+  assertLeaseOwned: () => Promise<void>,
 ): AsyncGenerator<SettleProgress> {
   const chapter = await prisma.chapter.findUnique({
     where: { id: chapterId },
@@ -188,7 +246,12 @@ async function* settleChapterWithLease(
           allowTransportFallback: false,
           cache: { namespace: `settlement:v1:${mode}` },
         });
+        await assertLeaseOwned();
         await assertTimelineStillActive(world.id, timeline.id);
+        const creatorRelationTargets = mode === "creator"
+          ? await relationTargetResolver(timeline.id)
+          : undefined;
+        validateSettlementRelationTargets(mode, settlement, creatorRelationTargets);
         const stored = await prisma.chapter.updateMany({
           where: { id: chapterId, timelineId: timeline.id, settleState: claim.leaseState },
           data: {
@@ -198,10 +261,15 @@ async function* settleChapterWithLease(
         });
         if (stored.count !== 1) throw new Error("章节结算占用已失效");
       } catch (error) {
-        await prisma.chapter.updateMany({
-          where: { id: chapterId, settleState: claim.leaseState },
-          data: { settleState: "open" },
-        });
+        try {
+          await assertLeaseOwned();
+          await prisma.chapter.updateMany({
+            where: { id: chapterId, settleState: claim.leaseState },
+            data: { settleState: "open" },
+          });
+        } catch {
+          // Lease loss forbids any further settlement mutation, including recovery writes.
+        }
         throw error;
       }
     } else {
@@ -210,6 +278,11 @@ async function* settleChapterWithLease(
     }
   }
 
+  const creatorRelationTargets = mode === "creator"
+    ? await relationTargetResolver(timeline.id)
+    : undefined;
+  validateSettlementRelationTargets(mode, settlement, creatorRelationTargets);
+  await assertLeaseOwned();
   await assertTimelineStillActive(world.id, timeline.id);
   const afterModel = await prisma.chapter.findUniqueOrThrow({
     where: { id: chapterId },
@@ -217,7 +290,8 @@ async function* settleChapterWithLease(
   });
   if (parseState(afterModel.settleState) === "pantheon") {
     yield { step: "pantheon", detail: "诸神行动落定" };
-    await applyPantheonTurns(timeline.id, chapter.index, settlement.pantheonTurns);
+    await assertLeaseOwned();
+    await applyPantheonTurns(timeline.id, chapter.index, settlement.pantheonTurns, mode);
     await setState(chapterId, "extract");
   }
 
@@ -228,13 +302,15 @@ async function* settleChapterWithLease(
   const startIdx = STEP_ORDER.indexOf(parseState(current.settleState));
 
   if (startIdx <= STEP_ORDER.indexOf("extract")) {
+    await assertLeaseOwned();
     await assertTimelineStillActive(world.id, timeline.id);
     yield { step: "extract" };
-    await applyExtraction(timeline.id, chapterId, chapterText, settlement.extraction);
+    await applyExtraction(timeline.id, chapterId, chapterText, settlement.extraction, mode);
     await setState(chapterId, "chronicle");
   }
 
   if (startIdx <= STEP_ORDER.indexOf("chronicle")) {
+    await assertLeaseOwned();
     await assertTimelineStillActive(world.id, timeline.id);
     yield { step: "chronicle" };
     await applyChronicle(timeline.id, chapterId, chapter.index, chapter.title, settlement.chronicle);
@@ -242,6 +318,7 @@ async function* settleChapterWithLease(
   }
 
   if (startIdx <= STEP_ORDER.indexOf("decay")) {
+    await assertLeaseOwned();
     await assertTimelineStillActive(world.id, timeline.id);
     yield { step: "decay" };
     const staleBefore = chapter.index - 3;
@@ -275,6 +352,7 @@ async function* settleChapterWithLease(
   }
 
   if (startIdx <= STEP_ORDER.indexOf("snapshot")) {
+    await assertLeaseOwned();
     await assertTimelineStillActive(world.id, timeline.id);
     yield { step: "snapshot" };
     const [gods, entities] = await Promise.all([
@@ -451,11 +529,15 @@ async function applyPantheonTurns(
   timelineId: string,
   chapterIndex: number,
   turns: ModeAwareChapterSettlement["pantheonTurns"],
+  mode: WorldMode,
 ) {
   const gods = await prisma.god.findMany({
     where: { timelineId, tier: "major", isPlayer: false },
     orderBy: { createdAt: "asc" },
   });
+  const relationTargets = mode === "creator"
+    ? await relationTargetResolver(timelineId)
+    : undefined;
   const already = await prisma.chronicleEntry.findMany({
     where: { timelineId, chapterIndex, source: "pantheon" },
     select: { godIds: true },
@@ -502,7 +584,10 @@ async function applyPantheonTurns(
       }
       const relations = (god.relations ?? {}) as Record<string, unknown>;
       for (const relation of turn.relationsUpdate) {
-        relations[relation.target] = { label: relation.label, note: relation.note };
+        const targetId = mode === "creator"
+          ? relationTargets!.resolve(relation.target)
+          : relation.target;
+        relations[targetId] = { label: relation.label, note: relation.note };
       }
       await tx.god.update({
         where: { id: god.id },
@@ -592,15 +677,59 @@ async function entityNameMap(timelineId: string): Promise<Map<string, string>> {
   return map;
 }
 
+type RelationTargetResolver = {
+  resolve(target: string): string;
+};
+
+async function relationTargetResolver(timelineId: string): Promise<RelationTargetResolver> {
+  const [gods, entities] = await Promise.all([
+    prisma.god.findMany({ where: { timelineId }, select: { id: true, name: true, aliases: true } }),
+    prisma.entity.findMany({ where: { timelineId }, select: { name: true, aliases: true } }),
+  ]);
+  const godIdsByName = new Map<string, Set<string>>();
+  for (const god of gods) {
+    for (const name of [god.name, ...god.aliases]) {
+      const ids = godIdsByName.get(name) ?? new Set<string>();
+      ids.add(god.id);
+      godIdsByName.set(name, ids);
+    }
+  }
+  const entityNames = new Set(entities.flatMap((entity) => [entity.name, ...entity.aliases]));
+  return {
+    resolve(target: string): string {
+      const ids = godIdsByName.get(target);
+      if (ids?.size === 1) return [...ids][0]!;
+      if (ids && ids.size > 1) throw new Error(`神明关系目标“${target}”存在歧义`);
+      if (entityNames.has(target)) throw new Error(`神明关系目标“${target}”是实体，不是神明`);
+      throw new Error(`无法解析神明关系目标“${target}”`);
+    },
+  };
+}
+
+function validateSettlementRelationTargets(
+  mode: WorldMode,
+  settlement: ModeAwareChapterSettlement,
+  resolver?: RelationTargetResolver,
+): void {
+  if (mode !== "creator") return;
+  if (!resolver) throw new Error("Creator 结算缺少神明关系解析器");
+  for (const turn of settlement.pantheonTurns) {
+    for (const relation of turn.relationsUpdate) resolver.resolve(relation.target);
+  }
+  for (const update of settlement.extraction.godUpdates) {
+    for (const relation of update.relationChanges ?? []) resolver.resolve(relation.target);
+  }
+}
+
 async function godNameMap(timelineId: string): Promise<Map<string, string>> {
   const list = await prisma.god.findMany({
     where: { timelineId },
     select: { id: true, name: true, aliases: true },
   });
   const map = new Map<string, string>();
-  for (const g of list) {
-    map.set(g.name, g.id);
-    for (const a of g.aliases) map.set(a, g.id);
+  for (const god of list) {
+    map.set(god.name, god.id);
+    for (const alias of god.aliases) map.set(alias, god.id);
   }
   return map;
 }
@@ -611,6 +740,7 @@ async function applyExtraction(
   chapterId: string,
   chapterText: Awaited<ReturnType<typeof chapterProse>>,
   extraction: Extraction,
+  mode: WorldMode,
 ) {
   const normalizedExtraction: Extraction = {
     ...extraction,
@@ -729,6 +859,9 @@ async function applyExtraction(
       where: { timelineId },
       select: { id: true, name: true, aliases: true, rank: true, isPlayer: true },
     });
+    const relationTargets = mode === "creator"
+      ? await relationTargetResolver(timelineId)
+      : undefined;
     const godByName = new Map<string, (typeof godRecords)[number]>();
     for (const god of godRecords) {
       godByName.set(god.name, god);
@@ -757,8 +890,11 @@ async function applyExtraction(
       const god = await tx.god.findUnique({ where: { id: target.id } });
       if (!god) continue;
       const relations = (god.relations ?? {}) as Record<string, unknown>;
-      for (const r of gu.relationChanges ?? []) {
-        relations[r.target] = { label: r.label, note: r.note };
+      for (const relation of gu.relationChanges ?? []) {
+        const targetId = mode === "creator"
+          ? relationTargets!.resolve(relation.target)
+          : relation.target;
+        relations[targetId] = { label: relation.label, note: relation.note };
       }
       await tx.god.update({
         where: { id: target.id },

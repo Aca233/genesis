@@ -6,6 +6,7 @@ import {
   claimWorldOperation,
   releaseWorldOperation,
   renewWorldOperation,
+  assertWorldOperationOwner,
   type WorldOperationKind,
 } from "./operation-lock";
 
@@ -22,6 +23,9 @@ function matches(value: LeaseState, where: Record<string, unknown>): boolean {
     const actual = value[key as keyof LeaseState];
     if (expected && typeof expected === "object" && "lte" in expected) {
       return actual instanceof Date && actual <= (expected as { lte: Date }).lte;
+    }
+    if (expected && typeof expected === "object" && "gt" in expected) {
+      return actual instanceof Date && actual > (expected as { gt: Date }).gt;
     }
     return actual === expected;
   });
@@ -129,6 +133,18 @@ describe("world operation lease", () => {
     await expect(claimWorldOperation(db, "w1", "chat", "g1", now)).resolves.toEqual({ acquired: true });
     expect(attempts).toBe(2);
     expect(state).toMatchObject({ operationKind: "chat", operationToken: "g1" });
+  });
+
+  it("asserts ownership only for the matching live token", async () => {
+    const { db } = database({
+      operationKind: "settlement",
+      operationToken: "s1",
+      operationLeaseExpiresAt: new Date(now.getTime() + 10_000),
+    });
+
+    await expect(assertWorldOperationOwner(db, "w1", "settlement", "s1", now)).resolves.toBeUndefined();
+    await expect(assertWorldOperationOwner(db, "w1", "settlement", "wrong", now)).rejects.toThrow("世界操作租约已失效");
+    await expect(assertWorldOperationOwner(db, "w1", "settlement", "s1", new Date(now.getTime() + 10_000))).rejects.toThrow("世界操作租约已失效");
   });
 
   it("wrong-token release is a no-op and matching release clears every lease field", async () => {
