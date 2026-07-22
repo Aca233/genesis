@@ -14,11 +14,13 @@ import {
   SECTION_TEMPLATES,
 } from "@/lib/prompts/extractor";
 import {
-  ChapterSettlementSchema,
+  chapterSettlementSchema,
   settlementSystem,
   settlementUserPrompt,
-  type ChapterSettlement,
+  type ModeAwareChapterSettlement,
 } from "@/lib/prompts/settlement";
+import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
+import { RealityStateSchema, type RealityState } from "@/lib/reality/schemas";
 
 /**
  * 章末结算流水线（docs/02 §4.2）：
@@ -50,7 +52,7 @@ const MODEL_STATE_PREFIX = "settling:model:";
 
 type SettlementModelClaim =
   | { owner: true; leaseState: string }
-  | { owner: false; settlement: ChapterSettlement };
+  | { owner: false; settlement: ModeAwareChapterSettlement };
 
 
 export type SettleProgress = {
@@ -75,7 +77,7 @@ async function setState(chapterId: string, step: SettleStep) {
 }
 
 /** 组装本章正文（定稿内容，含玩家神谕） */
-async function chapterProse(chapterId: string) {
+async function chapterProse(chapterId: string, mode: WorldMode) {
   const messages = await prisma.message.findMany({
     where: { chapterId },
     orderBy: { index: "asc" },
@@ -83,7 +85,7 @@ async function chapterProse(chapterId: string) {
   return {
     prose: messages
       .map((message) =>
-        message.role === "player" ? `【玩家神谕】${message.content}` : message.content,
+        message.role === "player" ? `${mode === "creator" ? "【天外观测】" : "【玩家神谕】"}${message.content}` : message.content,
       )
       .join("\n\n"),
     messages,
@@ -106,31 +108,43 @@ export async function* settleChapter(
 
   const timeline = chapter.timeline;
   const world = timeline.world;
-  const chapterText = await chapterProse(chapterId);
+  const mode = WorldModeSchema.parse(world.mode);
+  assertActiveReality(world.activeTimelineId, timeline.id);
+  const parsedReality = RealityStateSchema.safeParse(timeline.realityState);
+  if (mode === "creator" && !parsedReality.success) throw new Error("创世主现实状态无效");
+  const chapterText = await chapterProse(chapterId, mode);
   const scaleNote = await dominantScale(chapterId);
 
   // Database CAS makes the model request chapter-global: concurrent settlement runners
   // wait for the winner's persisted response instead of issuing their own request.
-  let settlement = readPendingSettlement(chapter.snapshot);
+  let settlement = readPendingSettlement(chapter.snapshot, mode);
   if (!settlement) {
-    const claim = await claimSettlementModel(chapterId);
+    const claim = await claimSettlementModel(chapterId, timeline.id, mode);
     if (claim.owner) {
       yield { step: "pantheon", detail: "诸神与史官正在共同结算" };
       try {
-        const context = await buildSettlementContext(timeline.id, chapterText, scaleNote, world);
+        const context = await buildSettlementContext(
+          timeline.id,
+          chapterText,
+          scaleNote,
+          world,
+          mode,
+          parsedReality.success ? parsedReality.data : undefined,
+        );
         settlement = await completeStructured("backstage", {
           task: "settlement",
-          system: settlementSystem(),
+          system: settlementSystem(mode),
           user: settlementUserPrompt(context),
-          schema: ChapterSettlementSchema,
+          schema: chapterSettlementSchema(mode),
           maxTokens: 16000,
           maxAttempts: 1,
           transportMaxAttempts: 1,
           allowTransportFallback: false,
-          cache: { namespace: "settlement:v1" },
+          cache: { namespace: `settlement:v1:${mode}` },
         });
+        await assertTimelineStillActive(world.id, timeline.id);
         const stored = await prisma.chapter.updateMany({
-          where: { id: chapterId, settleState: claim.leaseState },
+          where: { id: chapterId, timelineId: timeline.id, settleState: claim.leaseState },
           data: {
             snapshot: { pendingSettlement: settlement } as unknown as Prisma.InputJsonValue,
             settleState: "settling:pantheon",
@@ -150,6 +164,7 @@ export async function* settleChapter(
     }
   }
 
+  await assertTimelineStillActive(world.id, timeline.id);
   const afterModel = await prisma.chapter.findUniqueOrThrow({
     where: { id: chapterId },
     select: { settleState: true },
@@ -167,18 +182,21 @@ export async function* settleChapter(
   const startIdx = STEP_ORDER.indexOf(parseState(current.settleState));
 
   if (startIdx <= STEP_ORDER.indexOf("extract")) {
+    await assertTimelineStillActive(world.id, timeline.id);
     yield { step: "extract" };
     await applyExtraction(timeline.id, chapterId, chapterText, settlement.extraction);
     await setState(chapterId, "chronicle");
   }
 
   if (startIdx <= STEP_ORDER.indexOf("chronicle")) {
+    await assertTimelineStillActive(world.id, timeline.id);
     yield { step: "chronicle" };
     await applyChronicle(timeline.id, chapterId, chapter.index, chapter.title, settlement.chronicle);
     await setState(chapterId, "decay");
   }
 
   if (startIdx <= STEP_ORDER.indexOf("decay")) {
+    await assertTimelineStillActive(world.id, timeline.id);
     yield { step: "decay" };
     const staleBefore = chapter.index - 3;
     if (staleBefore > 0) {
@@ -211,6 +229,7 @@ export async function* settleChapter(
   }
 
   if (startIdx <= STEP_ORDER.indexOf("snapshot")) {
+    await assertTimelineStillActive(world.id, timeline.id);
     yield { step: "snapshot" };
     const [gods, entities] = await Promise.all([
       prisma.god.findMany({ where: { timelineId: timeline.id } }),
@@ -239,9 +258,24 @@ export async function* settleChapter(
 }
 
 type SettlementWorld = {
+  id: string;
+  mode: string;
+  activeTimelineId: string | null;
   themeCard: Prisma.JsonValue | null;
   fusionAxiom: Prisma.JsonValue | null;
 };
+
+function assertActiveReality(activeTimelineId: string | null, timelineId: string): void {
+  if (activeTimelineId !== timelineId) throw new Error("该现实已被冻结");
+}
+
+async function assertTimelineStillActive(worldId: string, timelineId: string): Promise<void> {
+  const world = await prisma.world.findUnique({
+    where: { id: worldId },
+    select: { activeTimelineId: true },
+  });
+  assertActiveReality(world?.activeTimelineId ?? null, timelineId);
+}
 
 function modelLeaseExpiry(state: string): number | null {
   if (!state.startsWith(MODEL_STATE_PREFIX)) return null;
@@ -249,13 +283,14 @@ function modelLeaseExpiry(state: string): number | null {
   return Number.isFinite(expiry) ? expiry : 0;
 }
 
-async function claimSettlementModel(chapterId: string): Promise<SettlementModelClaim> {
+async function claimSettlementModel(chapterId: string, timelineId: string, mode: WorldMode): Promise<SettlementModelClaim> {
   while (true) {
     const current = await prisma.chapter.findUniqueOrThrow({
       where: { id: chapterId },
       select: { snapshot: true, settleState: true },
     });
-    const pending = readPendingSettlement(current.snapshot);
+    await assertTimelineStillActive((await prisma.timeline.findUniqueOrThrow({ where: { id: timelineId }, select: { worldId: true } })).worldId, timelineId);
+    const pending = readPendingSettlement(current.snapshot, mode);
     if (pending) return { owner: false, settlement: pending };
     if (current.settleState === "settled") {
       throw new Error("章节已经完成结算，但缺少可恢复的结算响应");
@@ -276,16 +311,16 @@ async function claimSettlementModel(chapterId: string): Promise<SettlementModelC
   }
 }
 
-function readPendingSettlement(snapshot: Prisma.JsonValue | null): ChapterSettlement | null {
+function readPendingSettlement(snapshot: Prisma.JsonValue | null, mode: WorldMode): ModeAwareChapterSettlement | null {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
   const pending = (snapshot as Record<string, unknown>).pendingSettlement;
-  const parsed = ChapterSettlementSchema.safeParse(pending);
+  const parsed = chapterSettlementSchema(mode).safeParse(pending);
   return parsed.success ? parsed.data : null;
 }
 
-function labelledChapterMessages(messages: Awaited<ReturnType<typeof chapterProse>>["messages"]): string {
+function labelledChapterMessages(messages: Awaited<ReturnType<typeof chapterProse>>["messages"], mode: WorldMode): string {
   return messages.map((message) => {
-    const content = message.role === "player" ? `【玩家神谕】${message.content}` : message.content;
+    const content = message.role === "player" ? `${mode === "creator" ? "【天外观测】" : "【玩家神谕】"}${message.content}` : message.content;
     return `[${message.id} | ${message.index} | ${message.scale}]\n${content}`;
   }).join("\n\n");
 }
@@ -295,6 +330,8 @@ async function buildSettlementContext(
   chapterText: Awaited<ReturnType<typeof chapterProse>>,
   scaleNote: string,
   world: SettlementWorld,
+  mode: WorldMode,
+  reality?: RealityState,
 ): Promise<Parameters<typeof settlementUserPrompt>[0]> {
   const [entities, gods, abilities, lastEntry] = await Promise.all([
     prisma.entity.findMany({
@@ -329,14 +366,22 @@ async function buildSettlementContext(
       orderBy: { createdAt: "desc" },
     }),
   ]);
-  const theme = (world.themeCard ?? {}) as { eraSystem?: string };
+  const theme = mode === "creator" && reality
+    ? reality.theme
+    : (world.themeCard ?? {}) as { eraSystem?: string };
+  const fusionAxiom = mode === "creator" && reality
+    ? reality.fusionAxiom
+    : world.fusionAxiom;
   const raceName = new Map(entities.map((entity) => [entity.id, entity.name]));
 
   return {
-    chapterMessages: labelledChapterMessages(chapterText.messages),
+    mode,
+    chapterMessages: labelledChapterMessages(chapterText.messages, mode),
     scaleNote,
     eraSystem: theme.eraSystem ?? "纪元",
-    currentYearLabel: lastEntry?.yearLabel ?? "元年",
+    currentYearLabel: mode === "creator" && reality
+      ? reality.currentEra
+      : lastEntry?.yearLabel ?? "元年",
     entities: entities.map((entity) =>
       `${entity.name} [${entity.id}] (${entity.type}) race=${entity.raceId ? raceName.get(entity.raceId) ?? entity.raceId : "—"} aliases=[${entity.aliases.join("、")}] present=${entity.scenePresence}: ${entity.summary}`,
     ).join("\n"),
@@ -352,14 +397,14 @@ async function buildSettlementContext(
       return `[${ability.id}] ${owner}·${ability.name} kind=${ability.kind} mastery=${ability.mastery} state=${ability.state} visibility=${ability.visibility} source=${source} locked=[${ability.lockedFields.join(", ")}] effect=${ability.effect} trigger=${ability.trigger} cost=${ability.cost} limitations=${ability.limitations}`;
     }).join("\n"),
     lockedPaths: entities.flatMap((entity) => entity.lockedPaths.map((path) => `${entity.name}.${path}`)).join(", "),
-    fusionAxiom: world.fusionAxiom ? JSON.stringify(world.fusionAxiom) : undefined,
+    fusionAxiom: fusionAxiom ? JSON.stringify(fusionAxiom) : undefined,
   };
 }
 
 async function applyPantheonTurns(
   timelineId: string,
   chapterIndex: number,
-  turns: ChapterSettlement["pantheonTurns"],
+  turns: ModeAwareChapterSettlement["pantheonTurns"],
 ) {
   const gods = await prisma.god.findMany({
     where: { timelineId, tier: "major", isPlayer: false },
@@ -406,7 +451,9 @@ async function applyPantheonTurns(
       const agenda = (god.agenda ?? {}) as Record<string, unknown>;
       if (turn.agendaUpdate.shortTermGoals) agenda.shortTermGoals = turn.agendaUpdate.shortTermGoals;
       if (turn.agendaUpdate.schemes) agenda.schemes = turn.agendaUpdate.schemes;
-      if (turn.agendaUpdate.stanceToPlayer) agenda.stanceToPlayer = turn.agendaUpdate.stanceToPlayer;
+      if ("stanceToPlayer" in turn.agendaUpdate && turn.agendaUpdate.stanceToPlayer) {
+        agenda.stanceToPlayer = turn.agendaUpdate.stanceToPlayer;
+      }
       const relations = (god.relations ?? {}) as Record<string, unknown>;
       for (const relation of turn.relationsUpdate) {
         relations[relation.target] = { label: relation.label, note: relation.note };
@@ -427,7 +474,7 @@ async function applyChronicle(
   chapterId: string,
   chapterIndex: number,
   currentTitle: string | null,
-  chronicle: ChapterSettlement["chronicle"],
+  chronicle: ModeAwareChapterSettlement["chronicle"],
 ) {
   const [entityMap, godMap] = await Promise.all([
     entityNameMap(timelineId),

@@ -5,6 +5,9 @@ import type { NarratorMeta } from "@/lib/prompts/narrator";
 const REQUEST_TAG = "chat-generation-request";
 const LEASE_MS = 5 * 60 * 1000;
 export type ChatGenerationMode = "say" | "continue" | "opening";
+export class FrozenRealityError extends Error {
+  constructor() { super("该现实已被冻结"); this.name = "FrozenRealityError"; }
+}
 export class OpeningGenerationConflictError extends Error {
   constructor() { super("本章已有开场，不可重复演出"); this.name = "OpeningGenerationConflictError"; }
 }
@@ -25,6 +28,9 @@ type RequestMessage = {
   content: string; scale: string; meta: unknown;
 };
 export type GenerationRequestTx = {
+  world: {
+    findUnique(args: { where: { id: string }; select: { activeTimelineId: true } }): Promise<{ activeTimelineId: string | null } | null>;
+  };
   generationRequest: {
     findUnique(args: { where: { id: string } }): Promise<RequestRow | null>;
     create(args: { data: Record<string, unknown> }): Promise<RequestRow>;
@@ -67,7 +73,7 @@ function asNarratorMeta(value: unknown): NarratorMeta | null {
     ? meta as NarratorMeta : null;
 }
 export type PrepareGenerationInput = {
-  generationId: string; chapterId: string; mode: ChatGenerationMode; scale: Scale;
+  generationId: string; chapterId: string; worldId: string; expectedActiveTimelineId: string; mode: ChatGenerationMode; scale: Scale;
   content?: string; directive?: string; playerIndex: number | null; narratorIndex: number;
   chapterHasMessages?: boolean;
 };
@@ -125,12 +131,26 @@ async function reserveInTx(tx: GenerationRequestTx, input: PrepareGenerationInpu
 export async function prepareGenerationRequest(client: GenerationRequestClient, input: PrepareGenerationInput) {
   try {
     return await client.$transaction(async (tx) => {
+      const world = await tx.world.findUnique({
+        where: { id: input.worldId },
+        select: { activeTimelineId: true },
+      });
+      if (!world || world.activeTimelineId !== input.expectedActiveTimelineId) {
+        throw new FrozenRealityError();
+      }
       const existing = await tx.generationRequest.findUnique({ where: { id: input.generationId } });
       return existing ? inspectOrTakeover(tx, existing, input) : reserveInTx(tx, input);
     });
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
       return client.$transaction(async (tx) => {
+        const world = await tx.world.findUnique({
+          where: { id: input.worldId },
+          select: { activeTimelineId: true },
+        });
+        if (!world || world.activeTimelineId !== input.expectedActiveTimelineId) {
+          throw new FrozenRealityError();
+        }
         const row = await tx.generationRequest.findUnique({ where: { id: input.generationId } });
         if (!row) throw error;
         return inspectOrTakeover(tx, row, input);
@@ -141,6 +161,13 @@ export async function prepareGenerationRequest(client: GenerationRequestClient, 
 }
 export async function readGenerationCompletion(client: GenerationRequestClient, input: PrepareGenerationInput) {
   return client.$transaction(async (tx) => {
+    const world = await tx.world.findUnique({
+      where: { id: input.worldId },
+      select: { activeTimelineId: true },
+    });
+    if (!world || world.activeTimelineId !== input.expectedActiveTimelineId) {
+      throw new FrozenRealityError();
+    }
     const row = await tx.generationRequest.findUnique({ where: { id: input.generationId } });
     if (!row) throw new Error("generation reservation disappeared");
     const meta = rowMeta(row);

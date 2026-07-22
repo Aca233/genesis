@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   OpeningGenerationConflictError: class OpeningGenerationConflictError extends Error {},
+  FrozenRealityError: class FrozenRealityError extends Error {},
   prisma: {
     chapter: { findUnique: vi.fn() },
+    world: { findUnique: vi.fn() },
     message: { create: vi.fn() },
   },
   buildNarratorContext: vi.fn(),
@@ -31,6 +33,7 @@ vi.mock("@/lib/chat/request", () => ({
   readGenerationCompletion: mocks.readGenerationCompletion,
   markGenerationFailed: mocks.markGenerationFailed,
   OpeningGenerationConflictError: mocks.OpeningGenerationConflictError,
+  FrozenRealityError: mocks.FrozenRealityError,
 }));
 
 import { POST } from "./route";
@@ -42,7 +45,7 @@ describe("POST /api/chat", () => {
       id: "chapter-1",
       index: 2,
       settleState: "open",
-      timeline: { id: "timeline-1", worldId: "world-1" },
+      timeline: { id: "timeline-1", worldId: "world-1", world: { activeTimelineId: "timeline-1" } },
       messages: [{ index: 3 }],
     });
     mocks.buildNarratorContext.mockResolvedValue([{ role: "user", content: "继续" }]);
@@ -244,4 +247,57 @@ describe("POST /api/chat", () => {
       expect.objectContaining({ message: "context unavailable" }),
     );
   });
+  it("rejects a frozen branch before generation reservation", async () => {
+    mocks.prisma.chapter.findUnique.mockResolvedValue({
+      id: "chapter-frozen", index: 2, settleState: "open",
+      timeline: { id: "timeline-old", worldId: "world-1", world: { activeTimelineId: "timeline-new" } },
+      messages: [],
+    });
+    const response = await POST(new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        chapterId: "chapter-frozen", scale: "scene", mode: "continue",
+        generationId: "generation-frozen",
+      }),
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "该现实已被冻结" });
+    expect(mocks.prepareGenerationRequest).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when the reality freezes while building narration context", async () => {
+    mocks.buildNarratorContext.mockRejectedValue(new mocks.FrozenRealityError("该现实已被冻结"));
+
+    const response = await POST(new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        chapterId: "chapter-1", scale: "scene", mode: "continue",
+        generationId: "generation-frozen-late",
+      }),
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "该现实已被冻结" });
+    expect(mocks.markGenerationFailed).toHaveBeenCalled();
+  });
+
+  it("passes the expected active timeline into finalization so late replies cannot write", async () => {
+    const request = new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        chapterId: "chapter-1", scale: "scene", mode: "continue",
+        generationId: "generation-1",
+      }),
+    });
+    await POST(request);
+    const [{ onDone }] = mocks.narratorSSE.mock.calls[0];
+    await onDone({ prose: "正文", meta: { suggestions: [], chapterBreakHint: false } });
+
+    expect(mocks.finalizeNarration).toHaveBeenCalledWith(mocks.prisma, expect.objectContaining({
+      worldId: "world-1",
+      expectedActiveTimelineId: "timeline-1",
+    }));
+  });
+
 });

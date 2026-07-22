@@ -11,6 +11,7 @@ import { finalizeNarration } from "./finalize";
 function fixture() {
   const state = { messages: new Map<string, Record<string, unknown>>() };
   const tx = {
+    world: { findUnique: vi.fn().mockResolvedValue({ activeTimelineId: "timeline-1", mode: "pantheon" }) },
     generationRequest: {
       findUnique: vi.fn(async () => ({
         id: "generation-1",
@@ -51,6 +52,8 @@ const base = {
   chapterId: "chapter-1",
   chapterIndex: 3,
   timelineId: "timeline-1",
+  worldId: "world-1",
+  expectedActiveTimelineId: "timeline-1",
   narratorIndex: 4,
   requestMeta: {
     type: "chat-generation-request" as const,
@@ -138,6 +141,26 @@ describe("finalizeNarration", () => {
     await expect(finalizeNarration(client as never, base)).rejects.toThrow("database unavailable");
     expect(tx.chronicleEntry.updateMany).not.toHaveBeenCalled();
   });
+
+  it("creator omniscient observation never consumes author-only hidden chronicles", async () => {
+    const { client, tx } = fixture();
+    tx.world.findUnique.mockResolvedValue({ activeTimelineId: "timeline-1", mode: "creator" });
+    tx.ability.findFirst.mockResolvedValue(null);
+
+    await finalizeNarration(client as never, base);
+
+    expect(tx.chronicleEntry.updateMany).not.toHaveBeenCalled();
+  });
+  it("rejects a late response when the world has switched realities", async () => {
+    const { client, tx } = fixture();
+    tx.world.findUnique.mockResolvedValue({ activeTimelineId: "timeline-new" });
+
+    await expect(finalizeNarration(client as never, base)).rejects.toThrow("该现实已被冻结");
+    expect(tx.message.create).not.toHaveBeenCalled();
+    expect(tx.chronicleEntry.updateMany).not.toHaveBeenCalled();
+    expect(tx.generationRequest.update).not.toHaveBeenCalled();
+  });
+
 });
 
 describe("reveal merge/no-op", () => {

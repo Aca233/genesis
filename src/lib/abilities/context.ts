@@ -5,7 +5,7 @@ import {
   type PersistedAbilityRecord,
 } from "./types";
 
-export type AbilityContextViewer = "player" | "narrator" | "backstage";
+export type AbilityContextViewer = "player" | "narrator" | "backstage" | "creator_author";
 
 export type BuildAbilityContextOptions = {
   timelineId: string;
@@ -98,12 +98,14 @@ export async function buildAbilityContext(
   );
   const relevantEntities = entityIndex.filter(
     (entity) =>
+      opts.viewer === "creator_author" ||
       (entity.type === "character" && relevantCharacters.includes(entity)) ||
       (entity.type === "race" &&
         (relevantRaceIds.has(entity.id) || isMentioned(entity, opts.searchText))),
   );
   const relevantGods = godIndex.filter(
     (god) =>
+      opts.viewer === "creator_author" ||
       ((opts.viewer === "player" || opts.viewer === "narrator") && god.isPlayer) ||
       (opts.viewer === "backstage" && god.id === opts.subjectGodId) ||
       isMentioned(god, opts.searchText),
@@ -164,6 +166,10 @@ export async function buildAbilityContext(
   for (const god of relevantGods) {
     const owner = { id: god.id, name: god.name, type: "god" as const };
     const items = byGod.get(god.id) ?? [];
+    if (opts.viewer === "creator_author") {
+      addFull(authorOnly, owner, items);
+      continue;
+    }
     if (god.isPlayer && (opts.viewer === "player" || opts.viewer === "narrator")) {
       addFull(known, owner, items);
       continue;
@@ -194,10 +200,15 @@ export async function buildAbilityContext(
     };
     if (entity.type === "race") {
       const items = byEntity.get(entity.id) ?? [];
-      addVisible(owner, items);
+      if (opts.viewer === "creator_author") addFull(authorOnly, owner, items);
+      else addVisible(owner, items);
       if (narratorHiddenEntityIds.has(entity.id)) {
         addFull(authorOnly, owner, items.filter((ability) => ability.visibility === "hidden"));
       }
+      continue;
+    }
+    if (opts.viewer === "creator_author") {
+      addFull(authorOnly, owner, byEntity.get(entity.id) ?? []);
       continue;
     }
     const effective = resolveEffectiveAbilities({
@@ -240,6 +251,6 @@ export async function buildAbilityContext(
 
   return [
     formatBlock("KNOWN ABILITIES", known),
-    formatBlock("AUTHOR-ONLY HIDDEN ABILITIES", authorOnly),
+    formatBlock(opts.viewer === "creator_author" ? "AUTHOR-ONLY FULL ABILITIES" : "AUTHOR-ONLY HIDDEN ABILITIES", authorOnly),
   ].join("\n\n");
 }

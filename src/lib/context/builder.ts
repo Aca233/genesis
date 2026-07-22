@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db";
 import type { ChatMessage } from "@/lib/llm/types";
 import type { Scale } from "@/lib/cards/schemas";
+import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
+import { ObserverStateSchema, RealityStateSchema } from "@/lib/reality/schemas";
 import { narratorGlobalSystem, narratorTurnSystem, narratorWorldSystem, openingDirective } from "@/lib/prompts/narrator";
 import { buildAbilityContext } from "@/lib/abilities/context";
 
@@ -51,6 +53,7 @@ function stanceHint(agenda: unknown): string | null {
 
 /** 主神卡片集（人格+声纹+关系可见；议程仅给外显倾向一句） */
 function godsSystemBlock(
+  mode: WorldMode,
   gods: {
     name: string;
     aliases: string[];
@@ -75,7 +78,8 @@ function godsSystemBlock(
       `persona: ${JSON.stringify(g.persona)}`,
       `voice (LAW — this god must speak unmistakably in this voice): ${JSON.stringify(g.voice)}`,
       `relations: ${JSON.stringify(g.relations)}`,
-      hint ? `outward inclination toward the player god: ${hint}` : null,
+      mode === "creator" ? `AUTHOR-ONLY full agenda: ${JSON.stringify(g.agenda)}` : null,
+      mode === "pantheon" && hint ? `outward inclination toward the player god: ${hint}` : null,
     ]
       .filter(Boolean)
       .join("\n");
@@ -83,11 +87,16 @@ function godsSystemBlock(
 
   const minorLines = minors.length
     ? `\n\nMINOR GODS (one-line each, may be promoted by the story):\n${minors
-        .map((g) => `- ${g.name}: ${JSON.stringify(g.persona)}`)
+        .map((g) => mode === "creator"
+          ? `- ${g.name}: rank=${g.rank}; domains=${g.domains.join("、") || "—"}; persona=${JSON.stringify(g.persona)}; voice=${JSON.stringify(g.voice)}; relations=${JSON.stringify(g.relations)}; AUTHOR-ONLY full agenda=${JSON.stringify(g.agenda)}`
+          : `- ${g.name}: ${JSON.stringify(g.persona)}`)
         .join("\n")}`
     : "";
 
-  return `PANTHEON — the major gods of this world. Their hidden agendas are NOT given to you; portray only what is outwardly visible. Voice cards are law.\n\n${majorBlocks.join("\n\n")}${minorLines}`;
+  const heading = mode === "creator"
+    ? "AUTHOR-ONLY COMPLETE GOD CARDS — full agendas and relations may guide omniscient narration, but are not automatically known by world-internal characters. Voice cards are law."
+    : "PANTHEON — the major gods of this world. Their hidden agendas are NOT given to you; portray only what is outwardly visible. Voice cards are law.";
+  return `${heading}\n\n${majorBlocks.join("\n\n")}${minorLines}`;
 }
 
 /** 世界书命中：对检索文本做 keys 包含匹配，按预算截断 */
@@ -117,9 +126,11 @@ function lorebookBlock(
 /** 正文窗口：从旧到新拼接；玩家消息前缀【玩家神谕】；超预算从最旧裁剪 */
 function proseWindow(
   messages: { role: string; content: string }[],
+  mode: WorldMode,
 ): string {
+  const label = mode === "creator" ? "【天外观测】" : "【玩家神谕】";
   const lines = messages.map((m) =>
-    m.role === "player" ? `【玩家神谕】${m.content}` : m.content,
+    m.role === "player" ? `${label}${m.content}` : m.content,
   );
   // 从最新往回装，超预算即停 → 等价于从最旧裁剪
   const kept: string[] = [];
@@ -277,6 +288,7 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
   const chapter = await prisma.chapter.findUnique({
     where: { id: opts.chapterId },
     include: {
+      timeline: { select: { id: true, realityState: true, observerState: true } },
       messages: {
         orderBy: { index: "asc" },
         ...(opts.beforeIndex !== undefined
@@ -286,6 +298,16 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
     },
   });
   if (!chapter) throw new Error("章节不存在");
+  const mode = WorldModeSchema.parse(world.mode);
+  if (chapter.timelineId !== world.activeTimelineId) throw new Error("该现实已被冻结");
+
+  const parsedReality = RealityStateSchema.safeParse(chapter.timeline.realityState);
+  const parsedObserver = ObserverStateSchema.safeParse(chapter.timeline.observerState);
+  if (mode === "creator" && (!parsedReality.success || !parsedObserver.success)) {
+    throw new Error("创世主现实状态无效");
+  }
+  const reality = parsedReality.success ? parsedReality.data : null;
+  const observer = parsedObserver.success ? parsedObserver.data : null;
 
   // 上一章末 3 条
   const prevChapter = await prisma.chapter.findUnique({
@@ -304,20 +326,29 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
 
   // ── 征兆消费 + 查探检测 ──
   const probeText = opts.playerInput ?? "";
-  const [omens, hiddenEntries] = await Promise.all([
-    consumeOmens(chapter.timelineId),
-    hiddenEntriesForProbe(chapter.timelineId, probeText),
-  ]);
+  const [omens, hiddenEntries] = mode === "creator"
+    ? await Promise.all([
+        Promise.resolve({ texts: [] }),
+        prisma.chronicleEntry.findMany({
+          where: { timelineId: chapter.timelineId, revealed: false },
+          orderBy: { createdAt: "desc" },
+        }),
+      ])
+    : await Promise.all([
+        consumeOmens(chapter.timelineId),
+        hiddenEntriesForProbe(chapter.timelineId, probeText),
+      ]);
 
   // ── Stable cache prefix: global rules, then world-specific cards. ──
-  const globalSystem = narratorGlobalSystem();
+  const globalSystem = narratorGlobalSystem(mode);
   const worldSystem = narratorWorldSystem({
+    mode,
     worldName: world.name,
-    styleCard: world.styleCard,
-    themeCard: world.themeCard,
-    cosmology: world.cosmology,
-    fusionAxiom: world.fusionAxiom ?? undefined,
-    playerGod: playerGod
+    styleCard: reality?.style ?? world.styleCard,
+    themeCard: reality?.theme ?? world.themeCard,
+    cosmology: reality?.cosmology ?? world.cosmology,
+    fusionAxiom: reality ? reality.fusionAxiom ?? undefined : world.fusionAxiom ?? undefined,
+    playerGod: mode === "pantheon" && playerGod
       ? {
           name: playerGod.name,
           rank: playerGod.rank,
@@ -326,13 +357,29 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
           faithScope: playerGod.faithScope,
         }
       : null,
-    gods: godsSystemBlock(gods.filter((god) => !god.isPlayer)),
+    gods: godsSystemBlock(mode, gods.filter((god) => !god.isPlayer)),
   });
   const turnSystem = narratorTurnSystem({
+    mode,
     scale: opts.scale,
     omens: omens.texts,
-    hiddenEntries,
+    hiddenEntries: mode === "pantheon"
+      ? hiddenEntries.map((entry) => ({ id: entry.id, text: entry.text, godName: "godName" in entry ? entry.godName : "未知" }))
+      : undefined,
   });
+  const realityBlock = reality
+    ? `== ACTIVE REALITY STATE (authoritative over world cards) ==
+${JSON.stringify(reality, null, 1)}`
+    : null;
+  const observerBlock = observer
+    ? `== OBSERVER STATE ==
+${JSON.stringify(observer, null, 1)}`
+    : null;
+  const creatorHiddenChronicle = mode === "creator" && hiddenEntries.length
+    ? `== AUTHOR-ONLY HIDDEN CHRONICLE ==
+These events are available to omniscient narration but are not automatically known by world-internal characters:
+${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
+    : null;
 
   // ── 检索文本（world书/实体卡/编年史共用） ──
   const windowMessages = [...prevTail, ...chapter.messages];
@@ -348,25 +395,25 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
     chronicleBlock(chapter.timelineId, searchText),
     buildAbilityContext({
       timelineId: chapter.timelineId,
-      viewer: "narrator",
+      viewer: mode === "creator" ? "creator_author" : "narrator",
       searchText,
     }),
   ]);
 
   // ── 正文窗口 + 本轮输入，拼成单条 user（防中转站丢多轮） ──
-  const windowText = proseWindow(windowMessages);
+  const windowText = proseWindow(windowMessages, mode);
   const parts: string[] = [];
   if (windowText) {
     parts.push(`[Story so far — oldest to newest]\n\n${windowText}`);
   }
   if (opts.mode === "say") {
-    parts.push(`【玩家神谕】${opts.playerInput ?? ""}`);
+    parts.push(`${mode === "creator" ? "【天外观测】" : "【玩家神谕】"}${opts.playerInput ?? ""}`);
   } else if (opts.mode === "continue") {
     parts.push(
       `(幕后导演提示，不作为剧情输入): ${opts.directive?.trim() || "继续叙事，顺势推进。"}`,
     );
   } else {
-    parts.push(openingDirective);
+    parts.push(openingDirective(mode));
   }
 
   const messages: ChatMessage[] = [
@@ -374,6 +421,9 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
     { role: "system", content: worldSystem, cacheScope: "world" },
     { role: "system", content: turnSystem, cacheScope: "dynamic" },
   ];
+  if (realityBlock) messages.push({ role: "system", content: realityBlock, cacheScope: "dynamic" });
+  if (observerBlock) messages.push({ role: "system", content: observerBlock, cacheScope: "dynamic" });
+  if (creatorHiddenChronicle) messages.push({ role: "system", content: creatorHiddenChronicle, cacheScope: "dynamic" });
   if (entityCards) messages.push({ role: "system", content: entityCards, cacheScope: "dynamic" });
   messages.push({ role: "system", content: abilityContext, cacheScope: "dynamic" });
   if (lore) messages.push({ role: "system", content: lore, cacheScope: "dynamic" });

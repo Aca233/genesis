@@ -383,3 +383,65 @@ it("同一章节并发结束时全局只发起一次模型请求", async () => {
     await prisma.world.delete({ where: { id: data.world.id } });
   }
 });
+
+
+it("rejects settlement on a frozen non-active timeline without calling the model", async () => {
+  const data = await fixture();
+  const replacement = await prisma.timeline.create({ data: { worldId: data.world.id } });
+  await prisma.world.update({ where: { id: data.world.id }, data: { activeTimelineId: replacement.id } });
+  const { completeStructured } = await import("@/lib/llm/structured");
+  vi.mocked(completeStructured).mockClear();
+  try {
+    await expect(settle(data.chapter.id)).rejects.toThrow("该现实已被冻结");
+    expect(vi.mocked(completeStructured)).not.toHaveBeenCalled();
+    expect((await prisma.chapter.findUnique({ where: { id: data.chapter.id } }))?.settleState).toBe("open");
+  } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it("creator settlement uses creator schema/prompt and never writes stanceToPlayer", async () => {
+  const data = await fixture();
+  const { completeCreatorDeck } = await import("@/lib/abilities/embark.test-fixtures");
+  const { initialRealityState, initialObserverState } = await import("@/lib/reality/schemas");
+  const creatorDeck = completeCreatorDeck();
+  await prisma.$transaction([
+    prisma.world.update({ where: { id: data.world.id }, data: { mode: "creator", themeCard: { eraSystem: "旧世界纪年" } } }),
+    prisma.timeline.update({ where: { id: data.timeline.id }, data: {
+      realityState: initialRealityState(creatorDeck),
+      observerState: initialObserverState(creatorDeck),
+    } }),
+  ]);
+  const god = await prisma.god.create({
+    data: {
+      timelineId: data.timeline.id, name: "潮神", aliases: [], tier: "major", rank: "ascended", domains: ["潮汐"],
+      agenda: { longTermGoal: "吞没旧港", shortTermGoals: [], methods: "海啸", schemes: [] },
+      relations: {},
+    },
+  });
+  const { completeStructured } = await import("@/lib/llm/structured");
+  vi.mocked(completeStructured).mockClear();
+  vi.mocked(completeStructured).mockResolvedValueOnce({
+    pantheonTurns: [{
+      godName: "潮神", action: { description: "潮神令盐潮倒灌", targets: ["阿岚"] }, omen: "井水泛咸",
+      agendaUpdate: { shortTermGoals: ["控制盐路"], schemes: ["扶植海商"] },
+      relationsUpdate: [{ target: "阿岚", label: "neutral", note: "暂时观察" }],
+      proactiveEvent: { type: "envoy", openingHook: "海商找到阿岚" },
+    }],
+    extraction: { newEntities: [], newGods: [], entityUpdates: [], godUpdates: [], revealSections: [], majorCharacterPromotions: [], abilityChanges: [] },
+    chronicle: { entries: [{ yearLabel: "元年", text: "盐潮倒灌山脚。", entityNames: ["阿岚"], godNames: ["潮神"] }], epilogue: "盐气漫上石阶。", chapterTitle: "盐潮" },
+  } as never);
+  try {
+    await settle(data.chapter.id);
+    const updated = await prisma.god.findUniqueOrThrow({ where: { id: god.id } });
+    expect(updated.agenda).toMatchObject({ shortTermGoals: ["控制盐路"], schemes: ["扶植海商"] });
+    expect(updated.agenda).not.toHaveProperty("stanceToPlayer");
+    expect(vi.mocked(completeStructured)).toHaveBeenCalledWith("backstage", expect.objectContaining({
+      system: expect.stringContaining("world-external Creator"),
+      user: expect.stringContaining(creatorDeck.theme.eraSystem),
+      cache: { namespace: "settlement:v1:creator" },
+    }));
+  } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});

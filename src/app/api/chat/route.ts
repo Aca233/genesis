@@ -13,6 +13,7 @@ import {
   readGenerationCompletion,
   markGenerationFailed,
   OpeningGenerationConflictError,
+  FrozenRealityError,
   type GenerationRequestClient,
 } from "@/lib/chat/request";
 
@@ -46,7 +47,13 @@ export async function POST(request: Request) {
   const chapter = await prisma.chapter.findUnique({
     where: { id: chapterId },
     include: {
-      timeline: { select: { id: true, worldId: true } },
+      timeline: {
+        select: {
+          id: true,
+          worldId: true,
+          world: { select: { activeTimelineId: true } },
+        },
+      },
       messages: { orderBy: { index: "desc" }, take: 1 },
     },
   });
@@ -55,6 +62,9 @@ export async function POST(request: Request) {
   }
   if (chapter.settleState !== "open") {
     return NextResponse.json({ error: "本章已成史，不可续写" }, { status: 409 });
+  }
+  if (chapter.timeline.id !== chapter.timeline.world.activeTimelineId) {
+    return NextResponse.json({ error: "该现实已被冻结" }, { status: 409 });
   }
 
   const lastIndex = chapter.messages[0]?.index ?? 0;
@@ -72,6 +82,8 @@ export async function POST(request: Request) {
       {
         generationId,
         chapterId,
+        worldId: chapter.timeline.worldId,
+        expectedActiveTimelineId: chapter.timeline.id,
         mode,
         scale,
         content: mode === "say" ? content!.trim() : undefined,
@@ -82,7 +94,7 @@ export async function POST(request: Request) {
       },
     );
   } catch (error) {
-    if (error instanceof OpeningGenerationConflictError) {
+    if (error instanceof OpeningGenerationConflictError || error instanceof FrozenRealityError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
     throw error;
@@ -98,6 +110,8 @@ export async function POST(request: Request) {
         {
           generationId,
           chapterId,
+          worldId: chapter.timeline.worldId,
+          expectedActiveTimelineId: chapter.timeline.id,
           mode,
           scale,
           content: mode === "say" ? content!.trim() : undefined,
@@ -131,6 +145,10 @@ export async function POST(request: Request) {
       prepared.attempt!,
       error,
     );
+    if (error instanceof FrozenRealityError ||
+        (error instanceof Error && error.message === "该现实已被冻结")) {
+      return NextResponse.json({ error: "该现实已被冻结" }, { status: 409 });
+    }
     throw error;
   }
 
@@ -152,6 +170,8 @@ export async function POST(request: Request) {
           chapterId,
           chapterIndex: chapter.index,
           timelineId: chapter.timeline.id,
+          worldId: chapter.timeline.worldId,
+          expectedActiveTimelineId: chapter.timeline.id,
           narratorIndex,
           attempt: prepared.attempt,
           requestMeta: prepared.meta,

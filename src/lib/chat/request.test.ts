@@ -5,6 +5,7 @@ function fixture() {
   const messages = new Map<string, Record<string, unknown>>();
   const requests = new Map<string, Record<string, unknown>>();
   const tx = {
+    world: { findUnique: vi.fn().mockResolvedValue({ activeTimelineId: "timeline-1" }) },
     generationRequest: {
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) => requests.get(where.id) ?? null),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -49,6 +50,8 @@ function fixture() {
 const input = {
   generationId: "generation-1",
   chapterId: "chapter-1",
+  worldId: "world-1",
+  expectedActiveTimelineId: "timeline-1",
   mode: "say" as const,
   scale: "scene" as const,
   content: "神谕",
@@ -185,4 +188,27 @@ describe("prepareGenerationRequest", () => {
       },
     });
   });
+
+  it("does not reserve or write the player message after the reality is frozen", async () => {
+    const { client, tx, requests } = fixture();
+    tx.world.findUnique.mockResolvedValue({ activeTimelineId: "timeline-new" });
+
+    await expect(prepareGenerationRequest(client as never, input)).rejects.toThrow("该现实已被冻结");
+    expect(requests.size).toBe(0);
+    expect(tx.message.create).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the active reality in unique-conflict recovery", async () => {
+    const { client, tx } = fixture();
+    await prepareGenerationRequest(client as never, input);
+    tx.world.findUnique.mockClear();
+    tx.generationRequest.findUnique.mockResolvedValueOnce(null);
+    tx.world.findUnique
+      .mockResolvedValueOnce({ activeTimelineId: "timeline-1" })
+      .mockResolvedValueOnce({ activeTimelineId: "timeline-new" });
+
+    await expect(prepareGenerationRequest(client as never, input)).rejects.toThrow("该现实已被冻结");
+    expect(tx.world.findUnique).toHaveBeenCalledTimes(2);
+  });
+
 });

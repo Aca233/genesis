@@ -1,13 +1,20 @@
 import type { Prisma } from "@prisma/client";
 import type { Scale } from "@/lib/cards/schemas";
 import type { NarratorMeta } from "@/lib/prompts/narrator";
-import { parseGenerationRequestMeta, type GenerationRequestMeta } from "./request";
+import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
+import { FrozenRealityError, parseGenerationRequestMeta, type GenerationRequestMeta } from "./request";
 import {
   revealAbilityInTransaction,
   type AbilityMutationTx,
 } from "@/lib/abilities/mutations";
 
 export type NarrationFinalizationTx = Omit<AbilityMutationTx, "message" | "ability"> & {
+  world: {
+    findUnique(args: {
+      where: { id: string };
+      select: { activeTimelineId: true; mode: true };
+    }): Promise<{ activeTimelineId: string | null; mode: WorldMode } | null>;
+  };
   generationRequest: {
     findUnique(args: { where: { id: string } }): Promise<unknown>;
     update(args: {
@@ -62,6 +69,8 @@ export async function finalizeNarration(
     chapterId: string;
     chapterIndex: number;
     timelineId: string;
+    worldId: string;
+    expectedActiveTimelineId: string;
     narratorIndex: number;
     attempt?: number;
     requestMeta?: GenerationRequestMeta;
@@ -76,6 +85,15 @@ export async function finalizeNarration(
   checkCancelled();
   return client.$transaction(async (tx) => {
     checkCancelled();
+    const world = await tx.world.findUnique({
+      where: { id: input.worldId },
+      select: { activeTimelineId: true, mode: true },
+    });
+    if (!world || world.activeTimelineId !== input.expectedActiveTimelineId ||
+        input.timelineId !== input.expectedActiveTimelineId) {
+      throw new FrozenRealityError();
+    }
+    const worldMode = WorldModeSchema.parse(world.mode);
     if (input.attempt !== undefined) {
       const owned = await tx.generationRequest.updateMany({
         where: { id: input.generationId, status: "pending", attempt: input.attempt },
@@ -154,7 +172,7 @@ export async function finalizeNarration(
     }
 
     checkCancelled();
-    if (input.meta.revealedEventIds?.length) {
+    if (worldMode !== "creator" && input.meta.revealedEventIds?.length) {
       await tx.chronicleEntry.updateMany({
         where: {
           id: { in: input.meta.revealedEventIds },

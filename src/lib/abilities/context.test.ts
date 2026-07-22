@@ -392,6 +392,35 @@ describe("buildAbilityContext", () => {
     expect(authorOnly).not.toContain("无声誓");
   });
 
+
+  it("Creator author viewer receives every persisted ability in full without search-based filtering", async () => {
+    const sealed = { ...ability("character-sealed-author", "封印秘术", "hidden"), state: "sealed" };
+    mocks.prisma.ability.findMany.mockResolvedValue([
+      ...owned(playerGod, "godId"),
+      ...owned(actingGod, "godId"),
+      ...owned(unrelatedGod, "godId"),
+      ...owned(race, "entityId"),
+      ...owned({ ...character, abilities: [...character.abilities, sealed] }, "entityId"),
+      ...owned(unrelatedCharacter, "entityId"),
+    ]);
+    const context = await buildAbilityContext({
+      timelineId: "timeline-1",
+      viewer: "creator_author",
+      searchText: "",
+    });
+
+    expect(context).toContain("昼临的效果");
+    expect(context).toContain("秘日的效果");
+    expect(context).toContain("沉海的效果");
+    expect(context).toContain("灰烬密仪的效果");
+    expect(context).toContain("日蚀血脉的效果");
+    expect(context).toContain("无声誓的效果");
+    expect(context).toContain("远方技艺的效果");
+    expect(context).toContain("封印秘术的效果");
+    expect(context).toContain("state: sealed");
+    expect(context).toContain("AUTHOR-ONLY");
+  });
+
   it("Narrator 仅获得被点名 NPC、种族与非玩家神的隐藏能力完整机制", async () => {
     const context = await buildAbilityContext({
       timelineId: "timeline-1",

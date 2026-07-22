@@ -42,11 +42,12 @@ import {
   narratorGlobalSystem,
   narratorTurnSystem,
   narratorWorldSystem,
+  openingDirective,
 } from "./narrator";
 
 describe("narrator quality contract", () => {
   it("protects player agency at natural decision points", () => {
-    const prompt = narratorGlobalSystem();
+    const prompt = narratorGlobalSystem("pantheon");
     expect(prompt).toContain("PLAYER AGENCY BOUNDARY");
     expect(prompt).toContain("explicitly supplied words, actions and intent");
     expect(prompt).toContain("never invent a new consequential decision");
@@ -55,7 +56,7 @@ describe("narrator quality contract", () => {
   });
 
   it("requires grounded knowledge and ability provenance for every NPC", () => {
-    const prompt = narratorGlobalSystem();
+    const prompt = narratorGlobalSystem("pantheon");
     expect(prompt).toContain("KNOWLEDGE BOUNDARY");
     expect(prompt).toContain("witnessed, was told, can reliably infer");
     expect(prompt).toContain("Narrator knowledge is not character knowledge");
@@ -63,7 +64,7 @@ describe("narrator quality contract", () => {
   });
 
   it("builds living characters from state instead of random traits", () => {
-    const prompt = narratorGlobalSystem();
+    const prompt = narratorGlobalSystem("pantheon");
     expect(prompt).toContain("LIVING CHARACTER METHOD");
     expect(prompt).toContain("persona, present goal, known information, relationships, recent experience, abilities and limitations");
     expect(prompt).toContain("surprising but retrospectively explainable");
@@ -71,7 +72,7 @@ describe("narrator quality contract", () => {
   });
 
   it("uses positive prose guidance and forbids visible planning", () => {
-    const prompt = narratorGlobalSystem();
+    const prompt = narratorGlobalSystem("pantheon");
     expect(prompt).toContain("PROSE CRAFT");
     expect(prompt).toContain("Render personality through choices, timing, action and dialogue");
     expect(prompt).toContain("Use direct description for ordinary sensory facts");
@@ -81,15 +82,16 @@ describe("narrator quality contract", () => {
   });
 
   it("keeps stable quality rules global and turn facts dynamic", () => {
-    const global = narratorGlobalSystem();
+    const global = narratorGlobalSystem("pantheon");
     const world = narratorWorldSystem({
+      mode: "pantheon",
       worldName: "测试世界",
       styleCard: null,
       themeCard: null,
       cosmology: null,
       playerGod: null,
     });
-    const turn = narratorTurnSystem({ scale: "scene", omens: ["潮声倒流"] });
+    const turn = narratorTurnSystem({ mode: "pantheon", scale: "scene", omens: ["潮声倒流"] });
     expect(global).toContain("PLAYER AGENCY BOUNDARY");
     expect(global).not.toContain("潮声倒流");
     expect(world).toContain("测试世界");
@@ -100,8 +102,63 @@ describe("narrator quality contract", () => {
   });
 
   it("limits suggestions to unresolved player choices without prewriting outcomes", () => {
-    const prompt = narratorGlobalSystem();
+    const prompt = narratorGlobalSystem("pantheon");
     expect(prompt).toContain("Suggest only actions or attitudes the player god may choose");
     expect(prompt).toContain("never state the outcome as already achieved");
+  });
+
+  it("retains pantheon author-only narration and NPC knowledge boundaries", () => {
+    const prompt = narratorGlobalSystem("pantheon");
+    expect(prompt).toContain("Never mention, imply or suggest an ability absent from KNOWN ABILITIES. AUTHOR-ONLY entries may shape only their owner's manifested behavior");
+    expect(prompt).toContain("Hidden chronicle entries, agendas and AUTHOR-ONLY abilities cannot leak through convenient intuition");
+  });
+});
+
+
+describe("creator observation narration contract", () => {
+  it("treats the player as a world-external observer whose ordinary requests cannot rewrite facts", () => {
+    const prompt = narratorGlobalSystem("creator");
+
+    expect(prompt).toContain("world-external Creator");
+    expect(prompt).toContain("OBSERVATION REQUEST");
+    expect(prompt).toContain("focus, time span, and what to show");
+    expect(prompt).toContain("does not itself rewrite established facts");
+    expect(prompt).toContain("Never invent a body, god-card, worship, rank, limitation, or in-world identity");
+    expect(prompt).toContain("World-internal characters do not know the Creator exists");
+    expect(prompt).not.toContain("The player IS a god of this world");
+  });
+
+  it("offers observation choices rather than player-god actions and preserves reveal provenance", () => {
+    const prompt = narratorGlobalSystem("creator");
+
+    expect(prompt).toContain("observation, focus, viewpoint, or time-advance choices");
+    expect(prompt).not.toContain("actions or attitudes the player god may choose");
+    expect(prompt).toContain("ability_reveals");
+    expect(prompt).toContain("clearly witnessed");
+  });
+
+  it("uses a world tableau opening without descent or a fabricated player-god hook", () => {
+    const creator = openingDirective("creator");
+    const pantheon = openingDirective("pantheon");
+
+    expect(creator).toContain("present era");
+    expect(creator).toContain("world-internal tension");
+    expect(creator).toContain("no descent");
+    expect(creator).not.toContain("player god's starting situation");
+    expect(pantheon).toContain("genesis / descent set-piece");
+    expect(pantheon).toContain("player god's starting situation");
+  });
+
+  it("keeps second person external in creator mode", () => {
+    const world = narratorWorldSystem({
+      mode: "creator",
+      worldName: "观星界",
+      styleCard: null,
+      themeCard: null,
+      cosmology: null,
+      playerGod: null,
+    });
+    expect(world).toContain("CREATOR OBSERVER");
+    expect(world).not.toContain("PLAYER GOD (the protagonist");
   });
 });
