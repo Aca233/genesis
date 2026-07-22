@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { completeStructured } from "@/lib/llm/structured";
-import { WorldDeckSchema } from "@/lib/cards/schemas";
+import { PantheonWorldDeckSchema } from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 import { GENESIS_SYSTEM, genesisUserPrompt } from "@/lib/prompts/genesis";
 import { parseStWorldbook, lorebookExcerpts } from "@/lib/lorebook/st-import";
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
         decree: body.decree,
         lorebookExcerpts: excerpts,
       }),
-      schema: WorldDeckSchema,
+      schema: PantheonWorldDeckSchema,
       maxTokens: 16000,
       cache: { namespace: "genesis:v1" },
     });
@@ -69,6 +69,7 @@ export async function POST(request: Request) {
     data: {
       name: deck.worldName,
       genesisInput: body.decree,
+      mode: "pantheon",
       status: "draft",
       draftDeck: deck as unknown as Prisma.InputJsonValue,
       themeCard: deck.theme as unknown as Prisma.InputJsonValue,
