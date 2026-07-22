@@ -137,6 +137,9 @@ function startSettlementLeaseGuard(
         renewal = null;
       });
   };
+  // Renew immediately: an inherited lease can be closer to expiry than the
+  // normal heartbeat interval when the settlement runner takes ownership.
+  renew();
   const timer = setInterval(renew, heartbeatMs);
 
   return {
@@ -164,6 +167,16 @@ export async function* settleChapter(
   let leaseGuard: SettlementLeaseGuard | null = null;
 
   try {
+    if (ownsLease && worldId) {
+      leaseGuard = startSettlementLeaseGuard(
+        operationDb,
+        worldId,
+        token,
+        lease?.heartbeatMs ?? OPERATION_LEASE_RENEW_MS,
+      );
+      await leaseGuard.assertOwned();
+    }
+
     const chapter = await prisma.chapter.findUnique({
       where: { id: chapterId },
       include: { timeline: { select: { id: true, worldId: true, world: { select: { activeTimelineId: true } } } } },
@@ -179,13 +192,15 @@ export async function* settleChapter(
       ownsLease = true;
     }
 
-    leaseGuard = startSettlementLeaseGuard(
-      operationDb,
-      worldId,
-      token,
-      lease?.heartbeatMs ?? OPERATION_LEASE_RENEW_MS,
-    );
-    await leaseGuard.assertOwned();
+    if (!leaseGuard) {
+      leaseGuard = startSettlementLeaseGuard(
+        operationDb,
+        worldId,
+        token,
+        lease?.heartbeatMs ?? OPERATION_LEASE_RENEW_MS,
+      );
+      await leaseGuard.assertOwned();
+    }
     yield* settleChapterWithLease(chapterId, leaseGuard.assertOwned);
   } finally {
     leaseGuard?.stop();

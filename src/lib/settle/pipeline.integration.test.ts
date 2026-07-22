@@ -569,7 +569,7 @@ it.each([
 it("renews a long settlement lease so another operation remains blocked past the original expiry", async () => {
   const data = await fixture();
   const token = crypto.randomUUID();
-  const originalExpiry = new Date(Date.now() + 40);
+  const originalExpiry = new Date(Date.now() + 1_000);
   await prisma.world.update({
     where: { id: data.world.id },
     data: {
@@ -578,17 +578,17 @@ it("renews a long settlement lease so another operation remains blocked past the
       operationLeaseExpiresAt: originalExpiry,
     },
   });
-  responses.modelDelayMs = 90;
+  responses.modelDelayMs = 1_100;
   try {
     const running = (async () => {
       for await (const _progress of settleChapter(data.chapter.id, {
         worldId: data.world.id,
         token,
         claimed: true,
-        heartbeatMs: 10,
+        heartbeatMs: 2_000,
       })) void _progress;
     })();
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await new Promise((resolve) => setTimeout(resolve, 1_050));
     const { claimWorldOperation } = await import("@/lib/reality/operation-lock");
     await expect(claimWorldOperation(prisma, data.world.id, "chat", "intruder")).resolves.toEqual({
       acquired: false,
