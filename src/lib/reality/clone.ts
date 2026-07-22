@@ -49,18 +49,26 @@ function remapRuntimeJson(
 ): Prisma.InputJsonValue | typeof Prisma.DbNull {
   if (value === null) return Prisma.DbNull;
 
-  const visit = (node: Prisma.JsonValue, path: string): Prisma.InputJsonValue => {
+  function visit(
+    node: Exclude<Prisma.JsonValue, null>,
+    path: string,
+  ): Prisma.InputJsonValue;
+  function visit(node: Prisma.JsonValue, path: string): Prisma.InputJsonValue | null;
+  function visit(
+    node: Prisma.JsonValue,
+    path: string,
+  ): Prisma.InputJsonValue | null {
     if (typeof node === "string") {
       const mapped = idMap.get(node);
       if (mapped !== undefined) return mapped;
       if (sourceIds.has(node)) throw new Error(`${label}仍含未映射源 ID：${path}`);
       return node;
     }
-    if (node === null) return Prisma.JsonNull;
+    if (node === null) return null;
     if (typeof node !== "object") return node;
     if (Array.isArray(node)) return node.map((item, index) => visit(item, `${path}[${index}]`));
 
-    const output: Record<string, Prisma.InputJsonValue> = {};
+    const output: Record<string, Prisma.InputJsonValue | null> = {};
     for (const [key, child] of Object.entries(node)) {
       if (key === "generationRequest" || child === undefined) continue;
       const mappedKey = idMap.get(key) ?? key;
@@ -70,7 +78,7 @@ function remapRuntimeJson(
       output[mappedKey] = visit(child, `${path}.${key}`);
     }
     return output;
-  };
+  }
 
   return visit(value, "$");
 }

@@ -291,6 +291,10 @@ async function fixture() {
           linkedGodId: dawnGod.id,
           chapterId: chapterOne.id,
           messageId: messageOne.id,
+          nullableContext: {
+            note: null,
+            trail: [avatar.id, null, dawnGod.id],
+          },
         },
       }],
       meta: {
@@ -302,6 +306,10 @@ async function fixture() {
         evidenceEventId: abilityEvent.id,
         chapterId: chapterOne.id,
         playerMessageId: messageTwo.id,
+        nullableContext: {
+          note: null,
+          trail: [messageOne.id, null, learnedAbility.id],
+        },
       },
     },
   });
@@ -309,9 +317,13 @@ async function fixture() {
     where: { id: chapterOne.id },
     data: {
       snapshot: {
-        gods: [{ id: dawnGod.id, relations: { [duskGod.id]: { label: "rival" } } }],
-        entities: [{ id: avatar.id, raceId: race.id }],
-        pendingSettlement: { evidenceMessageId: messageOne.id, abilityId: learnedAbility.id },
+        gods: [{ id: dawnGod.id, lastOmen: null, relations: { [duskGod.id]: { label: "rival", note: null } } }],
+        entities: [{ id: avatar.id, raceId: race.id, title: null }],
+        pendingSettlement: {
+          evidenceMessageId: messageOne.id,
+          abilityId: learnedAbility.id,
+          discardedEvidenceId: null,
+        },
       },
     },
   });
@@ -459,11 +471,22 @@ describe("cloneTimelineGraph", () => {
       const clonedMessageOne = clonedChapterOne.messages.find((item) => item.index === 0)!;
       const clonedMessageTwo = cloned.timeline.chapters.find((item) => item.index === 2)!.messages[0]!;
       expect(clonedChapterOne.snapshot).toMatchObject({
-        gods: [{ id: result.maps.godIds.get(data.dawnGod.id) }],
-        entities: [{ id: result.maps.entityIds.get(data.avatar.id), raceId: result.maps.entityIds.get(data.race.id) }],
+        gods: [{
+          id: result.maps.godIds.get(data.dawnGod.id),
+          lastOmen: null,
+          relations: {
+            [result.maps.godIds.get(data.duskGod.id)!]: { label: "rival", note: null },
+          },
+        }],
+        entities: [{
+          id: result.maps.entityIds.get(data.avatar.id),
+          raceId: result.maps.entityIds.get(data.race.id),
+          title: null,
+        }],
         pendingSettlement: {
           evidenceMessageId: result.maps.messageIds.get(data.messageOne.id),
           abilityId: result.maps.abilityIds.get(data.learnedAbility.id),
+          discardedEvidenceId: null,
         },
       });
       expect(clonedMessageOne.meta).toMatchObject({
@@ -472,6 +495,14 @@ describe("cloneTimelineGraph", () => {
         abilityReveals: [{ abilityId: result.maps.abilityIds.get(data.learnedAbility.id) }],
         chapterId: result.maps.chapterIds.get(data.chapterOne.id),
         playerMessageId: result.maps.messageIds.get(data.messageTwo.id),
+        nullableContext: {
+          note: null,
+          trail: [
+            result.maps.messageIds.get(data.messageOne.id),
+            null,
+            result.maps.abilityIds.get(data.learnedAbility.id),
+          ],
+        },
       });
       expect(clonedMessageTwo.meta).not.toHaveProperty("generationRequest");
       expect(clonedMessageOne.variants).toMatchObject([{
@@ -481,6 +512,14 @@ describe("cloneTimelineGraph", () => {
           abilityReveals: [{ abilityId: result.maps.abilityIds.get(data.learnedAbility.id) }],
           chapterId: result.maps.chapterIds.get(data.chapterOne.id),
           messageId: result.maps.messageIds.get(data.messageOne.id),
+          nullableContext: {
+            note: null,
+            trail: [
+              result.maps.entityIds.get(data.avatar.id),
+              null,
+              result.maps.godIds.get(data.dawnGod.id),
+            ],
+          },
         },
       }]);
 
