@@ -633,3 +633,83 @@ it("stops after settlement lease renewal is lost and performs no post-model writ
     await prisma.world.delete({ where: { id: data.world.id } });
   }
 });
+
+it.each(["extract", "chronicle"] as const)(
+  "refuses to resume the %s stage after the settlement lease changes while progress is yielded",
+  async (pausedStep) => {
+    const data = await fixture();
+    const token = crypto.randomUUID();
+    const { claimWorldOperation } = await import("@/lib/reality/operation-lock");
+    await expect(claimWorldOperation(prisma, data.world.id, "settlement", token)).resolves.toEqual({ acquired: true });
+    const runner = settleChapter(data.chapter.id, {
+      worldId: data.world.id,
+      token,
+      claimed: true,
+      heartbeatMs: 60_000,
+    });
+    try {
+      let progress = await runner.next();
+      while (!progress.done && progress.value.step !== pausedStep) progress = await runner.next();
+      expect(progress).toMatchObject({ done: false, value: { step: pausedStep } });
+      expect((await prisma.chapter.findUniqueOrThrow({ where: { id: data.chapter.id } })).settleState)
+        .toBe(`settling:${pausedStep}`);
+
+      await prisma.world.update({
+        where: { id: data.world.id },
+        data: { operationToken: "replacement-owner" },
+      });
+
+      await expect(runner.next()).rejects.toThrow("世界操作租约已失效");
+      expect((await prisma.chapter.findUniqueOrThrow({ where: { id: data.chapter.id } })).settleState)
+        .toBe(`settling:${pausedStep}`);
+      expect(await prisma.chronicleEntry.count({ where: { timelineId: data.timeline.id } })).toBe(0);
+      expect(await prisma.ability.count({
+        where: { entityId: data.character.id, sourceAbilityId: data.source.id },
+      })).toBe(pausedStep === "chronicle" ? 1 : 0);
+    } finally {
+      await runner.return(undefined);
+      await prisma.world.delete({ where: { id: data.world.id } });
+    }
+  },
+);
+
+it("stops after an extraction transaction changes the lease and does not advance settlement state", async () => {
+  const data = await fixture();
+  const token = crypto.randomUUID();
+  const suffix = crypto.randomUUID().replaceAll("-", "");
+  const functionName = `settle_fence_${suffix}`;
+  const triggerName = `settle_fence_trigger_${suffix}`;
+  const { claimWorldOperation } = await import("@/lib/reality/operation-lock");
+  await expect(claimWorldOperation(prisma, data.world.id, "settlement", token)).resolves.toEqual({ acquired: true });
+  await prisma.$executeRawUnsafe(`
+    CREATE FUNCTION "${functionName}"() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.timeline_id = '${data.timeline.id}' AND NEW.source_ability_id = '${data.source.id}' THEN
+        UPDATE worlds SET operation_token = 'replacement-owner' WHERE id = '${data.world.id}';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER "${triggerName}" AFTER INSERT ON abilities
+    FOR EACH ROW EXECUTE FUNCTION "${functionName}"();
+  `);
+  try {
+    await expect((async () => {
+      for await (const _progress of settleChapter(data.chapter.id, {
+        worldId: data.world.id,
+        token,
+        claimed: true,
+        heartbeatMs: 60_000,
+      })) void _progress;
+    })()).rejects.toThrow("世界操作租约已失效");
+    expect(await prisma.ability.count({
+      where: { entityId: data.character.id, sourceAbilityId: data.source.id },
+    })).toBe(0);
+    expect((await prisma.chapter.findUniqueOrThrow({ where: { id: data.chapter.id } })).settleState)
+      .toBe("settling:extract");
+    expect(await prisma.chronicleEntry.count({ where: { timelineId: data.timeline.id } })).toBe(0);
+  } finally {
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON abilities; DROP FUNCTION IF EXISTS "${functionName}"();`);
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
