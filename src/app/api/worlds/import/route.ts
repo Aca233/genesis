@@ -366,8 +366,18 @@ function jsonRequired(v: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNul
   return v == null ? Prisma.JsonNull : (v as Prisma.InputJsonValue);
 }
 
-function addMapping(map: Map<string, string>, oldId: string, label: string) {
+function addMapping(
+  map: Map<string, string>,
+  archiveIds: Map<string, string>,
+  oldId: string,
+  label: string,
+) {
   if (map.has(oldId)) throw new Error(`重复的${label} ID：${oldId}`);
+  const existingLabel = archiveIds.get(oldId);
+  if (existingLabel !== undefined) {
+    throw new Error(`重复的存档 ID：${oldId}（${existingLabel}与${label}）`);
+  }
+  archiveIds.set(oldId, label);
   map.set(oldId, crypto.randomUUID());
 }
 
@@ -819,6 +829,7 @@ export async function POST(request: Request) {
   const importedMode = archiveVersion === 3 ? w.mode : "pantheon";
 
   const newWorldId = crypto.randomUUID();
+  const archiveIds = new Map<string, string>();
   const timelineMap = new Map<string, string>();
   const chapterMap = new Map<string, string>();
   const messageMap = new Map<string, string>();
@@ -843,35 +854,35 @@ export async function POST(request: Request) {
       }
     }
     for (const tl of w.timelines) {
-      addMapping(timelineMap, tl.id, "时间线");
+      addMapping(timelineMap, archiveIds, tl.id, "时间线");
       for (const ch of tl.chapters) {
-        addMapping(chapterMap, ch.id, "章节");
-        for (const message of ch.messages) addMapping(messageMap, message.id, "消息");
+        addMapping(chapterMap, archiveIds, ch.id, "章节");
+        for (const message of ch.messages) addMapping(messageMap, archiveIds, message.id, "消息");
       }
-      for (const god of tl.gods) addMapping(godMap, god.id, "神明");
+      for (const god of tl.gods) addMapping(godMap, archiveIds, god.id, "神明");
       for (const entity of tl.entities) {
-        addMapping(entityMap, entity.id, "实体");
+        addMapping(entityMap, archiveIds, entity.id, "实体");
         for (const section of entity.sections) {
-          if (section.id !== undefined) addMapping(sectionMap, section.id, "实体栏目");
+          if (section.id !== undefined) addMapping(sectionMap, archiveIds, section.id, "实体栏目");
         }
       }
-      for (const ability of tl.abilities) addMapping(abilityMap, ability.id, "能力");
+      for (const ability of tl.abilities) addMapping(abilityMap, archiveIds, ability.id, "能力");
       for (const event of tl.abilityEvents) {
-        addMapping(abilityEventMap, event.id, "能力事件");
+        addMapping(abilityEventMap, archiveIds, event.id, "能力事件");
       }
       for (const membership of tl.memberships) {
-        addMapping(membershipMap, membership.id, "成员关系");
+        addMapping(membershipMap, archiveIds, membership.id, "成员关系");
       }
       for (const chronicle of tl.chronicles) {
-        if (chronicle.id !== undefined) addMapping(chronicleMap, chronicle.id, "编年史");
+        if (chronicle.id !== undefined) addMapping(chronicleMap, archiveIds, chronicle.id, "编年史");
       }
       for (const omen of tl.omens) {
-        if (omen.id !== undefined) addMapping(omenMap, omen.id, "征兆");
+        if (omen.id !== undefined) addMapping(omenMap, archiveIds, omen.id, "征兆");
       }
     }
-    for (const rewrite of w.rewrites) addMapping(rewriteMap, rewrite.id, "现实改写");
+    for (const rewrite of w.rewrites) addMapping(rewriteMap, archiveIds, rewrite.id, "现实改写");
     for (const lorebook of w.lorebookEntries) {
-      if (lorebook.id !== undefined) addMapping(lorebookMap, lorebook.id, "世界书条目");
+      if (lorebook.id !== undefined) addMapping(lorebookMap, archiveIds, lorebook.id, "世界书条目");
     }
 
     if (archiveVersion === 3) validateVersionThreeArchive(w);

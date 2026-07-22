@@ -659,6 +659,45 @@ describe("存档导入", () => {
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it("拒绝时间线与神明复用同一个旧存档 ID", async () => {
+    const archive = versionThreeArchive();
+    archive.world.timelines[0].gods[0].id = archive.world.timelines[0].id;
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("重复的存档 ID：timeline-root"),
+    });
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.prisma.world.create).not.toHaveBeenCalled();
+  });
+
+  it("拒绝章节与消息复用同一个旧存档 ID", async () => {
+    const archive = versionThreeArchive();
+    const chapter = archive.world.timelines[0].chapters[0];
+    (chapter.messages as unknown as Array<Record<string, unknown>>).push({
+      id: chapter.id,
+      chapterId: chapter.id,
+      index: 0,
+      role: "narrator",
+      content: "重复标识不应进入写事务。",
+      scale: "scene",
+      variants: null,
+      meta: null,
+      createdAt: "2026-07-22T00:00:00.000Z",
+    });
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("重复的存档 ID：chapter-root"),
+    });
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.prisma.world.create).not.toHaveBeenCalled();
+  });
+
   it("任一有序写入失败时由单个事务回滚全部改动", async () => {
     const committedWorlds: unknown[] = [];
     let transactionBodyRan = false;
