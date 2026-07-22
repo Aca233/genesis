@@ -13,6 +13,11 @@ import {
   traditionAbilityRefsForRace,
   visibleAbilityIndexes,
   deckCardOrder,
+  addCreatorGodRelation,
+  creatorRelationTargetRefs,
+  removeCreatorGodRelation,
+  removeCreatorMajorGod,
+  updateCreatorGodRelation,
 } from "./deck-utils";
 
 describe("创世人物引用工具", () => {
@@ -169,5 +174,68 @@ describe("Creator 卡墙顺序", () => {
     const deck = completeCreatorDeck();
     expect(deckCardOrder(deck).slice(0, 2)).toEqual(["cosmology", "majorGods"]);
     expect(deckCardOrder(deck)).not.toContain("playerGod");
+  });
+});
+
+describe("Creator 主神关系编辑工具", () => {
+  it("关系目标排除自身与其他行已用目标，但保留当前行目标", () => {
+    const deck = completeCreatorDeck();
+    const currentTarget = deck.majorGods[0]!.relations[0]!.targetGodRef;
+    deck.majorGods[0]!.relations.push({
+      targetGodRef: deck.majorGods[2]!.ref,
+      label: "ally",
+      note: "第二条关系",
+    });
+
+    expect(creatorRelationTargetRefs(deck, 0, 0)).toEqual([
+      currentTarget,
+      deck.majorGods[3]!.ref,
+    ]);
+
+    deck.majorGods[0]!.relations[1]!.targetGodRef = currentTarget;
+    expect(creatorRelationTargetRefs(deck, 0, 0)).toContain(currentTarget);
+  });
+
+  it("添加关系时选择第一个尚未使用的世界内主神", () => {
+    const deck = completeCreatorDeck();
+    const added = addCreatorGodRelation(deck, 0);
+
+    expect(added).not.toBe(deck);
+    expect(added.majorGods[0]!.relations).toHaveLength(2);
+    expect(added.majorGods[0]!.relations[1]).toEqual({
+      targetGodRef: deck.majorGods[2]!.ref,
+      label: "unknown",
+      note: "",
+    });
+  });
+
+  it("修改与删除关系均返回新卡组且不改动原值", () => {
+    const deck = completeCreatorDeck();
+    const changed = updateCreatorGodRelation(deck, 0, 0, {
+      label: "ally",
+      note: "结盟",
+    });
+    const removed = removeCreatorGodRelation(changed, 0, 0);
+
+    expect(changed.majorGods[0]!.relations[0]).toMatchObject({ label: "ally", note: "结盟" });
+    expect(deck.majorGods[0]!.relations[0]!.label).toBe("rival");
+    expect(removed.majorGods[0]!.relations).toEqual([]);
+  });
+
+  it("删除主神同步清理所有指向它的入向关系，不留下悬挂引用", () => {
+    const deck = completeCreatorDeck();
+    const removedRef = deck.majorGods[1]!.ref;
+    expect(deck.majorGods.some((god) =>
+      god.relations.some((relation) => relation.targetGodRef === removedRef),
+    )).toBe(true);
+
+    const next = removeCreatorMajorGod(deck, 1);
+    const remainingRefs = new Set(next.majorGods.map((god) => god.ref));
+
+    expect(next.majorGods).toHaveLength(deck.majorGods.length - 1);
+    expect(next.majorGods.some((god) => god.ref === removedRef)).toBe(false);
+    expect(next.majorGods.flatMap((god) => god.relations).every((relation) =>
+      remainingRefs.has(relation.targetGodRef),
+    )).toBe(true);
   });
 });

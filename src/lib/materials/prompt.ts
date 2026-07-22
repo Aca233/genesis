@@ -21,6 +21,29 @@ export function coreLockedPaths(kind: MaterialKind): readonly string[] {
   return INHERIT_CORE_PATHS[kind];
 }
 
+/** 从冻结主神卡结构判断其来源模式；runtime 自由结构不明确时交由模型适配。 */
+function majorGodMaterialMode(item: GenesisMaterialSnapshotItem): WorldMode | null {
+  if (item.card.kind !== "major_god") return null;
+  const card = parseMaterialVersionContent(item.version.content).card;
+  if ("relations" in card && !("initialRelationToPlayer" in card)) return "creator";
+  if ("initialRelationToPlayer" in card && !("relations" in card)) return "pantheon";
+  return null;
+}
+
+function assertModeCompatibleFullLocks(
+  snapshot: GenesisMaterialSnapshot,
+  mode: WorldMode,
+): void {
+  for (const item of snapshot.items) {
+    const fullLock = item.selection.mode === "locked" || item.selection.fullLock;
+    if (!fullLock) continue;
+    const sourceMode = majorGodMaterialMode(item);
+    if (sourceMode !== null && sourceMode !== mode) {
+      throw new Error("完全锁定的主神素材与当前世界模式不兼容");
+    }
+  }
+}
+
 function lockDescriptor(item: GenesisMaterialSnapshotItem) {
   const content = parseMaterialVersionContent(item.version.content);
   if (item.selection.mode === "remix") {
@@ -47,6 +70,7 @@ export function materialConstraintsPrompt(
   if (mode === "creator" && snapshot.items.some((item) => item.card.kind === "player_god")) {
     throw new Error("创世主模式不能引用玩家神素材");
   }
+  assertModeCompatibleFullLocks(snapshot, mode);
   const items = snapshot.items
     .map((item, stableIndex) => ({ item, stableIndex }))
     .sort((a, b) => b.item.selection.priority - a.item.selection.priority || a.stableIndex - b.stableIndex)

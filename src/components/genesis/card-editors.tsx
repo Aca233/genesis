@@ -10,6 +10,10 @@ import {
   type Rank,
   abilityRefsInDeck,
   isPathLocked,
+  addCreatorGodRelation,
+  creatorRelationTargetRefs,
+  removeCreatorGodRelation,
+  updateCreatorGodRelation,
 } from "./deck-utils";
 import { AbilityEditor, AbilitySection } from "./AbilityEditor";
 import {
@@ -237,40 +241,76 @@ function CreatorGodRelationsEditor({
   const god = deck.majorGods[index];
   if (!god) return null;
   const path = `majorGods.${index}.relations`;
-  const targets = deck.majorGods
-    .filter((_, targetIndex) => targetIndex !== index)
-    .map((target) => ({ value: target.ref, label: `${target.name} · ${target.ref}` }));
-  const common = { lockedPaths, onEdit };
+  const common = { lockedPaths };
   return (
     <>
       <Sect title="与世界内诸神的关系" />
       {god.relations.map((relation, relationIndex) => {
         const relationPath = `${path}.${relationIndex}`;
+        const targetOptions = creatorRelationTargetRefs(deck, index, relationIndex)
+          .map((ref) => deck.majorGods.find((target) => target.ref === ref))
+          .filter((target) => target !== undefined)
+          .map((target) => ({ value: target.ref, label: `${target.name} · ${target.ref}` }));
+        const editRelation = (patch: Partial<typeof relation>) =>
+          updateCreatorGodRelation(deck, index, relationIndex, patch);
         return (
           <div key={`${relation.targetGodRef}-${relationIndex}`} className="grid gap-3 rounded-md border border-line bg-paper p-3">
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs text-ink-faint">关系 {relationIndex + 1}</span>
               <button
                 type="button"
-                onClick={() => onEdit(path, god.relations.filter((_, itemIndex) => itemIndex !== relationIndex))}
+                onClick={() => {
+                  const next = removeCreatorGodRelation(deck, index, relationIndex);
+                  onEdit(path, next.majorGods[index]!.relations);
+                }}
                 className="rounded-md border border-line px-2.5 py-0.5 text-xs text-ink-faint transition hover:border-cinnabar/50 hover:text-cinnabar"
               >
                 删除
               </button>
             </div>
-            <SelectField label="目标神明" path={`${relationPath}.targetGodRef`} value={relation.targetGodRef} options={targets} {...common} />
-            <SelectField label="关系" path={`${relationPath}.label`} value={relation.label} options={RELATION_OPTIONS} {...common} />
-            <TextAreaField label="备注" path={`${relationPath}.note`} value={relation.note} rows={2} {...common} />
+            <SelectField
+              label="目标神明"
+              path={`${relationPath}.targetGodRef`}
+              value={relation.targetGodRef}
+              options={targetOptions}
+              onEdit={(_, value) => {
+                const next = editRelation({ targetGodRef: String(value) });
+                onEdit(`${relationPath}.targetGodRef`, next.majorGods[index]!.relations[relationIndex]!.targetGodRef);
+              }}
+              {...common}
+            />
+            <SelectField
+              label="关系"
+              path={`${relationPath}.label`}
+              value={relation.label}
+              options={RELATION_OPTIONS}
+              onEdit={(_, value) => {
+                const next = editRelation({ label: value as typeof relation.label });
+                onEdit(`${relationPath}.label`, next.majorGods[index]!.relations[relationIndex]!.label);
+              }}
+              {...common}
+            />
+            <TextAreaField
+              label="备注"
+              path={`${relationPath}.note`}
+              value={relation.note}
+              rows={2}
+              onEdit={(_, value) => {
+                const next = editRelation({ note: String(value) });
+                onEdit(`${relationPath}.note`, next.majorGods[index]!.relations[relationIndex]!.note);
+              }}
+              {...common}
+            />
           </div>
         );
       })}
       <button
         type="button"
-        disabled={targets.length === 0}
+        disabled={creatorRelationTargetRefs(deck, index).length === 0}
         onClick={() => {
-          const target = targets.find((option) => !god.relations.some((relation) => relation.targetGodRef === option.value));
-          if (!target) return;
-          onEdit(path, [...god.relations, { targetGodRef: target.value, label: "unknown", note: "" }]);
+          const next = addCreatorGodRelation(deck, index);
+          if (next === deck) return;
+          onEdit(path, next.majorGods[index]!.relations);
         }}
         className="justify-self-start rounded-md border border-dashed border-line px-4 py-1.5 text-sm text-ink-faint transition hover:border-gilt/40 hover:text-gilt disabled:opacity-40"
       >

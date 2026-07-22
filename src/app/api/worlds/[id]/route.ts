@@ -52,7 +52,7 @@ export async function PATCH(
   const { id } = await params;
   const world = await prisma.world.findUnique({
     where: { id },
-    select: { mode: true, lockedPaths: true },
+    select: { mode: true, lockedPaths: true, updatedAt: true },
   });
   if (!world) return NextResponse.json({ error: "不存在" }, { status: 404 });
 
@@ -88,8 +88,8 @@ export async function PATCH(
   }
 
   const lockedPaths = [...new Set([...world.lockedPaths, ...body.editedPaths])];
-  await prisma.world.update({
-    where: { id },
+  const { count } = await prisma.world.updateMany({
+    where: { id, mode, updatedAt: world.updatedAt },
     data: {
       name: deck.worldName,
       draftDeck: deck as unknown as Prisma.InputJsonValue,
@@ -102,6 +102,12 @@ export async function PATCH(
         : undefined,
     },
   });
+  if (count !== 1) {
+    return NextResponse.json(
+      { error: "卡组已被其他操作更新，请刷新后重试" },
+      { status: 409 },
+    );
+  }
 
   return NextResponse.json({ ok: true, lockedPaths });
 }

@@ -173,6 +173,11 @@ export async function POST(
       const repaired = mode === "pantheon"
         ? await completeStructured("narrative", { ...repairOptions, schema: PantheonWorldDeckSchema })
         : await completeStructured("narrative", { ...repairOptions, schema: CreatorWorldDeckSchema });
+      try {
+        assertModeTransition(mode, repaired.mode);
+      } catch {
+        return NextResponse.json({ error: "世界模式不可更改" }, { status: 409 });
+      }
       deck = applyLockedPaths(repaired, currentDeck, lockedPaths, mode);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -188,8 +193,8 @@ export async function POST(
     }
   }
 
-  await prisma.world.update({
-    where: { id },
+  const { count } = await prisma.world.updateMany({
+    where: { id, mode, updatedAt: world.updatedAt },
     data: {
       name: deck.worldName,
       draftDeck: deck as unknown as Prisma.InputJsonValue,
@@ -201,6 +206,12 @@ export async function POST(
         : undefined,
     },
   });
+  if (count !== 1) {
+    return NextResponse.json(
+      { error: "卡组已被其他操作更新，请刷新后重试" },
+      { status: 409 },
+    );
+  }
 
   return NextResponse.json({ deck });
 }

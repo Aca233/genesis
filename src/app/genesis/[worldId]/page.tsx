@@ -13,6 +13,7 @@ import {
   RANK_LABELS,
   RELATION_LABELS,
   CARD_KEY_LABELS,
+  removeCreatorMajorGod,
 } from "@/components/genesis/deck-utils";
 import { DeckCard, GroupHeader } from "@/components/genesis/DeckCard";
 import { CardEditorModal } from "@/components/genesis/CardEditorModal";
@@ -190,10 +191,10 @@ export default function GenesisEditorPage({
       }
       if (!window.confirm(`将「${god.name}」逐出主神席？此神的全部设定将被抹去。`)) return;
       setOpenCard(null);
-      handleEdit(
-        "majorGods",
-        deck.majorGods.filter((_, i) => i !== index),
-      );
+      const majorGods = deck.mode === "creator"
+        ? removeCreatorMajorGod(deck, index).majorGods
+        : deck.majorGods.filter((_, i) => i !== index);
+      handleEdit("majorGods", majorGods);
     },
     [deck, handleEdit],
   );

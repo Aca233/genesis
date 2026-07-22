@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { parsePersistedWorldDeck } from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
+import { WorldModeSchema } from "@/lib/world-mode";
 import { archiveWorldMaterials } from "@/lib/materials/archive-world";
 import {
   EmbarkConflictError,
@@ -21,6 +22,9 @@ export {
 /** POST /api/worlds/[id]/embark —— 开局：草稿卡组物化为时间线+诸神+百科实体+第一章 */
 export const maxDuration = 60;
 
+class EmbarkModeMismatchError extends Error {}
+class CreatorEmbarkPendingError extends Error {}
+
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -33,9 +37,13 @@ export async function POST(
         throw new EmbarkDraftError("世界草稿不存在");
       }
 
+      const mode = WorldModeSchema.parse(world.mode);
       const deck = parsePersistedWorldDeck(world.draftDeck);
-      if (deck.mode !== "pantheon") {
-        throw new EmbarkDraftError("当前开局流程尚不支持创世主模式");
+      if (deck.mode !== mode) {
+        throw new EmbarkModeMismatchError("世界模式不可更改");
+      }
+      if (deck.mode === "creator") {
+        throw new CreatorEmbarkPendingError("创世主开局将在现实状态初始化后启用");
       }
       validateDeckReferences(deck);
       return deck;
@@ -47,6 +55,15 @@ export async function POST(
     }
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof EmbarkModeMismatchError) {
+      return NextResponse.json({ error: "世界模式不可更改" }, { status: 409 });
+    }
+    if (error instanceof CreatorEmbarkPendingError) {
+      return NextResponse.json(
+        { error: "创世主开局将在现实状态初始化后启用" },
+        { status: 409 },
+      );
+    }
     if (error instanceof EmbarkConflictError) {
       const world = await prisma.world.findUnique({ where: { id }, select: { id: true } });
       return NextResponse.json(

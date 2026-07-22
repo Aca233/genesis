@@ -1,4 +1,4 @@
-import type { WorldDeck, MajorGodCard, CreatorMajorGodCard, DeckCardKey } from "@/lib/cards/schemas";
+import type { WorldDeck, MajorGodCard, CreatorMajorGodCard, CreatorWorldDeck, DeckCardKey } from "@/lib/cards/schemas";
 import { RANKS } from "@/lib/cards/schemas";
 
 /** 卡片编辑器共用工具：路径读写、枚举中文映射、升格模板 */
@@ -77,6 +77,105 @@ export function deckCardOrder(deck: WorldDeck): DeckCardKey[] {
   if (deck.mode === "pantheon") order.push("playerGod");
   order.push(...SHARED_DECK_CARD_ORDER.slice(1));
   return order;
+}
+
+type CreatorGodRelation = CreatorMajorGodCard["relations"][number];
+
+/** Creator 关系目标不允许指向自身或被其他关系行重复占用；当前行目标始终可保留。 */
+export function creatorRelationTargetRefs(
+  deck: CreatorWorldDeck,
+  godIndex: number,
+  relationIndex?: number,
+): string[] {
+  const god = deck.majorGods[godIndex];
+  if (!god) return [];
+  const currentTargetRef = relationIndex === undefined
+    ? undefined
+    : god.relations[relationIndex]?.targetGodRef;
+  const usedByOtherRows = new Set(
+    god.relations.flatMap((relation, index) =>
+      index === relationIndex ? [] : [relation.targetGodRef],
+    ),
+  );
+  return deck.majorGods
+    .filter((target) =>
+      target.ref !== god.ref &&
+      (target.ref === currentTargetRef || !usedByOtherRows.has(target.ref)),
+    )
+    .map((target) => target.ref);
+}
+
+/** 为 Creator 主神新增一条指向首个未占用主神的关系；无目标时保持原卡组。 */
+export function addCreatorGodRelation(
+  deck: CreatorWorldDeck,
+  godIndex: number,
+): CreatorWorldDeck {
+  const god = deck.majorGods[godIndex];
+  const targetGodRef = creatorRelationTargetRefs(deck, godIndex)[0];
+  if (!god || !targetGodRef) return deck;
+  const relation: CreatorGodRelation = { targetGodRef, label: "unknown", note: "" };
+  return {
+    ...deck,
+    majorGods: deck.majorGods.map((item, index) =>
+      index === godIndex ? { ...item, relations: [...item.relations, relation] } : item,
+    ),
+  };
+}
+
+/** 纯函数更新 Creator 主神关系。 */
+export function updateCreatorGodRelation(
+  deck: CreatorWorldDeck,
+  godIndex: number,
+  relationIndex: number,
+  patch: Partial<CreatorGodRelation>,
+): CreatorWorldDeck {
+  return {
+    ...deck,
+    majorGods: deck.majorGods.map((god, index) =>
+      index === godIndex
+        ? {
+            ...god,
+            relations: god.relations.map((relation, itemIndex) =>
+              itemIndex === relationIndex ? { ...relation, ...patch } : relation,
+            ),
+          }
+        : god,
+    ),
+  };
+}
+
+/** 纯函数删除 Creator 主神的一条关系。 */
+export function removeCreatorGodRelation(
+  deck: CreatorWorldDeck,
+  godIndex: number,
+  relationIndex: number,
+): CreatorWorldDeck {
+  return {
+    ...deck,
+    majorGods: deck.majorGods.map((god, index) =>
+      index === godIndex
+        ? { ...god, relations: god.relations.filter((_, itemIndex) => itemIndex !== relationIndex) }
+        : god,
+    ),
+  };
+}
+
+/** 删除 Creator 主神，并同步移除其他主神指向它的入向关系。 */
+export function removeCreatorMajorGod(
+  deck: CreatorWorldDeck,
+  godIndex: number,
+): CreatorWorldDeck {
+  const removedRef = deck.majorGods[godIndex]?.ref;
+  if (!removedRef) return deck;
+  return {
+    ...deck,
+    majorGods: deck.majorGods
+      .filter((_, index) => index !== godIndex)
+      .map((god) => ({
+        ...god,
+        relations: god.relations.filter((relation) => relation.targetGodRef !== removedRef),
+      })),
+  };
 }
 
 /** 按点分路径读值（"majorGods.2.persona"） */
