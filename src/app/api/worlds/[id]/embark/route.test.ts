@@ -20,9 +20,10 @@ const context = { params: Promise.resolve({ id: "world-1" }) };
 describe("POST /api/worlds/[id]/embark mode boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.runClaimedEmbarkTransaction.mockImplementation(async (_db, _id, loadDeck) => loadDeck({
-      world: { findUnique: mocks.findUnique },
-    }));
+    mocks.runClaimedEmbarkTransaction.mockImplementation(async (_db, _id, loadDeck) => {
+      await loadDeck({ world: { findUnique: mocks.findUnique } });
+      return { timelineId: "timeline-1", chapterId: "chapter-1" };
+    });
   });
 
   it("世界模式与草稿模式不一致时返回 409", async () => {
@@ -33,11 +34,14 @@ describe("POST /api/worlds/[id]/embark mode boundary", () => {
     expect(mocks.archiveWorldMaterials).not.toHaveBeenCalled();
   });
 
-  it("Creator 草稿返回独立的临时 409 而非 404", async () => {
+  it("Creator 草稿通过模式校验、物化并归档素材", async () => {
     mocks.findUnique.mockResolvedValue({ mode: "creator", draftDeck: completeCreatorDeck() });
     const response = await POST(new Request("http://localhost"), context);
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toEqual({ error: "创世主开局将在现实状态初始化后启用" });
-    expect(mocks.archiveWorldMaterials).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      timelineId: "timeline-1",
+      chapterId: "chapter-1",
+    });
+    expect(mocks.archiveWorldMaterials).toHaveBeenCalledWith("world-1");
   });
 });

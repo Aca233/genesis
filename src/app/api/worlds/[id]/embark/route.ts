@@ -23,7 +23,6 @@ export {
 export const maxDuration = 60;
 
 class EmbarkModeMismatchError extends Error {}
-class CreatorEmbarkPendingError extends Error {}
 
 export async function POST(
   _request: Request,
@@ -42,9 +41,6 @@ export async function POST(
       if (deck.mode !== mode) {
         throw new EmbarkModeMismatchError("世界模式不可更改");
       }
-      if (deck.mode === "creator") {
-        throw new CreatorEmbarkPendingError("创世主开局将在现实状态初始化后启用");
-      }
       validateDeckReferences(deck);
       return deck;
     });
@@ -57,12 +53,6 @@ export async function POST(
   } catch (error) {
     if (error instanceof EmbarkModeMismatchError) {
       return NextResponse.json({ error: "世界模式不可更改" }, { status: 409 });
-    }
-    if (error instanceof CreatorEmbarkPendingError) {
-      return NextResponse.json(
-        { error: "创世主开局将在现实状态初始化后启用" },
-        { status: 409 },
-      );
     }
     if (error instanceof EmbarkConflictError) {
       const world = await prisma.world.findUnique({ where: { id }, select: { id: true } });

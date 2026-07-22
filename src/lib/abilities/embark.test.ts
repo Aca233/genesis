@@ -6,7 +6,7 @@ import {
   runEmbarkTransaction,
 } from "@/lib/embark/mutations";
 
-import { completeDeck } from "./embark.test-fixtures";
+import { completeCreatorDeck, completeDeck } from "./embark.test-fixtures";
 
 type StoredAbility = {
   id: string;
@@ -101,6 +101,34 @@ describe("materializeDeckAbilities", () => {
     expect(learned?.sourceAbilityId).toBe(ids.abilityByRef.get("ability-human-ritual"));
     expect(fake.abilities.find((ability) => ability.name === "ability-character-1-override之能")?.sourceAbilityId)
       .toBe(ids.abilityByRef.get("ability-human-sight"));
+  });
+
+  it("Creator 仅物化主神神权及共享的种族和人物能力", async () => {
+    const deck = completeCreatorDeck();
+    const fake = fakeTransaction();
+    const ids = {
+      raceByRef: new Map([["race-human", "race-db-human"]]),
+      factionByRef: new Map([
+        ["faction-court", "faction-db-court"],
+        ["faction-archive", "faction-db-archive"],
+      ]),
+      characterByRef: new Map(Array.from({ length: 6 }, (_, index) => [
+        `character-${index + 1}`,
+        `character-db-${index + 1}`,
+      ])),
+      godByRef: new Map<string, string>(Array.from({ length: 4 }, (_, index) => [
+        `god-major-${index + 1}`,
+        `god-db-major-${index + 1}`,
+      ])),
+      abilityByRef: new Map<string, string>(),
+    };
+
+    await materializeDeckAbilities(fake.tx, "timeline-1", deck, ids);
+
+    expect(fake.abilities.filter((ability) => ability.godId !== null)).toHaveLength(12);
+    expect(fake.abilities.some((ability) => ability.name.startsWith("ability-player-"))).toBe(false);
+    expect(fake.abilities.filter((ability) => ability.entityId === "race-db-human")).toHaveLength(2);
+    expect(fake.abilities.filter((ability) => ability.kind === "personal")).toHaveLength(12);
   });
 
   it("在同一事务中创建种族、势力、地点、人物、神与第一章", async () => {

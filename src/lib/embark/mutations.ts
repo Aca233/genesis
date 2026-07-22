@@ -1,7 +1,12 @@
 import type { Prisma } from "@prisma/client";
-import type { PantheonWorldDeck } from "@/lib/cards/schemas";
+import type { WorldDeck } from "@/lib/cards/schemas";
 import { factionSections } from "@/lib/cards/faction-sections";
 import { materializeDeckAbilities } from "@/lib/abilities/embark";
+import {
+  initialBranchSummary,
+  initialObserverState,
+  initialRealityState,
+} from "@/lib/reality/schemas";
 
 function emblemSeed(name: string): string {
   let h = 5381;
@@ -9,7 +14,7 @@ function emblemSeed(name: string): string {
   return h.toString(36);
 }
 
-function raceSections(race: PantheonWorldDeck["races"][number]) {
+function raceSections(race: WorldDeck["races"][number]) {
   return [
     { key: "overview", content: { text: race.traits } },
     { key: "lifespan", content: { text: race.lifespan } },
@@ -18,7 +23,7 @@ function raceSections(race: PantheonWorldDeck["races"][number]) {
   ];
 }
 
-function placeSections(place: PantheonWorldDeck["places"][number]) {
+function placeSections(place: WorldDeck["places"][number]) {
   return [
     { key: "overview", content: { text: place.overview } },
     { key: "kind", content: { text: place.kind } },
@@ -26,7 +31,7 @@ function placeSections(place: PantheonWorldDeck["places"][number]) {
   ];
 }
 
-function characterSections(character: PantheonWorldDeck["majorCharacters"][number]) {
+function characterSections(character: WorldDeck["majorCharacters"][number]) {
   return [
     { key: "overview", content: { text: character.situation } },
     { key: "identity", content: { text: character.identity } },
@@ -46,9 +51,17 @@ function characterSections(character: PantheonWorldDeck["majorCharacters"][numbe
 export async function materializeEmbarkDeck(
   tx: Prisma.TransactionClient,
   worldId: string,
-  deck: PantheonWorldDeck,
+  deck: WorldDeck,
 ): Promise<{ timelineId: string; chapterId: string }> {
-  const timeline = await tx.timeline.create({ data: { worldId } });
+  const timeline = await tx.timeline.create({
+    data: {
+      worldId,
+      branchName: "原初现实",
+      branchSummary: initialBranchSummary(deck),
+      realityState: initialRealityState(deck) as Prisma.InputJsonValue,
+      observerState: initialObserverState(deck) as Prisma.InputJsonValue,
+    },
+  });
   const ids = {
     raceByRef: new Map<string, string>(),
     factionByRef: new Map<string, string>(),
@@ -57,48 +70,91 @@ export async function materializeEmbarkDeck(
     abilityByRef: new Map<string, string>(),
   };
 
-  const playerGod = await tx.god.create({
-    data: {
-      timelineId: timeline.id,
-      name: deck.playerGod.name,
-      aliases: [],
-      tier: "player",
-      isPlayer: true,
-      rank: deck.playerGod.rank,
-      domains: deck.playerGod.domains,
-      persona: {
-        origin: deck.playerGod.origin,
-        situation: deck.playerGod.situation,
-      } as Prisma.InputJsonValue,
-      faithScope: deck.playerGod.faithBase,
-      materialRef: deck.playerGod.ref,
-    },
-  });
-  ids.godByRef.set(deck.playerGod.ref, playerGod.id);
-
-  for (const god of deck.majorGods) {
-    const created = await tx.god.create({
+  if (deck.mode === "pantheon") {
+    const playerGod = await tx.god.create({
       data: {
         timelineId: timeline.id,
-        name: god.name,
-        aliases: god.aliases,
-        tier: "major",
-        rank: god.rank,
-        domains: god.domains,
-        persona: { text: god.persona } as Prisma.InputJsonValue,
-        voice: god.voice as Prisma.InputJsonValue,
-        agenda: god.agenda as unknown as Prisma.InputJsonValue,
-        relations: {
-          player: {
-            label: god.initialRelationToPlayer.label,
-            note: god.initialRelationToPlayer.note,
-          },
+        name: deck.playerGod.name,
+        aliases: [],
+        tier: "player",
+        isPlayer: true,
+        rank: deck.playerGod.rank,
+        domains: deck.playerGod.domains,
+        persona: {
+          origin: deck.playerGod.origin,
+          situation: deck.playerGod.situation,
         } as Prisma.InputJsonValue,
-        faithScope: god.faithScope,
-        materialRef: god.ref,
+        faithScope: deck.playerGod.faithBase,
+        materialRef: deck.playerGod.ref,
       },
     });
-    ids.godByRef.set(god.ref, created.id);
+    ids.godByRef.set(deck.playerGod.ref, playerGod.id);
+  }
+
+  // Creator relations target real database IDs, so every major god must exist first.
+  if (deck.mode === "pantheon") {
+    for (const god of deck.majorGods) {
+      const created = await tx.god.create({
+        data: {
+          timelineId: timeline.id,
+          name: god.name,
+          aliases: god.aliases,
+          tier: "major",
+          rank: god.rank,
+          domains: god.domains,
+          persona: { text: god.persona } as Prisma.InputJsonValue,
+          voice: god.voice as Prisma.InputJsonValue,
+          agenda: god.agenda as Prisma.InputJsonValue,
+          relations: {
+            player: {
+              label: god.initialRelationToPlayer.label,
+              note: god.initialRelationToPlayer.note,
+            },
+          } as Prisma.InputJsonValue,
+          faithScope: god.faithScope,
+          materialRef: god.ref,
+        },
+      });
+      ids.godByRef.set(god.ref, created.id);
+    }
+  } else {
+    for (const god of deck.majorGods) {
+      const created = await tx.god.create({
+        data: {
+          timelineId: timeline.id,
+          name: god.name,
+          aliases: god.aliases,
+          tier: "major",
+          rank: god.rank,
+          domains: god.domains,
+          persona: { text: god.persona } as Prisma.InputJsonValue,
+          voice: god.voice as Prisma.InputJsonValue,
+          agenda: god.agenda as Prisma.InputJsonValue,
+          relations: {} as Prisma.InputJsonValue,
+          faithScope: god.faithScope,
+          materialRef: god.ref,
+        },
+      });
+      ids.godByRef.set(god.ref, created.id);
+    }
+  }
+
+  if (deck.mode === "creator") {
+    for (const god of deck.majorGods) {
+      const godId = ids.godByRef.get(god.ref);
+      if (godId === undefined) throw new Error(`无法解析神明引用 "${god.ref}"`);
+      const relations = Object.fromEntries(god.relations.map((relation) => {
+        const targetId = ids.godByRef.get(relation.targetGodRef);
+        if (targetId === undefined) {
+          throw new Error(`无法解析神明引用 "${relation.targetGodRef}"`);
+        }
+        return [targetId, { label: relation.label, note: relation.note }];
+      }));
+      await tx.god.update({
+        where: { id: godId },
+        data: { relations: relations as Prisma.InputJsonValue },
+      });
+    }
   }
 
   for (const god of deck.minorGods) {
@@ -239,7 +295,7 @@ export async function claimDraftWorld(
 export function runEmbarkTransaction(
   runner: EmbarkTransactionRunner,
   worldId: string,
-  deck: PantheonWorldDeck,
+  deck: WorldDeck,
 ): Promise<{ timelineId: string; chapterId: string }> {
   return runner.$transaction((tx) => materializeEmbarkDeck(tx, worldId, deck));
 }
@@ -251,7 +307,7 @@ export function runEmbarkTransaction(
 export function runClaimedEmbarkTransaction(
   runner: EmbarkTransactionRunner,
   worldId: string,
-  loadDeck: (tx: Prisma.TransactionClient) => Promise<PantheonWorldDeck>,
+  loadDeck: (tx: Prisma.TransactionClient) => Promise<WorldDeck>,
 ): Promise<{ timelineId: string; chapterId: string }> {
   return runner.$transaction(async (tx) => {
     await claimDraftWorld(tx, worldId);

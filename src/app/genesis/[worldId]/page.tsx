@@ -648,12 +648,11 @@ export default function GenesisEditorPage({
             <button
               type="button"
               onClick={embark}
-              disabled={deck.mode === "creator" || saving || busy || ceremony?.phase === "pending"}
-              title={deck.mode === "creator" ? "创世主开局将在后续开放" : undefined}
+              disabled={saving || busy || ceremony?.phase === "pending"}
               className="rounded-md border border-gilt bg-gilt/10 px-10 py-2 text-lg tracking-widest text-gilt transition hover:bg-gilt/20 disabled:opacity-40"
               style={{ fontFamily: "var(--font-display)" }}
             >
-              {deck.mode === "creator" ? "开局待启" : "创　世"}
+              创　世
             </button>
           </div>
         </div>
@@ -661,7 +660,7 @@ export default function GenesisEditorPage({
 
       {/* ── 创世演出 ── */}
       <AnimatePresence>
-        {deck.mode === "pantheon" && ceremony && ceremony.phase !== "error" && (
+        {ceremony && ceremony.phase !== "error" && (
           <GenesisCeremony
             decree={genesisInput || `${deck.worldName}，自此有史。`}
             deck={deck}
