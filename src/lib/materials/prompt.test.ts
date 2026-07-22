@@ -106,6 +106,19 @@ describe("跨模式主神素材约束", () => {
       .toThrow("完全锁定的主神素材与当前世界模式不兼容");
   });
 
+  it("runtime 主神即使带 relations 也不猜测源模式或误拒", () => {
+    const runtime = majorGodSnapshot("creator", "locked");
+    const content = runtime.items[0]!.version.content as {
+      origin: string;
+      card: Record<string, unknown>;
+    };
+    content.origin = "runtime";
+    content.card = { ref: "runtime-god", name: "运行时神明", relations: [] };
+
+    expect(materialConstraintsPrompt(runtime, "pantheon"))
+      .toContain("== GENESIS MATERIALS ==");
+  });
+
   it.each(["inherit", "remix"] as const)("%s 主神素材允许模型跨模式适配", (selection) => {
     expect(materialConstraintsPrompt(majorGodSnapshot("pantheon", selection), "creator"))
       .toContain("== GENESIS MATERIALS ==");

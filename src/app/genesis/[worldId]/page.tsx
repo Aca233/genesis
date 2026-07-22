@@ -32,6 +32,10 @@ import {
 } from "@/components/genesis/card-editors";
 import { MajorCharacterEditor } from "@/components/genesis/MajorCharacterEditor";
 import { GenesisCeremony } from "@/components/genesis/GenesisCeremony";
+import {
+  buildDeckPatchPayload,
+  parseWorldRevision,
+} from "@/components/genesis/editor-revision";
 
 /**
  * 卡片编辑器（M1.4）+ 创世开局演出（M1.5）
@@ -59,6 +63,7 @@ export default function GenesisEditorPage({
   const [deck, setDeck] = useState<WorldDeck | null>(null);
   const [genesisInput, setGenesisInput] = useState("");
   const [lockedPaths, setLockedPaths] = useState<string[]>([]);
+  const [revision, setRevision] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // ── 编辑状态 ──
@@ -100,6 +105,7 @@ export default function GenesisEditorPage({
         setDeck(parsedDeck);
         setGenesisInput(world.genesisInput ?? "");
         setLockedPaths(world.lockedPaths ?? []);
+        setRevision(parseWorldRevision(world.updatedAt));
       })
       .catch((err) => !cancelled && setLoadError(String(err instanceof Error ? err.message : err)));
     return () => {
@@ -124,10 +130,11 @@ export default function GenesisEditorPage({
       setSaving(true);
       setNotice(null);
       try {
+        if (revision === null) throw new Error("世界版本无效，请刷新后重试");
         const res = await fetch(`/api/worlds/${worldId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ deck: current, editedPaths: [...dirtyPaths] }),
+          body: JSON.stringify(buildDeckPatchPayload(current, [...dirtyPaths], revision)),
         });
         const json = await res.json();
         if (!res.ok) {
@@ -135,6 +142,7 @@ export default function GenesisEditorPage({
           return false;
         }
         setLockedPaths(json.lockedPaths);
+        setRevision(parseWorldRevision(json.updatedAt));
         setDirtyPaths(new Set());
         setStructDirty(false);
         setNotice({ ok: true, text: "✓ 手改已录，字段已上锁" });
@@ -146,7 +154,7 @@ export default function GenesisEditorPage({
         setSaving(false);
       }
     },
-    [worldId, dirtyPaths],
+    [worldId, dirtyPaths, revision],
   );
 
   // ── 重掷（整组粒度；有未保存手改则先保存以免丢失） ──
@@ -170,6 +178,7 @@ export default function GenesisEditorPage({
         const rerolled = parsePersistedWorldDeck(json.deck);
         if (rerolled.mode !== deck.mode) throw new Error("世界模式不可更改");
         setDeck(rerolled);
+        setRevision(parseWorldRevision(json.updatedAt));
         setNotice({ ok: true, text: `✓ ${CARD_KEY_LABELS[cardKey]}已重掷（手改字段保留）` });
       } catch (err) {
         setNotice({ ok: false, text: `重掷失败:${String(err)}` });

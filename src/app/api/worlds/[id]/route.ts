@@ -21,6 +21,8 @@ const PatchSchema = z.object({
   deck: z.unknown(),
   /** 本次手改涉及的字段路径（点分）——将被标记为 player_locked */
   editedPaths: z.array(z.string()).default([]),
+  /** 客户端最近一次 GET/PATCH 取得的世界 revision。 */
+  expectedUpdatedAt: z.coerce.date(),
 });
 
 export async function GET(
@@ -88,28 +90,36 @@ export async function PATCH(
   }
 
   const lockedPaths = [...new Set([...world.lockedPaths, ...body.editedPaths])];
-  const { count } = await prisma.world.updateMany({
-    where: { id, mode, updatedAt: world.updatedAt },
-    data: {
-      name: deck.worldName,
-      draftDeck: deck as unknown as Prisma.InputJsonValue,
-      lockedPaths,
-      themeCard: deck.theme as unknown as Prisma.InputJsonValue,
-      styleCard: deck.style as unknown as Prisma.InputJsonValue,
-      cosmology: deck.cosmology as unknown as Prisma.InputJsonValue,
-      fusionAxiom: deck.fusionAxiom
-        ? (deck.fusionAxiom as unknown as Prisma.InputJsonValue)
-        : undefined,
-    },
+  const updatedAt = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.world.updateMany({
+      where: { id, mode, updatedAt: body.expectedUpdatedAt },
+      data: {
+        name: deck.worldName,
+        draftDeck: deck as unknown as Prisma.InputJsonValue,
+        lockedPaths,
+        themeCard: deck.theme as unknown as Prisma.InputJsonValue,
+        styleCard: deck.style as unknown as Prisma.InputJsonValue,
+        cosmology: deck.cosmology as unknown as Prisma.InputJsonValue,
+        fusionAxiom: deck.fusionAxiom
+          ? (deck.fusionAxiom as unknown as Prisma.InputJsonValue)
+          : undefined,
+      },
+    });
+    if (count !== 1) return null;
+    const updated = await tx.world.findUnique({
+      where: { id },
+      select: { updatedAt: true },
+    });
+    return updated?.updatedAt ?? null;
   });
-  if (count !== 1) {
+  if (updatedAt === null) {
     return NextResponse.json(
       { error: "卡组已被其他操作更新，请刷新后重试" },
       { status: 409 },
     );
   }
 
-  return NextResponse.json({ ok: true, lockedPaths });
+  return NextResponse.json({ ok: true, lockedPaths, updatedAt });
 }
 
 export async function DELETE(

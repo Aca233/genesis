@@ -1,6 +1,10 @@
 import { parseMaterialVersionContent } from "./schemas";
 import type { GenesisMaterialSnapshot, GenesisMaterialSnapshotItem, MaterialKind } from "./types";
 import type { WorldMode } from "@/lib/world-mode";
+import {
+  CreatorMajorGodCardSchema,
+  PantheonMajorGodCardSchema,
+} from "@/lib/cards/schemas";
 
 const INHERIT_CORE_PATHS: Record<MaterialKind, readonly string[]> = {
   player_god: ["ref", "name", "origin", "domains", "rank", "abilities"],
@@ -21,12 +25,13 @@ export function coreLockedPaths(kind: MaterialKind): readonly string[] {
   return INHERIT_CORE_PATHS[kind];
 }
 
-/** 从冻结主神卡结构判断其来源模式；runtime 自由结构不明确时交由模型适配。 */
+/** 仅对 deck-origin 冻结卡做精确模式判定；runtime/edited 结构不猜测。 */
 function majorGodMaterialMode(item: GenesisMaterialSnapshotItem): WorldMode | null {
   if (item.card.kind !== "major_god") return null;
-  const card = parseMaterialVersionContent(item.version.content).card;
-  if ("relations" in card && !("initialRelationToPlayer" in card)) return "creator";
-  if ("initialRelationToPlayer" in card && !("relations" in card)) return "pantheon";
+  const content = parseMaterialVersionContent(item.version.content);
+  if (content.origin !== "deck") return null;
+  if (PantheonMajorGodCardSchema.safeParse(content.card).success) return "pantheon";
+  if (CreatorMajorGodCardSchema.safeParse(content.card).success) return "creator";
   return null;
 }
 

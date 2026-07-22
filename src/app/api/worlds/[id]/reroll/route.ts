@@ -193,25 +193,33 @@ export async function POST(
     }
   }
 
-  const { count } = await prisma.world.updateMany({
-    where: { id, mode, updatedAt: world.updatedAt },
-    data: {
-      name: deck.worldName,
-      draftDeck: deck as unknown as Prisma.InputJsonValue,
-      themeCard: deck.theme as unknown as Prisma.InputJsonValue,
-      styleCard: deck.style as unknown as Prisma.InputJsonValue,
-      cosmology: deck.cosmology as unknown as Prisma.InputJsonValue,
-      fusionAxiom: deck.fusionAxiom
-        ? (deck.fusionAxiom as unknown as Prisma.InputJsonValue)
-        : undefined,
-    },
+  const updatedAt = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.world.updateMany({
+      where: { id, mode, updatedAt: world.updatedAt },
+      data: {
+        name: deck.worldName,
+        draftDeck: deck as unknown as Prisma.InputJsonValue,
+        themeCard: deck.theme as unknown as Prisma.InputJsonValue,
+        styleCard: deck.style as unknown as Prisma.InputJsonValue,
+        cosmology: deck.cosmology as unknown as Prisma.InputJsonValue,
+        fusionAxiom: deck.fusionAxiom
+          ? (deck.fusionAxiom as unknown as Prisma.InputJsonValue)
+          : undefined,
+      },
+    });
+    if (count !== 1) return null;
+    const updated = await tx.world.findUnique({
+      where: { id },
+      select: { updatedAt: true },
+    });
+    return updated?.updatedAt ?? null;
   });
-  if (count !== 1) {
+  if (updatedAt === null) {
     return NextResponse.json(
       { error: "卡组已被其他操作更新，请刷新后重试" },
       { status: 409 },
     );
   }
 
-  return NextResponse.json({ deck });
+  return NextResponse.json({ deck, updatedAt });
 }

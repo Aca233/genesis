@@ -166,6 +166,8 @@ export const MajorGodCardSchema = z.object({
   abilities: z.array(DivineDeckAbilitySchema).min(3).max(6).describe("神权能力"),
 });
 
+export const PantheonMajorGodCardSchema = MajorGodCardSchema;
+
 export const CreatorMajorGodCardSchema = MajorGodCardSchema
   .omit({ agenda: true, initialRelationToPlayer: true })
   .extend({
