@@ -103,6 +103,20 @@ describe("/api/worlds", () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
+
+  it("malformed JSON 返回 400 且不调用模型或创建世界", async () => {
+    const response = await POST(new Request("http://localhost/api/worlds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: '{"decree":',
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: "创世请求无效" });
+    expect(mocks.completeStructured).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
   it("拒绝未知世界模式", async () => {
     const response = await POST(new Request("http://localhost/api/worlds", {
       method: "POST",

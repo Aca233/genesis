@@ -24,7 +24,13 @@ const CreateSchema = z.object({
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
-  const parsed = CreateSchema.safeParse(await request.json());
+  let rawBody: unknown;
+  try {
+    rawBody = await request.json();
+  } catch {
+    return NextResponse.json({ error: "创世请求无效" }, { status: 400 });
+  }
+  const parsed = CreateSchema.safeParse(rawBody);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "创世请求无效" },

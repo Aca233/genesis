@@ -10,6 +10,7 @@ import {
   AbilityVisibilitySchema,
 } from "@/lib/abilities/types";
 import { validateAbilityOwnership } from "@/lib/abilities/validator";
+import { WorldModeSchema } from "@/lib/world-mode";
 
 /**
  * POST /api/worlds/import —— 导入 version 1 或 version 2 存档。
@@ -271,6 +272,7 @@ const WorldSchema = z
     userId: OptionalIdSchema,
     name: ShortStringSchema.min(1),
     genesisInput: TextSchema,
+    mode: WorldModeSchema.default("pantheon"),
     status: ShortStringSchema.default("draft"),
     draftDeck: BoundedJsonSchema.optional(),
     lockedPaths: StringListSchema.default([]),
@@ -898,6 +900,7 @@ export async function POST(request: Request) {
           id: newWorldId,
           name: w.name,
           genesisInput: w.genesisInput,
+          mode: w.mode,
           status: w.status,
           draftDeck: json(w.draftDeck),
           lockedPaths: w.lockedPaths,

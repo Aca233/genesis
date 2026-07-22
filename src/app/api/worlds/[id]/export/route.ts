@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { projectVersionTwoWorld } from "@/lib/archive/v2";
 
 /**
  * GET /api/worlds/[id]/export —— 导出存档
@@ -44,29 +45,7 @@ export async function GET(
     return NextResponse.json({ error: "不存在" }, { status: 404 });
   }
 
-  const exportWorld = {
-    ...world,
-    timelines: world.timelines.map((timeline) => {
-      const abilities = timeline.abilities.map(({ events, ...ability }) => {
-        void events;
-        return ability;
-      });
-      const abilityEvents = timeline.abilities.flatMap((ability) => ability.events);
-      const memberships = Array.from(
-        new Map(
-          timeline.entities
-            .flatMap((entity) => entity.memberships)
-            .map((membership) => [membership.id, membership]),
-        ).values(),
-      );
-      const entities = timeline.entities.map(({ race, memberships, ...entity }) => {
-        void race;
-        void memberships;
-        return entity;
-      });
-      return { ...timeline, entities, abilities, abilityEvents, memberships };
-    }),
-  };
+  const exportWorld = projectVersionTwoWorld(world);
 
   const payload = {
     version: 2,

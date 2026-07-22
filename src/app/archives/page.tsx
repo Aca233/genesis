@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { WORLD_MODE_PRESENTATION, type WorldMode } from "@/lib/world-mode";
+import { worldModeLabel, type WorldMode } from "@/lib/world-mode";
 
 /** 存档列表项（GET /api/worlds 返回 shape） */
 type WorldItem = {
@@ -201,7 +201,7 @@ export default function ArchivesPage() {
                         {badge.label}
                       </span>
                       <span className="shrink-0 rounded border border-gilt/25 bg-gilt/5 px-1.5 py-0.5 text-xs text-gilt">
-                        {WORLD_MODE_PRESENTATION[w.mode].label}
+                        {worldModeLabel(w.mode)}
                       </span>
                     </h2>
                     <p className="decree mt-2 text-sm">

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "@/components/theme/useTheme";
 import { MaterialPicker } from "@/components/materials/MaterialPicker";
 import type { MaterialSelectionItem } from "@/lib/materials/types";
+import { buildGenesisTaskPayload, defaultGenesisMode } from "@/lib/genesis/create-request";
 import { WORLD_MODES, WORLD_MODE_PRESENTATION, type WorldMode } from "@/lib/world-mode";
 
 /** 首屏：输入神谕 → 创世 → 跳转卡片编辑器（/genesis/[id]） */
@@ -14,7 +15,7 @@ export default function Home() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [worldMode, setWorldMode] = useState<WorldMode>("pantheon");
+  const [worldMode, setWorldMode] = useState<WorldMode>(defaultGenesisMode);
   const [decree, setDecree] = useState("");
   const [lorebook, setLorebook] = useState<{ name: string; data: unknown } | null>(null);
   const [creating, setCreating] = useState(false);
@@ -51,12 +52,12 @@ export default function Home() {
       const res = await fetch("/api/genesis/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(buildGenesisTaskPayload({
           mode: worldMode,
           decree: text,
-          ...(lorebook ? { lorebook: lorebook.data, lorebookName: lorebook.name } : {}),
+          lorebook,
           materialSelections,
-        }),
+        })),
       });
       const json: { taskId?: string; error?: string } = await res.json();
       if (!res.ok || !json.taskId) {

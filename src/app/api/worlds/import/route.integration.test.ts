@@ -181,6 +181,41 @@ describe("存档导出导入 PostgreSQL 往返", () => {
     }
   });
 
+  it("version 2 草稿世界往返保留 creator mode 且不导出操作凭证", async () => {
+    const source = await prisma.world.create({
+      data: {
+        name: `creator-archive-${crypto.randomUUID()}`,
+        genesisInput: "创造自行运转的宇宙",
+        mode: "creator",
+        operationKind: "rewrite",
+        operationToken: "integration-secret-token",
+        operationLeaseExpiresAt: new Date(Date.now() + 60_000),
+        lockedPaths: [],
+      },
+    });
+    let importedWorldId: string | undefined;
+
+    try {
+      const exported = await exportWorld(
+        new Request(`http://localhost/api/worlds/${source.id}/export`),
+        { params: Promise.resolve({ id: source.id }) },
+      );
+      const archive = await exported.json();
+      expect(archive.world.mode).toBe("creator");
+      expect(JSON.stringify(archive)).not.toContain("integration-secret-token");
+      expect(archive.world).not.toHaveProperty("operationKind");
+
+      const imported = await importWorld(importRequest(archive));
+      expect(imported.status).toBe(200);
+      importedWorldId = (await imported.json()).worldId;
+      await expect(prisma.world.findUniqueOrThrow({ where: { id: importedWorldId } }))
+        .resolves.toMatchObject({ mode: "creator" });
+    } finally {
+      if (importedWorldId) await prisma.world.delete({ where: { id: importedWorldId } });
+      await prisma.world.delete({ where: { id: source.id } });
+    }
+  });
+
   it("真实 version 1 结构可导入并重建章节消息", async () => {
     const oldWorldId = `v1-world-${crypto.randomUUID()}`;
     const oldTimelineId = `v1-timeline-${crypto.randomUUID()}`;

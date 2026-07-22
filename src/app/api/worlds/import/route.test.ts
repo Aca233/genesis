@@ -331,6 +331,9 @@ describe("存档导入", () => {
     const response = await importWorld(request(legacyArchive()));
 
     expect(response.status).toBe(200);
+    expect(mocks.prisma.world.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ mode: "pantheon" }),
+    }));
     expect(lastCreateManyData(mocks.prisma.ability)).toEqual([]);
     expect(lastCreateManyData(mocks.prisma.entityMembership)).toEqual([]);
     expect(lastCreateManyData(mocks.prisma.abilityEvent)).toEqual([]);
@@ -385,6 +388,20 @@ describe("存档导入", () => {
     expect(events[0].dedupeKey).not.toBe(
       "chapter-old:character-ability-old:improved:message-old",
     );
+  });
+
+  it("version 2 导入保留 creator mode", async () => {
+    const archive = versionTwoArchive();
+    (archive.world as typeof archive.world & { mode: "creator" }).mode = "creator";
+    (archive.world as unknown as { activeTimelineId: string | null }).activeTimelineId = null;
+    archive.world.timelines = [];
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(200);
+    expect(mocks.prisma.world.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ mode: "creator" }),
+    }));
   });
 
   it("保留 embark 的 relations.player 并重映射真实神明 ID 关系键", async () => {
@@ -732,7 +749,14 @@ describe("存档导出", () => {
     };
     mocks.prisma.world.findUnique.mockResolvedValue({
       id: "world-1",
+      userId: "local",
+      mode: "creator",
       name: "私有世界",
+      genesisInput: "创造私有世界",
+      status: "playing",
+      operationKind: "rewrite",
+      operationToken: "secret-operation-token",
+      operationLeaseExpiresAt: new Date("2026-07-22T00:00:00Z"),
       timelines: [
         {
           id: "timeline-1",
@@ -761,6 +785,11 @@ describe("存档导出", () => {
     const payload = await response.json();
 
     expect(payload.version).toBe(2);
+    expect(payload.world.mode).toBe("creator");
+    expect(JSON.stringify(payload)).not.toContain("secret-operation-token");
+    expect(payload.world).not.toHaveProperty("operationKind");
+    expect(payload.world).not.toHaveProperty("operationToken");
+    expect(payload.world).not.toHaveProperty("operationLeaseExpiresAt");
     expect(payload.world.timelines[0]).toMatchObject({
       abilities: [{ id: "hidden-ability", visibility: "hidden" }],
       abilityEvents: [{ id: "hidden-event", abilityId: "hidden-ability" }],

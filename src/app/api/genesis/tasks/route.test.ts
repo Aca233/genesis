@@ -42,6 +42,19 @@ describe("POST /api/genesis/tasks", () => {
     }));
   });
 
+
+  it("malformed JSON 返回 400 且不创建任务", async () => {
+    const response = await POST(new Request("http://localhost/api/genesis/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: '{"decree":',
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: "创世请求无效" });
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
   it("拒绝未知世界模式", async () => {
     const response = await POST(new Request("http://localhost/api/genesis/tasks", {
       method: "POST",
