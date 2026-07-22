@@ -199,7 +199,32 @@ describe("applyRewritePlan", () => {
     })).toMatchObject({ revealed: true });
   });
 
-  it("memory_only 只写 memory 栏目，不改变客观编年史", async () => {
+  it("纯 memory_only 携带客观补丁时在写入前 fail closed", async () => {
+    const data = await fixture();
+    const beforeTimeline = await prisma.timeline.findUniqueOrThrow({ where: { id: data.timeline.id } });
+
+    const invalidPlan = {
+      ...plan({
+        scope: "memory_only",
+        subcommands: [{ decree: "司星者忘记旧王", scope: "memory_only", effectivePoint: "此刻记忆" }],
+        memoryPatches: [{ entityId: data.character.id, operation: "replace", text: "只记得群星议庭" }],
+      }),
+      realityCardPatches: [{ section: "currentEra", value: "不应写入的伪造纪元" }],
+      entityPatches: [{ op: "remove", targetId: data.character.id }],
+    } as unknown as RewritePlan;
+
+    await expect(apply(data, invalidPlan)).rejects.toThrow(/memory_only|客观/);
+
+    expect(await prisma.timeline.findUniqueOrThrow({ where: { id: data.timeline.id } })).toMatchObject({
+      realityState: beforeTimeline.realityState,
+    });
+    expect(await prisma.entity.findUnique({ where: { id: data.character.id } })).not.toBeNull();
+    expect(await prisma.entitySection.findUnique({
+      where: { entityId_key: { entityId: data.character.id, key: "memory" } },
+    })).toBeNull();
+  });
+
+  it("memory_only 只写主体记忆与神明议程，不改变客观编年史", async () => {
     const data = await fixture();
     const before = await prisma.chronicleEntry.findMany({ where: { timelineId: data.timeline.id }, orderBy: { id: "asc" } });
 
@@ -207,13 +232,16 @@ describe("applyRewritePlan", () => {
       scope: "memory_only",
       subcommands: [{ decree: "司星者忘记旧王", scope: "memory_only", effectivePoint: "此刻记忆" }],
       memoryPatches: [{ entityId: data.character.id, operation: "replace", text: "只记得群星议庭" }],
-      chroniclePatches: [{ op: "update", targetId: data.chronicle.id, changes: { text: "不应写入的客观历史" } }],
+      godPatches: [{ op: "update", targetId: data.god.id, changes: { agenda: { belief: "旧王从未存在" } } }],
     }));
 
     expect(await prisma.chronicleEntry.findMany({ where: { timelineId: data.timeline.id }, orderBy: { id: "asc" } })).toEqual(before);
     expect(await prisma.entitySection.findUniqueOrThrow({
       where: { entityId_key: { entityId: data.character.id, key: "memory" } },
     })).toMatchObject({ content: { text: "只记得群星议庭" } });
+    expect(await prisma.god.findUniqueOrThrow({ where: { id: data.god.id } })).toMatchObject({
+      agenda: { belief: "旧王从未存在" },
+    });
   });
 
   it("通过 tempRef 解析新神、实体与能力的交叉关系", async () => {

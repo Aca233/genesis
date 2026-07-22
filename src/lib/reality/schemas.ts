@@ -405,6 +405,33 @@ export const RewritePlanSchema = z.object({
     });
   }
 
+  const isPureMemoryOnly = plan.subcommands.every(
+    (subcommand) => subcommand.scope === "memory_only",
+  );
+  if (isPureMemoryOnly) {
+    const objectivePatchFields = [
+      ["realityCardPatches", plan.realityCardPatches.length > 0],
+      ["godPatches", plan.godPatches.some((patch) => (
+        patch.op !== "update"
+        || Object.keys(patch.changes).some((key) => key !== "agenda")
+      ))],
+      ["entityPatches", plan.entityPatches.length > 0],
+      ["abilityPatches", plan.abilityPatches.length > 0],
+      ["chroniclePatches", plan.chroniclePatches.length > 0],
+      ["omenPatches", plan.omenPatches.length > 0],
+      ["observerPatch", plan.observerPatch !== null],
+    ] as const;
+
+    for (const [field, hasObjectivePatch] of objectivePatchFields) {
+      if (!hasObjectivePatch) continue;
+      ctx.addIssue({
+        code: "custom",
+        path: [field],
+        message: "纯 memory_only 计划不得修改客观现实；仅允许 memoryPatches 与神明 agenda 更新",
+      });
+    }
+  }
+
   const createPatches = [
     ...plan.godPatches,
     ...plan.entityPatches,

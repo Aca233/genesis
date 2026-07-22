@@ -162,6 +162,48 @@ describe("absolute reality rewrite schemas", () => {
     expect(defaulted.subcommands[0]?.scope).toBe("prospective");
   });
 
+  it.each([
+    ["reality card", { realityCardPatches: [{ section: "currentEra", value: "伪造纪元" }] }],
+    ["god fact", { godPatches: [{ op: "update", targetId: "god-existing", changes: { domains: ["伪造神域"] } }] }],
+    ["entity fact", { entityPatches: [{ op: "remove", targetId: "entity-existing" }] }],
+    ["ability fact", { abilityPatches: [{ op: "remove", targetId: "ability-existing" }] }],
+    ["chronicle fact", { chroniclePatches: [{ op: "remove", targetId: "chronicle-existing" }] }],
+    ["omen fact", { omenPatches: [{ op: "remove", targetId: "omen-existing" }] }],
+    ["observer state", { observerPatch: { viewpoint: "limited" } }],
+  ])("rejects %s patches when every subcommand is memory_only", (_label, patches) => {
+    expect(RewritePlanSchema.safeParse({
+      ...emptyRewritePlan,
+      scope: "memory_only",
+      subcommands: [
+        { decree: "众生忘记旧王", scope: "memory_only", effectivePoint: "现有记忆" },
+        { decree: "旧王被误认为贤君", scope: "memory_only", effectivePoint: "现有认知" },
+      ],
+      ...patches,
+    }).success).toBe(false);
+  });
+
+  it("allows subjective memory and god agenda patches in a pure memory_only plan", () => {
+    expect(RewritePlanSchema.safeParse({
+      ...emptyRewritePlan,
+      scope: "memory_only",
+      subcommands: [{ decree: "众生忘记旧王", scope: "memory_only", effectivePoint: "现有记忆" }],
+      memoryPatches: [{ entityId: "entity-witness", operation: "replace", text: "只记得群星议庭" }],
+      godPatches: [{ op: "update", targetId: "god-existing", changes: { agenda: { belief: "旧王从未存在" } } }],
+    }).success).toBe(true);
+  });
+
+  it("allows explicit objective patches when a memory_only top-level plan contains an objective subcommand", () => {
+    expect(RewritePlanSchema.safeParse({
+      ...emptyRewritePlan,
+      scope: "memory_only",
+      subcommands: [
+        { decree: "众生忘记旧王", scope: "memory_only", effectivePoint: "现有记忆" },
+        { decree: "从现在起拆除旧王像", scope: "prospective", effectivePoint: "当前时刻" },
+      ],
+      entityPatches: [{ op: "remove", targetId: "entity-old-statue" }],
+    }).success).toBe(true);
+  });
+
   it("rejects a top-level scope that is shallower than its normalized subcommands", () => {
     expect(RewritePlanSchema.safeParse({
       ...emptyRewritePlan,
