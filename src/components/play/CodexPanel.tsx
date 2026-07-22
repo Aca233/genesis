@@ -46,6 +46,7 @@ type SectionRow = {
   revealed: boolean;
   rumorText: string | null;
   playerLocked: boolean;
+  worldVisible?: boolean;
 };
 
 type EntityDetail = EntityLite & {
@@ -62,6 +63,7 @@ type ChronicleRow = {
   yearLabel: string;
   text: string;
   revealedAtChapter: number | null;
+  worldVisible?: boolean;
 };
 
 // ── 列表 ──
@@ -142,10 +144,15 @@ function SectionBlock({ s }: { s: SectionRow }) {
           </span>
         )}
       </h4>
-      {s.revealed ? (
+      {s.content !== null ? (
+        <>
+          {s.worldVisible === false && (
+            <p className="mb-1 text-[10px] tracking-widest text-cinnabar/75">天外批注 · 世界内不可见</p>
+          )}
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-soft">
           {s.content?.text ?? s.content?.names?.join("、") ?? ""}
         </p>
+        </>
       ) : (
         <p className="fog-text text-sm">
           {s.rumorText ? `传闻：${s.rumorText}` : "此处经卷残缺"}
@@ -365,6 +372,9 @@ function EntityDetailView({
                 <span className="shrink-0 text-xs text-gilt/70">{c.yearLabel}</span>
                 <span className="text-ink-soft">
                   {c.text}
+                  {c.worldVisible === false && (
+                    <span className="ml-1 text-xs text-cinnabar/80">〔天外批注 · 世界内不可见〕</span>
+                  )}
                   {c.revealedAtChapter != null && (
                     <span className="ml-1 text-xs text-ink-faint">
                       （第{c.revealedAtChapter}章方揭）

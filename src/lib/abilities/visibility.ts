@@ -2,6 +2,7 @@ import type {
   AbilityInput,
   AbilityProjection,
   KnownAbilityProjection,
+  OmniscientAbilityProjection,
   RumoredAbilityProjection,
 } from "./types";
 
@@ -39,8 +40,11 @@ export function projectAbilitiesForOwner(
 /** Full mechanics for a creator observing outside the world's fog of war. */
 export function projectAbilitiesForOmniscient(
   abilities: readonly AbilityInput[],
-): KnownAbilityProjection[] {
-  return abilities.map(toKnownProjection);
+): OmniscientAbilityProjection[] {
+  return abilities.map((ability) => ({
+    ...ability,
+    worldVisible: ability.visibility === "known",
+  }));
 }
 
 /** Projects a collection without exposing hidden abilities to a player. */

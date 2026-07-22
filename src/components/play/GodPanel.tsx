@@ -94,8 +94,11 @@ function MajorGodCard({ god, theme }: { god: GodRow; theme: ThemeCard | null }) 
       {/* 议程区：揭示前为残卷 */}
       <div className="mt-3 border-t border-line pt-2 text-sm">
         <p className="mb-1 text-xs text-ink-faint">议程</p>
-        {god.agendaRevealed && god.agenda ? (
+        {god.agenda ? (
           <div className="grid gap-1 text-ink-soft">
+            {!god.agendaWorldVisible && (
+              <p className="text-xs text-cinnabar/75">天外批注 · 世界内不可见</p>
+            )}
             {god.agenda.longTermGoal && <p>长愿：{god.agenda.longTermGoal}</p>}
             {(god.agenda.shortTermGoals?.length ?? 0) > 0 && (
               <p>近谋：{god.agenda.shortTermGoals!.join("；")}</p>

@@ -72,4 +72,21 @@ describe("AbilityList display helpers", () => {
       { label: "传闻", value: "据说她能踏着月影穿墙。" },
     ]);
   });
+  it("全知 creator 可读隐藏能力机制并看到世界内不可见标记", () => {
+    const hiddenForAuthor = {
+      ...known,
+      visibility: "hidden" as const,
+      worldVisible: false as const,
+    };
+    expect(groupAbilities([hiddenForAuthor])).toEqual([{
+      kind: "racial_innate",
+      label: "先天能力（族人默认继承）",
+      abilities: [hiddenForAuthor],
+    }]);
+    expect(abilityDetailLines(hiddenForAuthor)[0]).toEqual({
+      label: "效果",
+      value: "在强光中辨识灵力轨迹",
+    });
+  });
+
 });

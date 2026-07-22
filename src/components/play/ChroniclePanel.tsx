@@ -17,6 +17,7 @@ type EntryRow = {
   godIds: string[];
   revealedAtChapter: number | null;
   source: string;
+  worldVisible?: boolean;
 };
 
 type NameRow = { id: string; name: string };
@@ -151,6 +152,9 @@ export function ChroniclePanel({ timelineId }: { timelineId: string }) {
                     <span className={backfilled ? "text-ink-soft" : "text-ink"}>
                       {e.text}
                     </span>
+                    {e.worldVisible === false && (
+                      <span className="ml-1.5 text-xs text-cinnabar/80">〔天外批注 · 世界内不可见〕</span>
+                    )}
                     {backfilled && (
                       <span
                         className="ml-1.5 text-xs text-cinnabar/80"

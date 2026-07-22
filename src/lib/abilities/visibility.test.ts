@@ -98,7 +98,7 @@ describe("projectAbilitiesForOwner", () => {
 });
 
 describe("projectAbilitiesForOmniscient", () => {
-  it("将隐藏能力作为完整 known DTO 提供给全知观察者", () => {
+  it("完整提供隐藏能力但保留世界内可见性语义", () => {
     const hidden = {
       ...ability,
       visibility: "hidden" as const,
@@ -106,7 +106,7 @@ describe("projectAbilitiesForOmniscient", () => {
     };
 
     expect(projectAbilitiesForOmniscient([hidden])).toEqual([
-      { ...hidden, visibility: "known" },
+      { ...hidden, visibility: "hidden", worldVisible: false },
     ]);
   });
 });

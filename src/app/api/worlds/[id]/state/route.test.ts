@@ -137,7 +137,7 @@ describe("GET /api/worlds/[id]/state projections", () => {
       agenda: { schemes: ["遮蔽星门"] },
       agendaRevealed: false,
       relations: { "god-sun": { label: "rival" } },
-      abilities: [{ name: "暗潮神权", visibility: "known", effect: "令海潮吞没一段历史" }],
+      abilities: [{ name: "暗潮神权", visibility: "hidden", worldVisible: false, effect: "令海潮吞没一段历史" }],
     });
     expect(body.recentRewrite).toMatchObject({ id: "rewrite-1", summary: "群星轨迹已经改变" });
     expect(body.avatars).toEqual([expect.objectContaining({
@@ -148,7 +148,7 @@ describe("GET /api/worlds/[id]/state projections", () => {
         expect.objectContaining({ key: "identity", content: { text: "天外来客" } }),
         expect.objectContaining({ key: "appearance", content: { text: "银发星眸" } }),
       ],
-      abilities: [expect.objectContaining({ name: "暗潮神权", visibility: "known" })],
+      abilities: [expect.objectContaining({ name: "暗潮神权", visibility: "hidden", worldVisible: false })],
     })]);
   });
 

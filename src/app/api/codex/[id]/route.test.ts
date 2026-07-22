@@ -94,7 +94,8 @@ describe("GET /api/codex/[id] projections", () => {
     });
     expect(body.entity.abilities[0]).toMatchObject({
       name: "隐秘血脉",
-      visibility: "known",
+      visibility: "hidden",
+      worldVisible: false,
       effect: "听见旧现实的回声",
     });
     expect(body.entity.abilityEvents[0]).toMatchObject({

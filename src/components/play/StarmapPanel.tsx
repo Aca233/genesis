@@ -140,15 +140,11 @@ export function StarmapPanel({
       });
     });
     const starById = new Map(stars.map((star) => [star.god.id, star]));
-    const seen = new Set<string>();
     const relations: StarRelation[] = [];
     for (const source of stars) {
       for (const [targetId, relation] of relationEntries(source.god)) {
         const target = starById.get(targetId);
         if (!target) continue;
-        const key = [source.god.id, targetId].sort().join(":");
-        if (seen.has(key)) continue;
-        seen.add(key);
         relations.push({ source, target, relation });
       }
     }
@@ -348,9 +344,17 @@ export function StarmapPanel({
               ))}
             </ul>
           )}
-          {!focused.isPlayer && !focused.agendaRevealed && (
+          {!focused.isPlayer && focused.agenda && !focused.agendaWorldVisible ? (
+            <div className="mt-2 border-l-2 border-cinnabar/40 pl-2 text-xs text-ink-soft">
+              <p className="text-cinnabar/75">天外批注 · 世界内不可见</p>
+              {focused.agenda.longTermGoal && <p>长愿：{focused.agenda.longTermGoal}</p>}
+              {(focused.agenda.shortTermGoals?.length ?? 0) > 0 && (
+                <p>近谋：{focused.agenda.shortTermGoals!.join("；")}</p>
+              )}
+            </div>
+          ) : !focused.isPlayer && !focused.agendaRevealed ? (
             <p className="fog-text mt-2 text-xs">其意难测——天机未泄。</p>
-          )}
+          ) : null}
         </div>
       )}
     </div>

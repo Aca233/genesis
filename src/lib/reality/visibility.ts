@@ -51,6 +51,7 @@ export function isOmniscientViewer(
 type SectionLike = { revealed: boolean; content: unknown };
 type ProjectedSection<T extends SectionLike> = Omit<T, "content"> & {
   content: T["content"] | null;
+  worldVisible: boolean;
 };
 
 /** Keeps rumor metadata but removes unrevealed section contents under fog. */
@@ -59,8 +60,10 @@ export function projectSectionsForViewer<T extends SectionLike>(
   viewer: RealityViewer,
 ): ProjectedSection<T>[] {
   return sections.map((section) => {
-    if (isOmniscientViewer(viewer) || section.revealed) return section;
-    return { ...section, content: null };
+    if (isOmniscientViewer(viewer) || section.revealed) {
+      return { ...section, worldVisible: section.revealed };
+    }
+    return { ...section, content: null, worldVisible: false };
   });
 }
 
@@ -70,6 +73,21 @@ export function projectGodAgendaForViewer<T>(
   viewer: RealityViewer,
 ): T | null {
   return revealed || isOmniscientViewer(viewer) ? agenda : null;
+}
+
+
+export function projectGodRelationsForViewer<T>(
+  relations: T,
+  viewer: RealityViewer,
+): T | Record<string, never> | { player: unknown } {
+  if (isOmniscientViewer(viewer)) return relations;
+  if (!relations || typeof relations !== "object" || Array.isArray(relations)) return {};
+  if (viewer === "pantheon_player" && "player" in relations) {
+    return { player: (relations as Record<string, unknown>).player };
+  }
+  // Persisted creator relations currently have no per-edge reveal metadata.
+  // Limited observation therefore fails closed rather than leaking the graph.
+  return {};
 }
 
 export type ProjectedChronicle<T> = T & { worldVisible: boolean };

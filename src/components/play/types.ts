@@ -66,7 +66,12 @@ export type RumoredAbilityView = {
   state: AbilityState;
 };
 
-export type AbilityView = KnownAbilityView | RumoredAbilityView;
+export type OmniscientAbilityView = Omit<KnownAbilityView, "visibility"> & {
+  visibility: "known" | "rumored" | "hidden";
+  worldVisible: boolean;
+};
+
+export type AbilityView = KnownAbilityView | RumoredAbilityView | OmniscientAbilityView;
 
 /** 能力沿革 DTO；传闻沿革仅提供揭示时间与传闻文本。 */
 export type AbilityEventView = {
@@ -120,6 +125,7 @@ export type GodRow = {
   relations: GodRelations | null;
   agenda: GodAgenda | null;
   agendaRevealed: boolean;
+  agendaWorldVisible?: boolean;
   abilities: AbilityView[];
 };
 

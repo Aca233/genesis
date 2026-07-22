@@ -68,7 +68,9 @@ export function groupAbilities(
   labels: Partial<Record<AbilityKind, string>> = {},
 ): AbilityGroup[] {
   const displayable = abilities.filter(
-    (ability) => ability.visibility === "known" || ability.visibility === "rumored",
+    (ability) => "worldVisible" in ability
+      || ability.visibility === "known"
+      || ability.visibility === "rumored",
   );
   return kinds.flatMap((kind) => {
     const grouped = displayable.filter((ability) => ability.kind === kind);
@@ -80,10 +82,11 @@ export function groupAbilities(
 
 /** 将完整能力与传闻能力转换为安全的展示行。 */
 export function abilityDetailLines(ability: AbilityView): AbilityDetailLine[] {
-  if (ability.visibility === "rumored") {
+  const authorVisible = "worldVisible" in ability;
+  if (!authorVisible && ability.visibility === "rumored") {
     return [{ label: "传闻", value: ability.rumorText || "此术详情尚不可考" }];
   }
-  if (ability.visibility !== "known") return [];
+  if (!authorVisible && ability.visibility !== "known") return [];
 
   return [
     { label: "效果", value: ability.effect },
@@ -96,7 +99,7 @@ export function abilityDetailLines(ability: AbilityView): AbilityDetailLine[] {
 }
 
 function sourceLabel(ability: AbilityView): string | null {
-  if (ability.visibility !== "known") return null;
+  if (!("worldVisible" in ability) && ability.visibility !== "known") return null;
   if (ability.inherited) return "族裔先天继承";
   if (ability.sourceAbilityId && ability.kind === "racial_tradition") {
     return "承自族群技艺";
@@ -160,20 +163,22 @@ function AbilityCard({
     <li className={`rounded-md border p-3 ${ability.visibility === "rumored" ? "border-line bg-paper-sunken" : "border-line bg-paper-raised"}`}>
       <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h5 className="text-sm text-ink">{ability.name}</h5>
-        {ability.visibility === "rumored" && (
+        {"worldVisible" in ability && !ability.worldVisible ? (
+          <span className="text-[10px] tracking-widest text-cinnabar/75">天外批注 · 世界内不可见</span>
+        ) : ability.visibility === "rumored" ? (
           <span className="fog-text text-[10px] tracking-widest">传闻</span>
-        )}
+        ) : null}
         {allowMaterialSave && <SaveMaterialVersionButton sourceType="ability" sourceId={ability.id} compact />}
       </header>
       {source && <p className="mt-1 text-xs text-gilt/75">来源：{source}</p>}
-      {ability.visibility === "known" && ability.bloodlineJustification && (
+      {(ability.visibility === "known" || "worldVisible" in ability) && ability.bloodlineJustification && (
         <p className="mt-1 text-xs text-ink-faint">血脉依据：{ability.bloodlineJustification}</p>
       )}
       <dl className="mt-2 grid gap-1 text-xs leading-relaxed">
         {abilityDetailLines(ability).map((line) => (
           <div key={line.label} className="grid grid-cols-[3rem_1fr] gap-2">
             <dt className="text-ink-faint">{line.label}</dt>
-            <dd className={ability.visibility === "rumored" ? "fog-text" : "text-ink-soft"}>{line.value}</dd>
+            <dd className={ability.visibility === "rumored" && !("worldVisible" in ability) ? "fog-text" : "text-ink-soft"}>{line.value}</dd>
           </div>
         ))}
       </dl>

@@ -3,6 +3,7 @@ import type { ObserverState } from "./schemas";
 import {
   projectChronicleForViewer,
   projectGodAgendaForViewer,
+  projectGodRelationsForViewer,
   projectSectionsForViewer,
   realityViewer,
   realityViewerFromPersistence,
@@ -47,7 +48,10 @@ describe("reality projections", () => {
   };
 
   it("全知 creator 获得未揭示栏目、议程与幕后编年史，同时保留世界内可见标记", () => {
-    expect(projectSectionsForViewer([hiddenSection], "creator_omniscient")).toEqual([hiddenSection]);
+    expect(projectSectionsForViewer([hiddenSection], "creator_omniscient")).toEqual([{
+      ...hiddenSection,
+      worldVisible: false,
+    }]);
     expect(projectGodAgendaForViewer({ schemes: ["遮蔽星门"] }, false, "creator_omniscient"))
       .toEqual({ schemes: ["遮蔽星门"] });
     expect(projectChronicleForViewer(hiddenChronicle, "creator_omniscient")).toEqual({
@@ -61,9 +65,22 @@ describe("reality projections", () => {
       expect(projectSectionsForViewer([hiddenSection], viewer)).toEqual([{
         ...hiddenSection,
         content: null,
+        worldVisible: false,
       }]);
       expect(projectGodAgendaForViewer({ schemes: ["遮蔽星门"] }, false, viewer)).toBeNull();
       expect(projectChronicleForViewer(hiddenChronicle, viewer)).toBeNull();
     }
   });
+  it("神际关系仅向全知 creator 完整公开，limited creator 默认完全隐藏", () => {
+    const relations = {
+      "god-moon": { label: "enemy", note: "暗中争夺月轮" },
+      player: { label: "neutral" },
+    };
+    expect(projectGodRelationsForViewer(relations, "creator_omniscient")).toEqual(relations);
+    expect(projectGodRelationsForViewer(relations, "creator_limited")).toEqual({});
+    expect(projectGodRelationsForViewer(relations, "pantheon_player")).toEqual({
+      player: { label: "neutral" },
+    });
+  });
+
 });

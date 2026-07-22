@@ -11,6 +11,7 @@ import {
   isOmniscientViewer,
   observerStateFromPersistence,
   projectGodAgendaForViewer,
+  projectGodRelationsForViewer,
   projectSectionsForViewer,
   realityViewer,
 } from "@/lib/reality/visibility";
@@ -144,10 +145,11 @@ export async function GET(
       persona: g.persona,
       voice: g.voice,
       faithScope: g.faithScope,
-      relations: g.relations,
+      relations: projectGodRelationsForViewer(g.relations, viewer),
       // 议程卡默认隐藏（迷雾的一部分）；玩家主动翻开后才下发
       agenda: projectGodAgendaForViewer(g.agenda, g.agendaRevealed, viewer),
       agendaRevealed: g.agendaRevealed,
+      agendaWorldVisible: g.agendaRevealed,
       abilities: isOmniscientViewer(viewer)
         ? projectAbilitiesForOmniscient(g.abilities.map(normalizePersistedAbility))
         : g.isPlayer

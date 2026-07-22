@@ -112,6 +112,12 @@ export type RumoredAbilityProjection = Pick<
 /** The only forms that may be returned to a player: full known data or a limited rumor. */
 export type AbilityProjection = KnownAbilityProjection | RumoredAbilityProjection;
 
+
+export type OmniscientAbilityProjection = AbilityInput & {
+  /** Whether world-internal observers receive the same mechanics. */
+  worldVisible: boolean;
+};
+
 /** A partial update must carry the record id and optimistic-lock version. */
 export type AbilityChangeInput = Pick<AbilityInput, "id" | "version"> &
   Partial<Omit<AbilityInput, "id" | "version">>;

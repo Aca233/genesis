@@ -42,4 +42,15 @@ describe("Creator starmap relations", () => {
     }]);
     expect(godRelationsForDetail(moon, [sun, moon], null)).toEqual([]);
   });
+  it("非对称关系按有向边分别绘制，不因无向去重丢失一侧", () => {
+    const hostileMoon = god({
+      id: "god-moon",
+      name: "月神",
+      relations: { "god-sun": { label: "enemy", note: "拒绝日轮" } },
+    });
+    const html = renderToStaticMarkup(<StarmapPanel gods={[sun, hostileMoon]} theme={null} />);
+    expect(html).toContain('data-relation-source="god-sun" data-relation-target="god-moon"');
+    expect(html).toContain('data-relation-source="god-moon" data-relation-target="god-sun"');
+  });
+
 });
