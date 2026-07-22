@@ -8,9 +8,17 @@ import {
 } from "@/lib/abilities/types";
 import { resolveEffectiveAbilities } from "@/lib/abilities/resolver";
 import {
+  projectAbilitiesForOmniscient,
   projectAbilitiesForPlayer,
   projectAbilityForPlayer,
 } from "@/lib/abilities/visibility";
+import { WorldModeSchema } from "@/lib/world-mode";
+import {
+  isOmniscientViewer,
+  projectChronicleForViewer,
+  projectSectionsForViewer,
+  realityViewerFromPersistence,
+} from "@/lib/reality/visibility";
 
 /**
  * GET   /api/codex/[id] —— 实体详情（sections + 专属编年史）
@@ -31,6 +39,8 @@ type AbilityWithEvents = PersistedAbilityRecord & {
     id?: string;
     abilityId?: string;
     type: string;
+    before?: unknown;
+    after?: unknown;
     evidence?: string;
     scale?: string;
     createdAt: unknown;
@@ -62,6 +72,12 @@ function projectVisibleAbilityEvents(abilities: readonly AbilityWithEvents[]) {
   });
 }
 
+function projectOmniscientAbilityEvents(abilities: readonly AbilityWithEvents[]) {
+  return abilities.flatMap((ability) =>
+    (ability.events ?? []).map((event) => ({ ...event, abilityId: ability.id })),
+  );
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -85,15 +101,27 @@ export async function GET(
           faction: { select: { id: true, name: true, summary: true } },
         },
       },
+      timeline: {
+        select: {
+          observerState: true,
+          world: { select: { mode: true } },
+        },
+      },
     },
   });
   if (!entity) return NextResponse.json({ error: "不存在" }, { status: 404 });
+
+  const viewer = realityViewerFromPersistence(
+    WorldModeSchema.parse(entity.timeline.world.mode),
+    entity.timeline.observerState,
+  );
+  const omniscient = isOmniscientViewer(viewer);
 
   // 专属编年史：涉及该实体且已揭示
   const chronicle = await prisma.chronicleEntry.findMany({
     where: {
       timelineId: entity.timelineId,
-      revealed: true,
+      ...(omniscient ? {} : { revealed: true }),
       entityIds: { has: entity.id },
     },
     orderBy: [{ chapterIndex: "asc" }, { createdAt: "asc" }],
@@ -102,11 +130,13 @@ export async function GET(
       chapterIndex: true,
       yearLabel: true,
       text: true,
+      revealed: true,
       revealedAtChapter: true,
     },
   });
 
-  const { abilities, race, memberships, ...entityFields } = entity;
+  const { abilities, race, memberships, timeline: _timeline, ...entityFields } = entity;
+  void _timeline;
   const ownAbilities = abilities.map(normalizeAbilityWithoutEvents);
   const effectiveCharacterAbilities = entity.type === "character"
     ? resolveEffectiveAbilities({
@@ -127,12 +157,21 @@ export async function GET(
   return NextResponse.json({
     entity: {
       ...entityFields,
-      abilities: projectAbilitiesForPlayer(characterAbilities),
-      abilityEvents: projectVisibleAbilityEvents(
-        entity.type === "character"
-          ? [...abilities, ...inheritedRaceAbilities]
-          : abilities,
-      ),
+      sections: projectSectionsForViewer(entity.sections, viewer),
+      abilities: omniscient
+        ? projectAbilitiesForOmniscient(characterAbilities)
+        : projectAbilitiesForPlayer(characterAbilities),
+      abilityEvents: omniscient
+        ? projectOmniscientAbilityEvents(
+          entity.type === "character"
+            ? [...abilities, ...inheritedRaceAbilities]
+            : abilities,
+        )
+        : projectVisibleAbilityEvents(
+          entity.type === "character"
+            ? [...abilities, ...inheritedRaceAbilities]
+            : abilities,
+        ),
       ...(entity.type === "character"
         ? {
           race: race === null ? null : { id: race.id, name: race.name, summary: race.summary },
@@ -140,7 +179,10 @@ export async function GET(
         }
         : {}),
     },
-    chronicle,
+    chronicle: chronicle.flatMap((entry) => {
+      const projection = projectChronicleForViewer(entry, viewer);
+      return projection === null ? [] : [projection];
+    }),
   });
 }
 

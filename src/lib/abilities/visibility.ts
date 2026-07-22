@@ -36,6 +36,13 @@ export function projectAbilitiesForOwner(
   return abilities.map(toKnownProjection);
 }
 
+/** Full mechanics for a creator observing outside the world's fog of war. */
+export function projectAbilitiesForOmniscient(
+  abilities: readonly AbilityInput[],
+): KnownAbilityProjection[] {
+  return abilities.map(toKnownProjection);
+}
+
 /** Projects a collection without exposing hidden abilities to a player. */
 export function projectAbilitiesForPlayer(
   abilities: readonly AbilityInput[],

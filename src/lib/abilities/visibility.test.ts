@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
+  projectAbilitiesForOmniscient,
   projectAbilitiesForOwner,
   projectAbilitiesForPlayer,
   projectAbilityForPlayer,
@@ -93,5 +94,19 @@ describe("projectAbilitiesForOwner", () => {
     expect(projection).toEqual({ ...hidden, visibility: "known" });
     expect(projection.visibility).toBe("known");
     expect(projection.effect).toBe(hidden.effect);
+  });
+});
+
+describe("projectAbilitiesForOmniscient", () => {
+  it("将隐藏能力作为完整 known DTO 提供给全知观察者", () => {
+    const hidden = {
+      ...ability,
+      visibility: "hidden" as const,
+      rumorText: "世间只流传过残缺传闻",
+    };
+
+    expect(projectAbilitiesForOmniscient([hidden])).toEqual([
+      { ...hidden, visibility: "known" },
+    ]);
   });
 });

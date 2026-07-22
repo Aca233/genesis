@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { GodRow, ThemeCard } from "./types";
+import type { GodRelation, GodRow, ThemeCard } from "./types";
 import { rankName, relationName, relationTone } from "./lexicon";
 
 /**
@@ -28,6 +28,50 @@ function hashOf(s: string): number {
 }
 
 type Star = { god: GodRow; x: number; y: number; r: number };
+type StarRelation = { source: Star; target: Star; relation: GodRelation };
+type GodRelationDetail = {
+  targetId: string;
+  targetName: string;
+  label: string;
+  note?: string;
+};
+
+function relationEntries(god: GodRow): Array<[string, GodRelation]> {
+  return Object.entries(god.relations ?? {}).flatMap(([targetId, relation]) =>
+    targetId === "player" || !relation ? [] : [[targetId, relation]],
+  );
+}
+
+export function godRelationsForDetail(
+  god: GodRow,
+  gods: readonly GodRow[],
+  player: GodRow | null,
+): GodRelationDetail[] {
+  if (player && god.id !== player.id) {
+    const relation = god.relations?.player;
+    return relation
+      ? [{
+        targetId: player.id,
+        targetName: player.name,
+        label: relation.label,
+        note: relation.note,
+      }]
+      : [];
+  }
+
+  const byId = new Map(gods.map((item) => [item.id, item]));
+  return relationEntries(god).flatMap(([targetId, relation]) => {
+    const target = byId.get(targetId);
+    return target
+      ? [{
+        targetId,
+        targetName: target.name,
+        label: relation.label,
+        note: relation.note,
+      }]
+      : [];
+  });
+}
 
 function relationStroke(label: string | undefined): {
   stroke: string;
@@ -59,7 +103,7 @@ export function StarmapPanel({
 }) {
   const [focusId, setFocusId] = useState<string | null>(null);
 
-  const { player, stars } = useMemo(() => {
+  const { player, stars, relations } = useMemo(() => {
     const player = gods.find((g) => g.isPlayer) ?? null;
     const majors = gods.filter((g) => g.tier === "major");
     const minors = gods.filter((g) => g.tier === "minor");
@@ -95,10 +139,26 @@ export function StarmapPanel({
         r: 2.5,
       });
     });
-    return { player, stars };
+    const starById = new Map(stars.map((star) => [star.god.id, star]));
+    const seen = new Set<string>();
+    const relations: StarRelation[] = [];
+    for (const source of stars) {
+      for (const [targetId, relation] of relationEntries(source.god)) {
+        const target = starById.get(targetId);
+        if (!target) continue;
+        const key = [source.god.id, targetId].sort().join(":");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        relations.push({ source, target, relation });
+      }
+    }
+    return { player, stars, relations };
   }, [gods]);
 
   const focused = focusId ? gods.find((g) => g.id === focusId) : null;
+  const focusedRelations = focused
+    ? godRelationsForDetail(focused, gods, player)
+    : [];
   const CX = 210;
   const CY = 210;
 
@@ -153,6 +213,27 @@ export function StarmapPanel({
                 />
               );
             })}
+
+        {/* Creator 世界没有玩家神，按真实 God ID 绘制诸神之间的关系。 */}
+        {!player && relations.map(({ source, target, relation }) => {
+          const st = relationStroke(relation.label);
+          const dim = focusId && focusId !== source.god.id && focusId !== target.god.id;
+          return (
+            <line
+              key={`rel-${source.god.id}-${target.god.id}`}
+              data-relation-source={source.god.id}
+              data-relation-target={target.god.id}
+              x1={source.x}
+              y1={source.y}
+              x2={target.x}
+              y2={target.y}
+              stroke={st.stroke}
+              strokeWidth="1.2"
+              strokeDasharray={st.dash}
+              opacity={dim ? st.opacity * 0.25 : st.opacity}
+            />
+          );
+        })}
 
         {/* 玩家神：北极星（金芒十字） */}
         {player && (
@@ -240,7 +321,7 @@ export function StarmapPanel({
               <span className="rounded border border-line px-1.5 py-0.5 text-ink-faint">
                 {rankName(theme, focused.rank)}
               </span>
-              {!focused.isPlayer && (
+              {!focused.isPlayer && player && (
                 <span
                   className={`rounded border px-1.5 py-0.5 ${relationTone(focused.relations?.player?.label)}`}
                 >
@@ -252,8 +333,20 @@ export function StarmapPanel({
           {focused.domains.length > 0 && (
             <p className="mt-1 text-xs text-ink-faint">{focused.domains.join(" · ")}</p>
           )}
-          {focused.relations?.player?.note && (
+          {player && focused.relations?.player?.note && (
             <p className="mt-2 text-ink-soft">{focused.relations.player.note}</p>
+          )}
+          {!player && focusedRelations.length > 0 && (
+            <ul className="mt-2 grid gap-1 text-xs text-ink-soft">
+              {focusedRelations.map((relation) => (
+                <li key={relation.targetId}>
+                  <span className={relationTone(relation.label)}>
+                    {relationName(relation.label)} · {relation.targetName}
+                  </span>
+                  {relation.note && <span>：{relation.note}</span>}
+                </li>
+              ))}
+            </ul>
           )}
           {!focused.isPlayer && !focused.agendaRevealed && (
             <p className="fog-text mt-2 text-xs">其意难测——天机未泄。</p>

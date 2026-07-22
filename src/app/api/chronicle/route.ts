@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { WorldModeSchema } from "@/lib/world-mode";
+import {
+  isOmniscientViewer,
+  projectChronicleForViewer,
+  realityViewerFromPersistence,
+} from "@/lib/reality/visibility";
 
 /**
  * GET /api/chronicle?timelineId=xxx&entityId=&godId= —— 年表（已揭示条目）
@@ -15,11 +21,27 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "缺少 timelineId" }, { status: 400 });
   }
 
+  const timeline = await prisma.timeline.findUnique({
+    where: { id: timelineId },
+    select: {
+      observerState: true,
+      world: { select: { mode: true } },
+    },
+  });
+  if (!timeline) {
+    return NextResponse.json({ error: "时间线不存在" }, { status: 404 });
+  }
+  const viewer = realityViewerFromPersistence(
+    WorldModeSchema.parse(timeline.world.mode),
+    timeline.observerState,
+  );
+  const omniscient = isOmniscientViewer(viewer);
+
   const [entries, gods, entities] = await Promise.all([
     prisma.chronicleEntry.findMany({
       where: {
         timelineId,
-        revealed: true,
+        ...(omniscient ? {} : { revealed: true }),
         ...(entityId ? { entityIds: { has: entityId } } : {}),
         ...(godId ? { godIds: { has: godId } } : {}),
       },
@@ -31,6 +53,7 @@ export async function GET(request: Request) {
         text: true,
         entityIds: true,
         godIds: true,
+        revealed: true,
         revealedAtChapter: true,
         source: true,
       },
@@ -47,5 +70,12 @@ export async function GET(request: Request) {
     }),
   ]);
 
-  return NextResponse.json({ entries, gods, entities });
+  return NextResponse.json({
+    entries: entries.flatMap((entry) => {
+      const projection = projectChronicleForViewer(entry, viewer);
+      return projection === null ? [] : [projection];
+    }),
+    gods,
+    entities,
+  });
 }

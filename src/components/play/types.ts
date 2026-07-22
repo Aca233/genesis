@@ -73,6 +73,8 @@ export type AbilityEventView = {
   abilityId: string;
   id?: string;
   type?: string;
+  before?: unknown;
+  after?: unknown;
   evidence?: string;
   scale?: string;
   createdAt?: string;
@@ -87,8 +89,12 @@ export type CharacterMembershipView = {
   faction: { id: string; name: string; summary: string };
 };
 
-/** 神明关系（对玩家） */
+/** 神明关系：Pantheon 的 player 键或 Creator 的真实目标 God ID。 */
 export type GodRelation = { label: string; note?: string };
+export type GodRelations = {
+  [targetGodId: string]: GodRelation | undefined;
+  player?: GodRelation;
+};
 
 /** 议程卡（仅揭示后下发） */
 export type GodAgenda = {
@@ -110,7 +116,8 @@ export type GodRow = {
   persona: { text?: string; origin?: string; situation?: string } | null;
   voice: unknown;
   faithScope: string | null;
-  relations: { player?: GodRelation } | null;
+  /** Pantheon uses `player`; creator worlds use persisted target God IDs. */
+  relations: GodRelations | null;
   agenda: GodAgenda | null;
   agendaRevealed: boolean;
   abilities: AbilityView[];
@@ -152,6 +159,7 @@ export type EpochConflict = {
 export type WorldInfo = {
   id: string;
   name: string;
+  mode: "pantheon" | "creator";
   status: string; // draft | playing | concluded
   genesisInput: string;
   themeCard: ThemeCard | null;
@@ -165,11 +173,32 @@ export type WorldInfo = {
 /** GET /api/worlds/[id]/state 全量 */
 export type PlayState = {
   world: WorldInfo;
-  timeline: { id: string };
+  timeline: {
+    id: string;
+    branchName: string;
+    branchSummary: string | null;
+    observerState: {
+      focusType: "world" | "place" | "entity" | "god" | "avatar";
+      focusId: string | null;
+      timeLabel: string;
+      viewpoint: "omniscient" | "limited";
+      activeAvatarId: string | null;
+    };
+  };
   gods: GodRow[];
   currentChapter: { id: string; index: number; title: string | null };
   messages: MessageRow[];
   prevChapterTail: MessageRow[];
+  recentRewrite: {
+    id: string;
+    decree: string;
+    scope: string;
+    status: string;
+    summary: string | null;
+    sourceTimelineId: string;
+    resultTimelineId: string | null;
+    createdAt: string;
+  } | null;
 };
 
 /** 右缘符文抽屉页签（香炉为独立 Link，不在此列） */
