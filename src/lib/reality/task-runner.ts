@@ -266,22 +266,31 @@ export async function retryRealityRewrite(
   if (task.status === "completed") return task;
 
   const hasLiveLease = task.leaseExpiresAt !== null && task.leaseExpiresAt > new Date();
-  if (task.status === "failed") {
-    const status = task.resultTimelineId !== null
-      ? "narrating"
-      : task.plan !== null ? "applying" : "planning";
-    return db.realityRewrite.update({
-      where: { id: task.id },
-      data: { status, error: null, leaseToken: null, leaseExpiresAt: null },
-    });
-  }
-  if (!hasLiveLease) {
-    return db.realityRewrite.update({
-      where: { id: task.id },
-      data: { leaseToken: null, leaseExpiresAt: null, error: null },
-    });
-  }
-  return task;
+  if (hasLiveLease) return task;
+
+  const data = task.status === "failed"
+    ? {
+        status: task.resultTimelineId !== null
+          ? "narrating" as const
+          : task.plan !== null ? "applying" as const : "planning" as const,
+        error: null,
+        leaseToken: null,
+        leaseExpiresAt: null,
+      }
+    : { error: null, leaseToken: null, leaseExpiresAt: null };
+  await db.realityRewrite.updateMany({
+    where: {
+      id: task.id,
+      status: task.status,
+      leaseToken: task.leaseToken,
+      leaseExpiresAt: task.leaseExpiresAt,
+    },
+    data,
+  });
+
+  const current = await db.realityRewrite.findUnique({ where: { id: task.id } });
+  if (current === null) throw new RealityRewriteNotFoundError();
+  return current;
 }
 
 type PlannerContext = {

@@ -142,16 +142,69 @@ describe("reality rewrite creation and leases", () => {
     expect(claimed?.leaseExpiresAt).toEqual(new Date(now.getTime() + REWRITE_LEASE_MS));
   });
 
-  it("re-arms failed narration without discarding its existing result branch", async () => {
-    const failed = task({ status: "failed", resultTimelineId: "child", plan: plan() as unknown as Prisma.JsonValue });
-    const update = vi.fn(async ({ data }: { data: Partial<RealityRewrite> }) => ({ ...failed, ...data }));
-    const db = { realityRewrite: { findFirst: vi.fn().mockResolvedValue(failed), update } };
+  it("does not steal a live lease from a failed runner", async () => {
+    const failed = task({
+      status: "failed",
+      leaseToken: "runner-a",
+      leaseExpiresAt: new Date("2999-07-22T00:00:00Z"),
+      error: "runner a is still cleaning up",
+    });
+    const updateMany = vi.fn();
+    const db = { realityRewrite: { findFirst: vi.fn().mockResolvedValue(failed), updateMany } };
+
+    await expect(retryRealityRewrite(db as never, failed.id)).resolves.toBe(failed);
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["without a lease", null, null],
+    ["with an expired lease", "runner-a", new Date("2000-07-22T00:00:00Z")],
+  ])("re-arms failed narration %s without discarding its existing result branch", async (_label, leaseToken, leaseExpiresAt) => {
+    const failed = task({
+      status: "failed",
+      resultTimelineId: "child",
+      plan: plan() as unknown as Prisma.JsonValue,
+      leaseToken,
+      leaseExpiresAt,
+      error: "provider failed",
+    });
+    const rearmed = task({ ...failed, status: "narrating", leaseToken: null, leaseExpiresAt: null, error: null });
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const findUnique = vi.fn().mockResolvedValue(rearmed);
+    const db = { realityRewrite: { findFirst: vi.fn().mockResolvedValue(failed), updateMany, findUnique } };
 
     const retried = await retryRealityRewrite(db as never, failed.id);
     expect(retried).toMatchObject({ status: "narrating", resultTimelineId: "child", error: null });
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+    expect(updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: failed.id,
+        status: "failed",
+        leaseToken,
+        leaseExpiresAt,
+      }),
       data: expect.objectContaining({ status: "narrating", leaseToken: null, leaseExpiresAt: null }),
-    }));
+    });
+  });
+
+  it("returns the new owner after losing the retry CAS without overwriting it", async () => {
+    const failed = task({
+      status: "failed",
+      leaseToken: "runner-a",
+      leaseExpiresAt: new Date("2000-07-22T00:00:00Z"),
+    });
+    const newOwner = task({
+      status: "narrating",
+      resultTimelineId: "child",
+      leaseToken: "runner-b",
+      leaseExpiresAt: new Date("2999-07-22T00:00:00Z"),
+    });
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const findUnique = vi.fn().mockResolvedValue(newOwner);
+    const db = { realityRewrite: { findFirst: vi.fn().mockResolvedValue(failed), updateMany, findUnique } };
+
+    await expect(retryRealityRewrite(db as never, failed.id)).resolves.toBe(newOwner);
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    expect(findUnique).toHaveBeenCalledWith({ where: { id: failed.id } });
   });
 });
 
