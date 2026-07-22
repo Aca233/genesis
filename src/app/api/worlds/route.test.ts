@@ -5,6 +5,7 @@ import { CreatorWorldDeckSchema, PantheonWorldDeckSchema } from "@/lib/cards/sch
 const mocks = vi.hoisted(() => ({
   completeStructured: vi.fn(),
   create: vi.fn(),
+  findMany: vi.fn(),
 }));
 
 vi.mock("@/lib/llm/structured", () => ({
@@ -14,12 +15,12 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     world: {
       create: mocks.create,
-      findMany: vi.fn(),
+      findMany: mocks.findMany,
     },
   },
 }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 function creatorDeck() {
   const { playerGod: _playerGod, ...shared } = completeDeck();
@@ -51,34 +52,66 @@ function creatorDeck() {
   });
 }
 
-function request() {
+function request(mode?: "pantheon" | "creator") {
   return new Request("http://localhost/api/worlds", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ decree: "创造星海神域" }),
+    body: JSON.stringify({ decree: "创造星海神域", ...(mode ? { mode } : {}) }),
   });
 }
 
-describe("POST /api/worlds legacy pantheon entry", () => {
+describe("/api/worlds", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.create.mockResolvedValue({ id: "world-1" });
   });
 
-  it("拒绝 creator 模型输出且绝不持久化", async () => {
+  it("creator 请求使用精确 schema、prompt 并持久化相同模式", async () => {
+    const creator = creatorDeck();
+    mocks.completeStructured.mockResolvedValue(creator);
+
+    const response = await POST(request("creator"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.completeStructured).toHaveBeenCalledWith(
+      "narrative",
+      expect.objectContaining({
+        schema: CreatorWorldDeckSchema,
+        system: expect.stringContaining('mode="creator"'),
+        user: expect.stringContaining('mode="creator"'),
+      }),
+    );
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ mode: "creator" }),
+    }));
+  });
+
+  it("拒绝生成结果与请求模式不一致且绝不持久化", async () => {
     const creator = creatorDeck();
     mocks.completeStructured.mockImplementation(async (
       _slot: unknown,
       options: { schema: { parse(value: unknown): unknown } },
     ) => options.schema.parse(creator));
 
-    const response = await POST(request());
+    const response = await POST(request("pantheon"));
 
     expect(response.status).toBe(502);
     expect(mocks.completeStructured).toHaveBeenCalledWith(
       "narrative",
       expect.objectContaining({ schema: PantheonWorldDeckSchema }),
     );
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("拒绝未知世界模式", async () => {
+    const response = await POST(new Request("http://localhost/api/worlds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decree: "创造星海神域", mode: "absolute" }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.completeStructured).not.toHaveBeenCalled();
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
@@ -90,6 +123,15 @@ describe("POST /api/worlds legacy pantheon entry", () => {
     expect(response.status).toBe(200);
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ mode: "pantheon" }),
+    }));
+  });
+
+  it("GET 存档列表显式查询 mode", async () => {
+    mocks.findMany.mockResolvedValue([]);
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({ mode: true }),
     }));
   });
 });

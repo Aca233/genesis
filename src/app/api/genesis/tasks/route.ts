@@ -5,8 +5,10 @@ import { prisma } from "@/lib/db";
 import { parseStWorldbook } from "@/lib/lorebook/st-import";
 import { MaterialSelectionItemSchema } from "@/lib/materials/types";
 import { buildGenesisMaterialSnapshot, snapshotJson } from "@/lib/materials/task-snapshot";
+import { WorldModeSchema } from "@/lib/world-mode";
 
 const CreateGenesisTaskSchema = z.object({
+  mode: WorldModeSchema.default("pantheon"),
   decree: z.string().trim().min(2, "神谕太短").max(2000, "神谕过长"),
   lorebook: z.unknown().optional(),
   lorebookName: z.string().max(255).optional(),
@@ -39,6 +41,7 @@ export async function POST(request: Request) {
 
   const task = await prisma.genesisTask.create({
     data: {
+      mode: parsed.data.mode,
       decree: parsed.data.decree,
       lorebook: parsed.data.lorebook as Prisma.InputJsonValue | undefined,
       lorebookName: parsed.data.lorebookName,

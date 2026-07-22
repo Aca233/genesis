@@ -10,9 +10,11 @@ import {
   type GenesisTaskStatus,
 } from "@/lib/genesis/stages";
 import { acceptTaskSnapshot } from "@/lib/genesis/client-state";
+import type { WorldMode } from "@/lib/world-mode";
 
 type Task = {
   id: string;
+  mode: WorldMode;
   status: GenesisTaskStatus;
   stage: GenesisStageId;
   completedKeys: string[];

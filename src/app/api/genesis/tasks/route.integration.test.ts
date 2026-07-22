@@ -28,12 +28,14 @@ describe("GenesisTask PostgreSQL lifecycle", () => {
     const response = await POST(request({
       decree: "[integration] 创造可恢复世界",
       lorebookName: "典籍.json",
+      mode: "creator",
       lorebook: { entries: [{ key: ["星海"], content: "星海是权威设定" }] },
     }));
     const { taskId } = await response.json() as { taskId: string };
 
     const stored = await prisma.genesisTask.findUniqueOrThrow({ where: { id: taskId } });
     expect(stored).toMatchObject({
+      mode: "creator",
       status: "queued",
       stage: "oracle",
       completedKeys: [],
@@ -41,5 +43,14 @@ describe("GenesisTask PostgreSQL lifecycle", () => {
       worldId: null,
     });
     expect(stored.lorebook).toEqual({ entries: [{ key: ["星海"], content: "星海是权威设定" }] });
+  });
+
+  it("缺省模式真实落库为 pantheon", async () => {
+    const response = await POST(request({ decree: "[integration] 创建默认诸神世界" }));
+    expect(response.status).toBe(202);
+    const { taskId } = await response.json() as { taskId: string };
+
+    const stored = await prisma.genesisTask.findUniqueOrThrow({ where: { id: taskId } });
+    expect(stored.mode).toBe("pantheon");
   });
 });

@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { claimGenesisTask, renewGenesisLease, toGenesisTaskDto } from "./task-runner";
+import {
+  buildGenesisRequest,
+  claimGenesisTask,
+  persistWorld,
+  renewGenesisLease,
+  toGenesisTaskDto,
+} from "./task-runner";
+import { CreatorWorldDeckSchema, PantheonWorldDeckSchema } from "@/lib/cards/schemas";
+import { completeDeck } from "@/lib/abilities/embark.test-fixtures";
 
 function task(overrides: Record<string, unknown> = {}) {
   return {
@@ -83,5 +91,86 @@ describe("genesis task runner", () => {
       }),
       data: expect.objectContaining({ status: "running" }),
     }));
+  });
+
+  it("按冻结模式构造生成 system、user 与精确 schema", () => {
+    const creator = buildGenesisRequest({
+      mode: "creator",
+      decree: "创造自行运转的星海",
+      lorebookExcerpts: "星海法则",
+      materialConstraints: "锁定素材",
+    });
+    expect(creator.mode).toBe("creator");
+    expect(creator.system).toContain('mode="creator"');
+    expect(creator.user).toContain('mode="creator"');
+    expect(creator.schema).toBe(CreatorWorldDeckSchema);
+
+    const pantheon = buildGenesisRequest({ mode: "pantheon", decree: "我是群星之神" });
+    expect(pantheon.system).toContain('mode="pantheon"');
+    expect(pantheon.user).toContain('mode="pantheon"');
+    expect(pantheon.schema).toBe(PantheonWorldDeckSchema);
+  });
+
+  it("持久化世界复制任务模式并从实际 creator 卡组导出完成键", async () => {
+    const pantheon = completeDeck();
+    const { playerGod: _playerGod, ...shared } = pantheon;
+    void _playerGod;
+    const creator = CreatorWorldDeckSchema.parse({
+      ...shared,
+      mode: "creator",
+      majorGods: shared.majorGods.map((majorGod, index, gods) => {
+        const { agenda, initialRelationToPlayer, ...god } = majorGod;
+        void initialRelationToPlayer;
+        return {
+          ...god,
+          agenda: {
+            longTermGoal: agenda.longTermGoal,
+            shortTermGoals: agenda.shortTermGoals,
+            methods: agenda.methods,
+            schemes: agenda.schemes,
+          },
+          relations: [{
+            targetGodRef: gods[(index + 1) % gods.length]!.ref,
+            label: "rival",
+            note: "世界内关系",
+          }],
+        };
+      }),
+    });
+    const create = vi.fn().mockResolvedValue({ id: "world-creator" });
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      genesisTask: {
+        findFirst: vi.fn().mockResolvedValue({ id: "task-1" }),
+        updateMany,
+      },
+      world: { create },
+    };
+    const db = { $transaction: vi.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)) };
+
+    await persistWorld(db, task({
+      mode: "creator",
+      decree: "创造星海",
+      leaseToken: "lease-1",
+    }) as never, "lease-1", creator, []);
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ mode: "creator" }),
+    }));
+    const completedKeys = updateMany.mock.calls[0]![0].data.completedKeys as string[];
+    expect(completedKeys).toEqual(Object.keys(creator));
+    expect(completedKeys).not.toContain("playerGod");
+  });
+
+  it("持久化前拒绝任务模式与卡组模式不一致", async () => {
+    const db = { $transaction: vi.fn() };
+    await expect(persistWorld(
+      db,
+      task({ mode: "creator", decree: "创造星海" }) as never,
+      "lease-1",
+      completeDeck(),
+      [],
+    )).rejects.toThrow("创世卡组模式不匹配");
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 });

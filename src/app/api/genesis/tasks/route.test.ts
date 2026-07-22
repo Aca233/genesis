@@ -24,8 +24,33 @@ describe("POST /api/genesis/tasks", () => {
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({ taskId: "task-1" });
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ decree: "创造星海", completedKeys: [] }),
+      data: expect.objectContaining({ decree: "创造星海", mode: "pantheon", completedKeys: [] }),
     }));
+  });
+
+  it("接受并持久化 creator 模式", async () => {
+    mocks.create.mockResolvedValue({ id: "task-creator" });
+    const response = await POST(new Request("http://localhost/api/genesis/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decree: "创造自行运转的星海", mode: "creator" }),
+    }));
+
+    expect(response.status).toBe(202);
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ mode: "creator" }),
+    }));
+  });
+
+  it("拒绝未知世界模式", async () => {
+    const response = await POST(new Request("http://localhost/api/genesis/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decree: "创造星海", mode: "absolute" }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("拒绝过短神谕", async () => {

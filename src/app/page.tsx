@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "@/components/theme/useTheme";
 import { MaterialPicker } from "@/components/materials/MaterialPicker";
 import type { MaterialSelectionItem } from "@/lib/materials/types";
+import { WORLD_MODES, WORLD_MODE_PRESENTATION, type WorldMode } from "@/lib/world-mode";
 
 /** 首屏：输入神谕 → 创世 → 跳转卡片编辑器（/genesis/[id]） */
 export default function Home() {
@@ -13,6 +14,7 @@ export default function Home() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [worldMode, setWorldMode] = useState<WorldMode>("pantheon");
   const [decree, setDecree] = useState("");
   const [lorebook, setLorebook] = useState<{ name: string; data: unknown } | null>(null);
   const [creating, setCreating] = useState(false);
@@ -40,7 +42,7 @@ export default function Home() {
     if (creating) return;
     const text = decree.trim();
     if (text.length < 2) {
-      setError("神谕太短——至少说出两个字。");
+      setError(`${WORLD_MODE_PRESENTATION[worldMode].validationNoun}太短——至少说出两个字。`);
       return;
     }
     setCreating(true);
@@ -50,6 +52,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          mode: worldMode,
           decree: text,
           ...(lorebook ? { lorebook: lorebook.data, lorebookName: lorebook.name } : {}),
           materialSelections,
@@ -79,17 +82,53 @@ export default function Home() {
           创世
         </h1>
         <p className="mt-4 text-ink-soft">
-          说出你的第一句神谕——你是谁，这是怎样的世界。
+          {WORLD_MODE_PRESENTATION[worldMode].subtitle}
         </p>
       </header>
 
       <section className="w-full max-w-xl">
+        <fieldset className="mb-4" disabled={creating}>
+          <legend className="mb-2 text-sm text-ink-faint">选择世界模式（创建后不可更改）</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {WORLD_MODES.map((mode) => {
+              const copy = WORLD_MODE_PRESENTATION[mode];
+              const selected = worldMode === mode;
+              return (
+                <label
+                  key={mode}
+                  className={`cursor-pointer rounded-lg border p-4 transition ${
+                    selected
+                      ? "border-gilt bg-gilt/10 shadow-[0_0_14px_var(--gilt-glow)]"
+                      : "border-line bg-paper-raised hover:border-gilt/40"
+                  } ${creating ? "cursor-not-allowed opacity-60" : ""}`}
+                >
+                  <span className="flex items-center gap-2 font-bold text-ink">
+                    <input
+                      type="radio"
+                      name="world-mode"
+                      value={mode}
+                      checked={selected}
+                      onChange={() => setWorldMode(mode)}
+                      disabled={creating}
+                      className="accent-[var(--gilt)]"
+                    />
+                    {copy.label}
+                  </span>
+                  <span className="mt-2 block text-xs leading-5 text-ink-soft">
+                    {copy.description}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+
         <textarea
           rows={3}
           value={decree}
           onChange={(e) => setDecree(e.target.value)}
           disabled={creating}
-          placeholder="我是战锤40K与凡人修仙传融合世界中，飞升失败坠入亚空间的道尊……"
+          placeholder={WORLD_MODE_PRESENTATION[worldMode].placeholder}
           className="w-full resize-none rounded-lg border border-line bg-paper-sunken p-4 text-ink outline-none transition focus:border-gilt/60 focus:shadow-[0_0_16px_var(--gilt-glow)] disabled:opacity-60"
         />
 

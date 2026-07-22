@@ -3,8 +3,12 @@ import type { GenesisTask, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { stream } from "@/lib/llm/gateway";
 import { completeStructured } from "@/lib/llm/structured";
-import type { WorldDeck } from "@/lib/cards/schemas";
-import { GENESIS_SYSTEM, genesisRepairPrompt, genesisUserPrompt } from "@/lib/prompts/genesis";
+import {
+  CreatorWorldDeckSchema,
+  PantheonWorldDeckSchema,
+  type WorldDeck,
+} from "@/lib/cards/schemas";
+import { genesisRepairPrompt, genesisSystem, genesisUserPrompt } from "@/lib/prompts/genesis";
 import { lorebookExcerpts, parseStWorldbook } from "@/lib/lorebook/st-import";
 import { generateGenesisDeck } from "./generate";
 import { GenesisMaterialSnapshotSchema, type GenesisMaterialSnapshot } from "@/lib/materials/types";
@@ -47,6 +51,28 @@ export function toGenesisTaskDto(task: PublicTask): GenesisTaskDto {
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   };
+}
+
+type GenesisRequestInput = {
+  mode: WorldMode;
+  decree: string;
+  lorebookExcerpts?: string;
+  materialConstraints?: string;
+};
+
+export function buildGenesisRequest(input: GenesisRequestInput) {
+  const shared = {
+    system: genesisSystem(input.mode),
+    user: genesisUserPrompt({
+      mode: input.mode,
+      decree: input.decree,
+      lorebookExcerpts: input.lorebookExcerpts,
+      materialConstraints: input.materialConstraints,
+    }),
+  };
+  return input.mode === "pantheon"
+    ? { ...shared, mode: input.mode, schema: PantheonWorldDeckSchema }
+    : { ...shared, mode: input.mode, schema: CreatorWorldDeckSchema };
 }
 
 type ClaimDb = {
@@ -155,12 +181,19 @@ async function runGenesisTask(taskId: string): Promise<void> {
       ? null
       : GenesisMaterialSnapshotSchema.parse(task.materialSelection);
     const materialText = materialConstraintsPrompt(materialSnapshot);
+    const mode = WorldModeSchema.parse(task.mode);
+    const genesisRequest = buildGenesisRequest({
+      mode,
+      decree: task.decree,
+      lorebookExcerpts: excerpts,
+      materialConstraints: materialText,
+    });
     if (task.stage === "oracle") {
       await updateOwnedTask({ stage: "laws" });
     }
 
     const deck = await generateGenesisDeck({
-      mode: "pantheon",
+      mode,
       decree: task.decree,
       lorebookExcerpts: excerpts,
       materialSnapshot,
@@ -168,15 +201,10 @@ async function runGenesisTask(taskId: string): Promise<void> {
         for await (const chunk of stream("narrative", {
           task: "genesis",
           maxTokens: 16000,
-          cache: { namespace: "genesis:v1" },
+          cache: { namespace: `genesis:v1:${mode}` },
           messages: [
-            { role: "system", content: GENESIS_SYSTEM, cacheScope: "global" },
-            { role: "user", content: genesisUserPrompt({
-              mode: "pantheon",
-              decree: task.decree,
-              lorebookExcerpts: excerpts,
-              materialConstraints: materialText,
-            }), cacheScope: "dynamic" },
+            { role: "system", content: genesisRequest.system, cacheScope: "global" },
+            { role: "user", content: genesisRequest.user, cacheScope: "dynamic" },
           ],
         })) {
           if (chunk.type === "text") yield chunk.text;
@@ -191,24 +219,16 @@ async function runGenesisTask(taskId: string): Promise<void> {
           validationError: input.validationError,
           materialConstraints: materialText,
         });
-        if (input.mode === "creator") {
-          return completeStructured("narrative", {
-            task: "genesis",
-            system: GENESIS_SYSTEM,
-            user: repairPrompt,
-            schema: input.schema,
-            maxTokens: 16000,
-            cache: { namespace: "genesis:v1" },
-          });
-        }
-        return completeStructured("narrative", {
-          task: "genesis",
-          system: GENESIS_SYSTEM,
+        const request = {
+          task: "genesis" as const,
+          system: genesisSystem(input.mode),
           user: repairPrompt,
-          schema: input.schema,
           maxTokens: 16000,
-          cache: { namespace: "genesis:v1" },
-        });
+          cache: { namespace: `genesis:v1:${input.mode}` },
+        };
+        return input.mode === "pantheon"
+          ? completeStructured("narrative", { ...request, schema: input.schema })
+          : completeStructured("narrative", { ...request, schema: input.schema });
       },
       onChunk: async (rawOutput) => {
         latestRaw = rawOutput;
@@ -223,7 +243,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
       onProgress: async (completedKeys, rawOutput) => {
         latestRaw = rawOutput;
         persistedKeys = mergeCompletedKeys(persistedKeys, completedKeys);
-        persistedStage = furthestStage(persistedStage, deriveStreamingStage(persistedKeys));
+        persistedStage = furthestStage(persistedStage, deriveStreamingStage(persistedKeys, mode));
         await updateOwnedTask({
           completedKeys: persistedKeys,
           stage: persistedStage,
@@ -251,7 +271,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
       leaseExpiresAt: new Date(Date.now() + LEASE_MS),
     });
     clearInterval(leaseHeartbeat);
-    await persistWorld(task, leaseToken, deck, parsedEntries);
+    await persistWorld(prisma as unknown as PersistWorldDb, task, leaseToken, deck, parsedEntries);
   } catch (error) {
     await prisma.genesisTask.updateMany({
       where: { id: taskId, leaseToken, status: { in: ["running", "repairing"] } },
@@ -268,13 +288,36 @@ async function runGenesisTask(taskId: string): Promise<void> {
   }
 }
 
-async function persistWorld(
+type PersistWorldTx = {
+  genesisTask: {
+    findFirst(args: unknown): Promise<{ id: string } | null>;
+    updateMany(args: unknown): Promise<{ count: number }>;
+  };
+  world: {
+    create(args: unknown): Promise<{ id: string }>;
+  };
+};
+
+type PersistWorldDb = {
+  $transaction(
+    callback: (tx: PersistWorldTx) => Promise<void>,
+    options?: { isolationLevel?: "Serializable" },
+  ): Promise<unknown>;
+};
+
+export async function persistWorld(
+  db: PersistWorldDb,
   task: GenesisTask,
   leaseToken: string,
   deck: WorldDeck,
   parsedEntries: ReturnType<typeof parseStWorldbook>,
 ) {
-  await prisma.$transaction(async (tx) => {
+  const mode = WorldModeSchema.parse(task.mode);
+  if (deck.mode !== mode) {
+    throw new Error(`创世卡组模式不匹配：任务为 ${mode}，卡组为 ${deck.mode}`);
+  }
+
+  await db.$transaction(async (tx) => {
     const owned = await tx.genesisTask.findFirst({
       where: { id: task.id, leaseToken, status: { in: ["running", "repairing"] } },
       select: { id: true },
@@ -285,6 +328,7 @@ async function persistWorld(
       data: {
         name: deck.worldName,
         genesisInput: task.decree,
+        mode,
         status: "draft",
         draftDeck: deck as unknown as Prisma.InputJsonValue,
         themeCard: deck.theme as unknown as Prisma.InputJsonValue,
@@ -310,10 +354,7 @@ async function persistWorld(
       data: {
         status: "completed",
         stage: "completed",
-        completedKeys: [
-          "worldName", "cosmology", "fusionAxiom", "playerGod", "majorGods", "minorGods",
-          "factions", "races", "places", "majorCharacters", "epochConflict", "style", "theme",
-        ],
+        completedKeys: Object.keys(deck),
         rawOutput: "",
         error: null,
         worldId: world.id,
