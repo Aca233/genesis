@@ -10,6 +10,14 @@ export type MessageMeta = {
   suggestions?: string[];
   chapterBreakHint?: boolean;
   edited?: boolean;
+  kind?: "reality_rewrite_result" | string;
+  realityRewriteId?: string;
+  decree?: string;
+  scope?: "prospective" | "memory_only" | "retroactive" | string;
+  interpretation?: string | null;
+  branchName?: string | null;
+  summary?: string | null;
+  sourceTimelineId?: string;
 };
 
 /** 异文候选 */
@@ -177,35 +185,60 @@ export type WorldInfo = {
 };
 
 /** GET /api/worlds/[id]/state 全量 */
+export type CreatorAvatar = {
+  id: string;
+  name: string;
+  summary: string;
+  heat: string;
+  raceId: string | null;
+  scenePresence: boolean;
+  sections: Array<{ key: string; content: unknown; revealed: boolean; worldVisible?: boolean }>;
+  abilities: AbilityView[];
+};
+
+export type ObserverState = {
+  focusType: "world" | "place" | "entity" | "god" | "avatar";
+  focusId: string | null;
+  timeLabel: string;
+  viewpoint: "omniscient" | "limited";
+  activeAvatarId: string | null;
+};
+
+export type TimelineInfo = {
+  id: string;
+  branchName: string;
+  branchSummary: string | null;
+  observerState: ObserverState;
+};
+
+export type RecentRewrite = {
+  id: string;
+  decree: string;
+  scope: string;
+  status: string;
+  summary: string | null;
+  sourceTimelineId: string;
+  resultTimelineId: string | null;
+  createdAt: string;
+};
+
 export type PlayState = {
   world: WorldInfo;
-  timeline: {
-    id: string;
-    branchName: string;
-    branchSummary: string | null;
-    observerState: {
-      focusType: "world" | "place" | "entity" | "god" | "avatar";
-      focusId: string | null;
-      timeLabel: string;
-      viewpoint: "omniscient" | "limited";
-      activeAvatarId: string | null;
-    };
-  };
+  timeline: TimelineInfo;
   gods: GodRow[];
+  avatars: CreatorAvatar[];
   currentChapter: { id: string; index: number; title: string | null };
   messages: MessageRow[];
   prevChapterTail: MessageRow[];
-  recentRewrite: {
-    id: string;
-    decree: string;
-    scope: string;
-    status: string;
-    summary: string | null;
-    sourceTimelineId: string;
-    resultTimelineId: string | null;
-    createdAt: string;
-  } | null;
+  recentRewrite: RecentRewrite | null;
 };
 
 /** 右缘符文抽屉页签（香炉为独立 Link，不在此列） */
-export type DrawerTab = "starmap" | "chronicle" | "god" | "lore" | "codex";
+export type DrawerTab =
+  | "starmap"
+  | "chronicle"
+  | "god"
+  | "creator"
+  | "realities"
+  | "lore"
+  | "codex";

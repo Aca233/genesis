@@ -50,6 +50,10 @@ export function MessageBlock({
   const vIndex = chosenIndex(variants);
   const isStreaming = streamingOverride != null;
   const content = isStreaming ? streamingOverride : message.content;
+  const isRewriteResult = message.meta?.kind === "reality_rewrite_result";
+  const scopeLabel = message.meta?.scope === "retroactive"
+    ? "溯改既往"
+    : message.meta?.scope === "memory_only" ? "唯改记忆" : "自此而后";
   const canAct = !readonly && !busy && !editing && !isStreaming;
 
   // 编辑态 textarea 自适应高度
@@ -189,6 +193,22 @@ export function MessageBlock({
             </button>
           </div>
         </div>
+      ) : isRewriteResult ? (
+        <article className="my-6 rounded-lg border border-cinnabar/50 bg-cinnabar/5 p-5 shadow-sm" aria-label="天外敕令">
+          <div className="flex items-center justify-between gap-3 border-b border-cinnabar/20 pb-3">
+            <p className="text-sm tracking-[0.28em] text-cinnabar">天外敕令</p>
+            <span className="rounded-full border border-cinnabar/30 px-2 py-0.5 text-[11px] text-cinnabar/80">{scopeLabel}</span>
+          </div>
+          {message.meta?.decree && <blockquote className="decree my-4 whitespace-pre-wrap leading-loose text-gilt">{message.meta.decree}</blockquote>}
+          {message.meta?.interpretation && <p className="mb-3 text-sm leading-relaxed text-ink-soft"><span className="text-ink-faint">敕令释义：</span>{message.meta.interpretation}</p>}
+          {message.meta?.branchName && <p className="mb-3 text-xs text-ink-faint">新现实 · {message.meta.branchName}</p>}
+          <Prose text={content} />
+          {message.meta?.sourceTimelineId && (
+            <button type="button" className="mt-4 text-xs text-gilt hover:underline" onClick={() => window.dispatchEvent(new CustomEvent("creator:open-realities", { detail: { sourceTimelineId: message.meta?.sourceTimelineId } }))}>
+              返回或查看现实树 →
+            </button>
+          )}
+        </article>
       ) : isPlayer ? (
         <blockquote className="decree my-4 whitespace-pre-wrap leading-loose">
           <span className="text-gilt/70">你降下神谕：</span>

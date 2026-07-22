@@ -2,38 +2,55 @@
 
 import { useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import type { DrawerTab, GodRow, WorldInfo } from "./types";
+import type {
+  CreatorAvatar,
+  DrawerTab,
+  GodRow,
+  RecentRewrite,
+  TimelineInfo,
+  WorldInfo,
+} from "./types";
+import type { BusyKinds } from "./reality-tree-state";
 import { GodPanel } from "./GodPanel";
 import { LorePanel } from "./LorePanel";
 import { CodexPanel } from "./CodexPanel";
 import { ChroniclePanel } from "./ChroniclePanel";
 import { StarmapPanel } from "./StarmapPanel";
+import { CreatorViewPanel } from "./CreatorViewPanel";
+import { RealityTreePanel } from "./RealityTreePanel";
+import { drawerTabsForMode } from "./reality-tree-state";
 
 /**
  * 右抽屉：spring 滑出 + 半透遮罩，Esc/遮罩点击关闭。
  * 神格/设定集来自页面初始 state；众生录/年表按需请求；星图纯前端布局。
  */
 
-const TAB_TITLES: Record<DrawerTab, string> = {
-  starmap: "✦ 星图",
-  chronicle: "📜 编年史",
-  god: "◈ 本尊神格",
-  lore: "📖 世界设定集",
-  codex: "👥 众生录",
-};
+function tabTitle(mode: WorldInfo["mode"], tab: DrawerTab): string {
+  return drawerTabsForMode(mode).find((entry) => entry.tab === tab)?.title ?? "古卷";
+}
 
 export function PlayDrawer({
   tab,
   world,
   gods,
-  timelineId,
+  timeline,
+  avatars = [],
+  recentRewrite = null,
+  busyKinds = { chat: false, settlement: false, rewrite: false },
   initialEntityId,
+  onStateChanged,
+  onTimelineChanged,
   onClose,
 }: {
   tab: DrawerTab | null;
   world: WorldInfo;
   gods: GodRow[];
-  timelineId: string;
+  timeline: TimelineInfo;
+  avatars?: CreatorAvatar[];
+  recentRewrite?: RecentRewrite | null;
+  busyKinds?: BusyKinds;
+  onStateChanged?: () => Promise<void>;
+  onTimelineChanged?: (timelineId: string) => Promise<void>;
   /** 正文实体链接点开时的定位实体 */
   initialEntityId?: string | null;
   onClose: () => void;
@@ -73,14 +90,14 @@ export function PlayDrawer({
             className="fixed right-0 top-0 z-50 flex h-full flex-col border-l border-line bg-paper pr-12 shadow-2xl max-sm:pb-14 max-sm:pr-0"
             style={{ width: "min(43rem, 92vw)" }}
             role="dialog"
-            aria-label={TAB_TITLES[tab]}
+            aria-label={tabTitle(world.mode, tab)}
           >
             <header className="flex items-center justify-between border-b border-line px-6 py-4">
               <h2
                 className="text-lg text-ink"
                 style={{ fontFamily: "var(--font-display)" }}
               >
-                {TAB_TITLES[tab]}
+                {tabTitle(world.mode, tab)}
               </h2>
               <button
                 onClick={onClose}
@@ -98,12 +115,29 @@ export function PlayDrawer({
                 <LorePanel world={world} />
               ) : tab === "codex" ? (
                 <CodexPanel
-                  timelineId={timelineId}
+                  timelineId={timeline.id}
                   theme={world.themeCard}
                   initialEntityId={initialEntityId}
                 />
               ) : tab === "chronicle" ? (
-                <ChroniclePanel timelineId={timelineId} />
+                <ChroniclePanel timelineId={timeline.id} />
+              ) : tab === "creator" ? (
+                <CreatorViewPanel
+                  worldId={world.id}
+                  timeline={timeline}
+                  gods={gods}
+                  avatars={avatars}
+                  recentRewrite={recentRewrite}
+                  busy={busyKinds.chat || busyKinds.settlement || busyKinds.rewrite}
+                  onChanged={onStateChanged ?? (async () => undefined)}
+                />
+              ) : tab === "realities" ? (
+                <RealityTreePanel
+                  worldId={world.id}
+                  activeTimelineId={timeline.id}
+                  busy={busyKinds}
+                  onTimelineChanged={onTimelineChanged ?? (async () => undefined)}
+                />
               ) : (
                 <StarmapPanel gods={gods} theme={world.themeCard} />
               )}

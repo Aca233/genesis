@@ -1,35 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import type { DrawerTab } from "./types";
+import type { DrawerTab, WorldInfo } from "./types";
+import { drawerTabsForMode } from "./reality-tree-state";
 
 /**
  * 右缘符文列：五枚抽屉符文 + 香炉（Link → /settings）。
  * 桌面固定右缘垂直居中；窄屏落到底部横排。
  */
 
-const RUNES: { tab: DrawerTab; glyph: string; label: string }[] = [
-  { tab: "starmap", glyph: "✦", label: "星图" },
-  { tab: "chronicle", glyph: "📜", label: "年表" },
-  { tab: "god", glyph: "◈", label: "神格" },
-  { tab: "lore", glyph: "📖", label: "设定集" },
-  { tab: "codex", glyph: "👥", label: "众生录" },
-];
-
 export function RuneRail({
+  mode = "pantheon",
   active,
   onOpen,
 }: {
+  mode?: WorldInfo["mode"];
   active: DrawerTab | null;
   onOpen: (tab: DrawerTab) => void;
 }) {
+  const runes = drawerTabsForMode(mode);
   return (
     <nav
       // z-[60] 高于抽屉（z-50）：抽屉展开时符文列仍可点击、可直接换页签
       className="fixed right-0 top-1/2 z-[60] flex -translate-y-1/2 flex-col gap-1 rounded-l-lg border border-r-0 border-line bg-paper-raised/95 py-2 shadow-lg max-sm:bottom-0 max-sm:left-0 max-sm:right-0 max-sm:top-auto max-sm:translate-y-0 max-sm:flex-row max-sm:justify-around max-sm:rounded-none max-sm:border max-sm:py-1"
       aria-label="符文列"
     >
-      {RUNES.map((r) => (
+      {runes.map((r) => (
         <button
           key={r.tab}
           onClick={() => onOpen(r.tab)}
