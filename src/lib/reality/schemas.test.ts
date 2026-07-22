@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { completeCreatorDeck, completeDeck } from "@/lib/abilities/embark.test-fixtures";
 import {
+  AbilityPatchSchema,
+  ChroniclePatchSchema,
+  EntityPatchSchema,
+  GodPatchSchema,
   ObserverStateSchema,
+  RealityCardPatchSchema,
   RealityStateSchema,
+  RewritePlanSchema,
+  normalizeRewriteScope,
   initialBranchSummary,
   initialObserverState,
   initialRealityState,
@@ -86,5 +93,181 @@ describe("initial reality and observer state", () => {
       viewpoint: "omniscient",
       activeAvatarId: null,
     }).success).toBe(false);
+  });
+});
+
+const emptyRewritePlan = {
+  scope: "prospective" as const,
+  interpretation: "令月亮从此变为两轮",
+  effectivePoint: "当前时刻",
+  branchName: "双月新纪",
+  realityCardPatches: [],
+  godPatches: [],
+  entityPatches: [],
+  abilityPatches: [],
+  chroniclePatches: [],
+  memoryPatches: [],
+  causalConsequences: ["潮汐从今以后受双月共同牵引"],
+  narrationFocus: "双月第一次同时升起",
+  subcommands: [{
+    decree: "从现在起天空有两轮月亮",
+    scope: "prospective" as const,
+    effectivePoint: "当前时刻",
+  }],
+};
+
+describe("absolute reality rewrite schemas", () => {
+  it.each([
+    ["prospective", "当前时刻"],
+    ["retroactive", "世界诞生之初"],
+    ["memory_only", "众生现有记忆"],
+  ] as const)("accepts a %s plan", (scope, effectivePoint) => {
+    expect(RewritePlanSchema.safeParse({
+      ...emptyRewritePlan,
+      scope,
+      effectivePoint,
+      subcommands: [{ decree: "执行对应敕令", scope, effectivePoint }],
+    }).success).toBe(true);
+  });
+
+  it("accepts mixed subcommands and normalizes to the deepest scope", () => {
+    const subcommands = [
+      { decree: "从今以后魔法消耗记忆", scope: "prospective" as const, effectivePoint: "当前时刻" },
+      { decree: "众生忘记旧王朝", scope: "memory_only" as const, effectivePoint: "现有记忆" },
+      { decree: "旧王朝从未存在", scope: "retroactive" as const, effectivePoint: "王朝建立之前" },
+    ];
+
+    expect(RewritePlanSchema.safeParse({
+      ...emptyRewritePlan,
+      scope: "retroactive",
+      subcommands,
+    }).success).toBe(true);
+    expect(normalizeRewriteScope(subcommands.map(({ scope }) => scope))).toBe("retroactive");
+    expect(normalizeRewriteScope(["prospective", "memory_only"])).toBe("memory_only");
+    expect(normalizeRewriteScope(["prospective"])).toBe("prospective");
+    expect(normalizeRewriteScope(undefined)).toBe("prospective");
+
+    const { scope: _scope, ...withoutScope } = emptyRewritePlan;
+    void _scope;
+    const defaulted = RewritePlanSchema.parse({
+      ...withoutScope,
+      subcommands: [{ decree: "让风停下", effectivePoint: "当前时刻" }],
+    });
+    expect(defaulted.scope).toBe("prospective");
+    expect(defaulted.subcommands[0]?.scope).toBe("prospective");
+  });
+
+  it("rejects duplicate temp refs across create patches", () => {
+    expect(RewritePlanSchema.safeParse({
+      ...emptyRewritePlan,
+      godPatches: [{
+        op: "create",
+        tempRef: "new-shared-ref",
+        value: {
+          name: "新神", aliases: [], tier: "minor", rank: "nascent", domains: [],
+          persona: null, voice: null, agenda: null, relations: [], faithScope: null,
+        },
+      }],
+      entityPatches: [{
+        op: "create",
+        tempRef: "new-shared-ref",
+        value: {
+          type: "place", name: "新地", aliases: [], summary: "新地点", raceRef: null,
+          heat: "active", isMajorCharacter: false, isCreatorAvatar: false, sections: [],
+        },
+      }],
+    }).success).toBe(false);
+  });
+
+  it("accepts explicit create/update/remove patches across record kinds", () => {
+    const parsed = RewritePlanSchema.safeParse({
+      ...emptyRewritePlan,
+      realityCardPatches: [{ section: "currentEra", value: "双月元年" }],
+      godPatches: [
+        {
+          op: "create", tempRef: "new-god-moon", value: {
+            name: "双月神", aliases: [], tier: "major", rank: "ascended",
+            domains: ["月亮"], persona: "沉静", voice: null, agenda: null,
+            relations: [], faithScope: "观星者",
+          },
+        },
+        { op: "update", targetId: "god-existing", changes: { domains: ["潮汐", "双月"] } },
+        { op: "remove", targetId: "god-obsolete" },
+      ],
+      entityPatches: [
+        {
+          op: "create", tempRef: "new-entity-observatory", value: {
+            type: "place", name: "双月台", aliases: [], summary: "观测双月的高台",
+            raceRef: null, heat: "active", isMajorCharacter: false,
+            isCreatorAvatar: false, sections: [],
+          },
+        },
+        { op: "update", targetId: "entity-existing", changes: { summary: "已适应双月潮汐" } },
+        { op: "remove", targetId: "entity-obsolete" },
+      ],
+      abilityPatches: [
+        {
+          op: "create", tempRef: "new-ability-twin-tide", ownerRef: "new-god-moon",
+          value: {
+            name: "双潮", kind: "divine", effect: "牵引双重潮汐", trigger: "双月升起",
+            cost: "无", limitations: "仅影响潮汐", mastery: "adept", state: "normal",
+            visibility: "known", rumorText: null, bloodlineJustification: null,
+            sourceAbilityRef: null, lockedFields: [],
+          },
+        },
+        { op: "update", targetId: "ability-existing", changes: { state: "enhanced" } },
+        { op: "remove", targetId: "ability-obsolete" },
+      ],
+      chroniclePatches: [
+        {
+          op: "create", tempRef: "new-chronicle-twin-moons", value: {
+            chapterIndex: 3, yearLabel: "双月元年", text: "双月同升。",
+            entityRefs: ["new-entity-observatory"], godRefs: ["new-god-moon"],
+            revealed: true, revealedAtChapter: null, source: "rewrite",
+          },
+        },
+        { op: "update", targetId: "chronicle-existing", changes: { revealed: false } },
+        { op: "remove", targetId: "chronicle-obsolete" },
+      ],
+      memoryPatches: [{ entityId: "entity-witness", operation: "append", text: "记得双月一直存在" }],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it.each([
+    [RealityCardPatchSchema, { path: "world.theme", value: "任意写库" }],
+    [RealityCardPatchSchema, { section: "database", value: "任意写库" }],
+    [GodPatchSchema, { op: "update", targetId: "god-1", changes: { rank: "ascended" }, path: "agenda.secret" }],
+    [EntityPatchSchema, { op: "remove", targetId: "entity-1", path: "../../world" }],
+    [AbilityPatchSchema, { op: "remove", targetId: "ability-1", arbitraryPath: "lockedFields" }],
+    [ChroniclePatchSchema, { op: "remove", targetId: "chronicle-1", path: "text" }],
+  ])("rejects arbitrary paths outside the patch whitelist", (schema, patch) => {
+    expect(schema.safeParse(patch).success).toBe(false);
+  });
+
+  it("requires tempRef only for creates and targetId only for existing records", () => {
+    const create = {
+      op: "create", tempRef: "new-god", value: {
+        name: "新神", aliases: [], tier: "minor", rank: "nascent", domains: [],
+        persona: null, voice: null, agenda: null, relations: [], faithScope: null,
+      },
+    };
+    expect(GodPatchSchema.safeParse(create).success).toBe(true);
+    expect(GodPatchSchema.safeParse({ ...create, targetId: "god-existing" }).success).toBe(false);
+    expect(GodPatchSchema.safeParse({ op: "update", tempRef: "god-temp", changes: { name: "改名" } }).success).toBe(false);
+    expect(GodPatchSchema.safeParse({ op: "update", targetId: "god-existing", changes: {} }).success).toBe(false);
+    expect(GodPatchSchema.safeParse({ op: "remove", tempRef: "god-temp" }).success).toBe(false);
+  });
+
+  it.each([
+    ["双月新纪", true],
+    ["无王之历史", true],
+    ["三字名", false],
+    ["这是一个超过十个汉字的现实名", false],
+    ["双月-新纪", false],
+    ["TwinMoon", false],
+  ])("enforces a 4-10 Chinese-character branch name: %s", (branchName, accepted) => {
+    expect(RewritePlanSchema.safeParse({ ...emptyRewritePlan, branchName }).success).toBe(accepted);
   });
 });
