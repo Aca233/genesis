@@ -5,7 +5,9 @@ import {
   ChroniclePatchSchema,
   EntityPatchSchema,
   GodPatchSchema,
+  OmenPatchSchema,
   ObserverActionSchema,
+  ObserverPatchSchema,
   ObserverStateSchema,
   RealityCardPatchSchema,
   RealityStateSchema,
@@ -108,6 +110,8 @@ const emptyRewritePlan = {
   abilityPatches: [],
   chroniclePatches: [],
   memoryPatches: [],
+  omenPatches: [],
+  observerPatch: null,
   causalConsequences: ["潮汐从今以后受双月共同牵引"],
   narrationFocus: "双月第一次同时升起",
   subcommands: [{
@@ -156,6 +160,52 @@ describe("absolute reality rewrite schemas", () => {
     });
     expect(defaulted.scope).toBe("prospective");
     expect(defaulted.subcommands[0]?.scope).toBe("prospective");
+  });
+
+  it("rejects a top-level scope that is shallower than its normalized subcommands", () => {
+    expect(RewritePlanSchema.safeParse({
+      ...emptyRewritePlan,
+      scope: "prospective",
+      subcommands: [
+        { decree: "从今以后群星倒行", scope: "prospective", effectivePoint: "当前时刻" },
+        { decree: "群星自古便倒行", scope: "retroactive", effectivePoint: "世界诞生之初" },
+      ],
+    }).success).toBe(false);
+
+    const { scope: _scope, ...withoutScope } = emptyRewritePlan;
+    void _scope;
+    expect(RewritePlanSchema.safeParse({
+      ...withoutScope,
+      subcommands: [{ decree: "众生忘记旧星", scope: "memory_only", effectivePoint: "现有记忆" }],
+    }).success).toBe(false);
+  });
+
+  it("accepts strict omen and observer patches that use stable refs", () => {
+    expect(RewritePlanSchema.safeParse({
+      ...emptyRewritePlan,
+      omenPatches: [
+        { op: "create", tempRef: "new-omen", value: { godRef: "new-god", text: "双月将升", consumed: false } },
+        { op: "update", targetId: "omen-existing", changes: { godRef: "god-existing", consumed: true } },
+        { op: "remove", targetId: "omen-obsolete" },
+      ],
+      observerPatch: {
+        focus: { focusType: "avatar", focusRef: "new-avatar" },
+        viewpoint: "limited",
+        activeAvatarRef: "new-avatar",
+      },
+    }).success).toBe(true);
+  });
+
+  it.each([
+    [OmenPatchSchema, { op: "update", targetId: "omen-1", changes: { arbitrary: true } }],
+    [OmenPatchSchema, { op: "create", tempRef: "new-omen", value: { godRef: "god-1", text: "", consumed: false } }],
+    [ObserverPatchSchema, { focus: { focusType: "world", focusRef: "entity-1" } }],
+    [ObserverPatchSchema, { focus: { focusType: "god", focusRef: null } }],
+    [ObserverPatchSchema, { viewpoint: "omniscient", activeAvatarId: "wrong-field" }],
+    [ObserverPatchSchema, { timeLabel: "越权修改时间标签" }],
+    [ObserverPatchSchema, {}],
+  ])("rejects invalid or non-whitelisted rewrite state patches", (schema, patch) => {
+    expect(schema.safeParse(patch).success).toBe(false);
   });
 
   it("rejects duplicate temp refs across create patches", () => {
@@ -231,6 +281,14 @@ describe("absolute reality rewrite schemas", () => {
         { op: "remove", targetId: "chronicle-obsolete" },
       ],
       memoryPatches: [{ entityId: "entity-witness", operation: "append", text: "记得双月一直存在" }],
+      omenPatches: [{
+        op: "create", tempRef: "new-omen-twin-moons",
+        value: { godRef: "new-god-moon", text: "双潮将至", consumed: false },
+      }],
+      observerPatch: {
+        focus: { focusType: "place", focusRef: "new-entity-observatory" },
+        viewpoint: "omniscient",
+      },
     });
 
     expect(parsed.success).toBe(true);
@@ -243,6 +301,7 @@ describe("absolute reality rewrite schemas", () => {
     [EntityPatchSchema, { op: "remove", targetId: "entity-1", path: "../../world" }],
     [AbilityPatchSchema, { op: "remove", targetId: "ability-1", arbitraryPath: "lockedFields" }],
     [ChroniclePatchSchema, { op: "remove", targetId: "chronicle-1", path: "text" }],
+    [OmenPatchSchema, { op: "remove", targetId: "omen-1", path: "text" }],
   ])("rejects arbitrary paths outside the patch whitelist", (schema, patch) => {
     expect(schema.safeParse(patch).success).toBe(false);
   });

@@ -323,6 +323,54 @@ export const MemoryPatchSchema = z.object({
   text: z.string(),
 }).strict();
 
+const RewriteOmenSchema = z.object({
+  godRef: StableRefSchema,
+  text: z.string().trim().min(1),
+  consumed: z.boolean(),
+}).strict();
+
+const RewriteOmenChangesSchema = RewriteOmenSchema.partial()
+  .refine(hasKeys, "征兆更新 changes 不得为空");
+
+export const OmenPatchSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("create"),
+    tempRef: StableRefSchema,
+    value: RewriteOmenSchema,
+  }).strict(),
+  z.object({
+    op: z.literal("update"),
+    targetId: NonEmptyIdSchema,
+    changes: RewriteOmenChangesSchema,
+  }).strict(),
+  z.object({
+    op: z.literal("remove"),
+    targetId: NonEmptyIdSchema,
+  }).strict(),
+]);
+
+const ObserverFocusPatchSchema = z.object({
+  focusType: ObserverFocusTypeSchema,
+  focusRef: StableRefSchema.nullable(),
+}).strict().superRefine((focus, ctx) => {
+  const isWorld = focus.focusType === "world";
+  if (isWorld !== (focus.focusRef === null)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["focusRef"],
+      message: isWorld
+        ? "世界焦点不能携带 focusRef"
+        : "非世界焦点必须携带 focusRef",
+    });
+  }
+});
+
+export const ObserverPatchSchema = z.object({
+  focus: ObserverFocusPatchSchema.optional(),
+  viewpoint: z.enum(["omniscient", "limited"]).optional(),
+  activeAvatarRef: StableRefSchema.nullable().optional(),
+}).strict().refine(hasKeys, "观察状态补丁不得为空");
+
 export const RewriteSubcommandSchema = z.object({
   decree: z.string().trim().min(1),
   scope: RewriteScopeSchema.default("prospective"),
@@ -340,15 +388,29 @@ export const RewritePlanSchema = z.object({
   abilityPatches: z.array(AbilityPatchSchema),
   chroniclePatches: z.array(ChroniclePatchSchema),
   memoryPatches: z.array(MemoryPatchSchema),
+  omenPatches: z.array(OmenPatchSchema).default([]),
+  observerPatch: ObserverPatchSchema.nullable().default(null),
   causalConsequences: z.array(z.string().trim().min(1)),
   narrationFocus: z.string().trim().min(1),
   subcommands: z.array(RewriteSubcommandSchema).min(1),
 }).strict().superRefine((plan, ctx) => {
+  const normalizedScope = normalizeRewriteScope(
+    plan.subcommands.map((subcommand) => subcommand.scope),
+  );
+  if (plan.scope !== normalizedScope) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["scope"],
+      message: `顶层 scope 必须等于子命令最深 scope：${normalizedScope}`,
+    });
+  }
+
   const createPatches = [
     ...plan.godPatches,
     ...plan.entityPatches,
     ...plan.abilityPatches,
     ...plan.chroniclePatches,
+    ...plan.omenPatches,
   ].filter((patch) => patch.op === "create");
   const seen = new Set<string>();
   for (const patch of createPatches) {

@@ -26,6 +26,8 @@ type GodPatch = ParsedPlan["godPatches"][number];
 type EntityPatch = ParsedPlan["entityPatches"][number];
 type AbilityPatch = ParsedPlan["abilityPatches"][number];
 type ChroniclePatch = ParsedPlan["chroniclePatches"][number];
+type OmenPatch = ParsedPlan["omenPatches"][number];
+type ObserverPatch = NonNullable<ParsedPlan["observerPatch"]>;
 
 type ReferenceMaps = {
   god: Map<string, string>;
@@ -197,6 +199,7 @@ async function assertEntityRemovalsAreExplicit(
   patches: readonly EntityPatch[],
   abilityPatches: readonly AbilityPatch[],
   chroniclePatches: readonly ChroniclePatch[],
+  observerPatch: ObserverPatch | null,
 ): Promise<void> {
   const removals = new Set(
     patches.filter((patch) => patch.op === "remove").map((patch) => patch.targetId),
@@ -278,9 +281,12 @@ async function assertEntityRemovalsAreExplicit(
 
   if (timeline.observerState !== null) {
     const observer = ObserverStateSchema.parse(timeline.observerState);
+    const repairsFocus = observerPatch?.focus !== undefined;
+    const repairsAvatar = observerPatch !== null
+      && hasOwn(observerPatch, "activeAvatarRef");
     if (
-      (observer.focusId !== null && removals.has(observer.focusId))
-      || (observer.activeAvatarId !== null && removals.has(observer.activeAvatarId))
+      (observer.focusId !== null && removals.has(observer.focusId) && !repairsFocus)
+      || (observer.activeAvatarId !== null && removals.has(observer.activeAvatarId) && !repairsAvatar)
     ) {
       throw new Error("观察状态仍引用待删除实体");
     }
@@ -293,6 +299,8 @@ async function assertGodRemovalsAreExplicit(
   patches: readonly GodPatch[],
   abilityPatches: readonly AbilityPatch[],
   chroniclePatches: readonly ChroniclePatch[],
+  omenPatches: readonly OmenPatch[],
+  observerPatch: ObserverPatch | null,
 ): Promise<void> {
   const removals = new Set(
     patches.filter((patch) => patch.op === "remove").map((patch) => patch.targetId),
@@ -307,6 +315,9 @@ async function assertGodRemovalsAreExplicit(
   );
   const chroniclePatchById = new Map(
     chroniclePatches.filter((patch) => patch.op !== "create").map((patch) => [patch.targetId, patch]),
+  );
+  const omenPatchById = new Map(
+    omenPatches.filter((patch) => patch.op !== "create").map((patch) => [patch.targetId, patch]),
   );
   const [gods, abilities, chronicles, omens, timeline] = await Promise.all([
     tx.god.findMany({ where: { timelineId }, select: { id: true, relations: true } }),
@@ -337,10 +348,20 @@ async function assertGodRemovalsAreExplicit(
       throw new Error(`编年史仍引用待删除神明：${chronicle.id}`);
     }
   }
-  if (omens.length > 0) throw new Error(`征兆仍引用待删除神明：${omens[0].id}`);
+  for (const omen of omens) {
+    const patch = omenPatchById.get(omen.id);
+    const repaired = patch?.op === "remove"
+      || (patch?.op === "update" && patch.changes.godRef !== undefined);
+    if (!repaired) throw new Error(`征兆仍引用待删除神明：${omen.id}`);
+  }
   if (timeline.observerState !== null) {
     const observer = ObserverStateSchema.parse(timeline.observerState);
-    if (observer.focusType === "god" && observer.focusId !== null && removals.has(observer.focusId)) {
+    if (
+      observer.focusType === "god"
+      && observer.focusId !== null
+      && removals.has(observer.focusId)
+      && observerPatch?.focus === undefined
+    ) {
       throw new Error("观察状态仍引用待删除神明");
     }
   }
@@ -382,6 +403,8 @@ async function applyGodPatches(
     plan.godPatches,
     plan.abilityPatches,
     plan.chroniclePatches,
+    plan.omenPatches,
+    plan.observerPatch,
   );
 
   for (const patch of plan.godPatches) {
@@ -488,6 +511,7 @@ async function applyEntityPatches(
     plan.entityPatches,
     plan.abilityPatches,
     plan.chroniclePatches,
+    plan.observerPatch,
   );
 
   for (const patch of plan.entityPatches) {
@@ -786,6 +810,139 @@ async function applyMemoryPatches(
   }
 }
 
+async function applyOmenPatches(
+  tx: Prisma.TransactionClient,
+  timelineId: string,
+  plan: ParsedPlan,
+  refs: ReferenceMaps,
+  godIds: ReadonlySet<string>,
+): Promise<void> {
+  const existing = await tx.omenQueue.findMany({
+    where: { timelineId },
+    select: { id: true },
+  });
+  const omenIds = new Set(existing.map(({ id }) => id));
+
+  for (const patch of plan.omenPatches) {
+    if (patch.op !== "create") continue;
+    const created = await tx.omenQueue.create({
+      data: {
+        timelineId,
+        godId: resolveRef(refs.god, godIds, patch.value.godRef, "征兆所属神明"),
+        text: patch.value.text,
+        consumed: patch.value.consumed,
+      },
+    });
+    omenIds.add(created.id);
+  }
+
+  for (const patch of plan.omenPatches) {
+    if (patch.op !== "update") continue;
+    requireTimelineTarget(omenIds, patch.targetId, "待更新征兆");
+    await tx.omenQueue.update({
+      where: { id: patch.targetId },
+      data: {
+        ...(patch.changes.godRef !== undefined
+          ? { godId: resolveRef(refs.god, godIds, patch.changes.godRef, "征兆所属神明") }
+          : {}),
+        ...(patch.changes.text !== undefined ? { text: patch.changes.text } : {}),
+        ...(patch.changes.consumed !== undefined ? { consumed: patch.changes.consumed } : {}),
+      },
+    });
+  }
+
+  for (const patch of plan.omenPatches) {
+    if (patch.op !== "remove") continue;
+    requireTimelineTarget(omenIds, patch.targetId, "待删除征兆");
+    await tx.omenQueue.delete({ where: { id: patch.targetId } });
+    omenIds.delete(patch.targetId);
+  }
+}
+
+async function resolveObserverEntity(
+  tx: Prisma.TransactionClient,
+  timelineId: string,
+  refs: ReferenceMaps,
+  entityIds: ReadonlySet<string>,
+  ref: string,
+  label: string,
+) {
+  const entityId = resolveRef(refs.entity, entityIds, ref, label);
+  return tx.entity.findFirstOrThrow({
+    where: { id: entityId, timelineId },
+    select: { id: true, type: true, heat: true, isCreatorAvatar: true },
+  });
+}
+
+async function applyObserverPatch(
+  tx: Prisma.TransactionClient,
+  timelineId: string,
+  plan: ParsedPlan,
+  refs: ReferenceMaps,
+  entityIds: ReadonlySet<string>,
+  godIds: ReadonlySet<string>,
+): Promise<void> {
+  const patch = plan.observerPatch;
+  if (patch === null) return;
+  const timeline = await tx.timeline.findUniqueOrThrow({
+    where: { id: timelineId },
+    select: { observerState: true },
+  });
+  const observer = ObserverStateSchema.parse(timeline.observerState);
+
+  if (patch.focus !== undefined) {
+    observer.focusType = patch.focus.focusType;
+    if (patch.focus.focusType === "world") {
+      observer.focusId = null;
+    } else if (patch.focus.focusType === "god") {
+      observer.focusId = resolveRef(refs.god, godIds, patch.focus.focusRef!, "观察焦点神明");
+    } else {
+      const entity = await resolveObserverEntity(
+        tx,
+        timelineId,
+        refs,
+        entityIds,
+        patch.focus.focusRef!,
+        "观察焦点实体",
+      );
+      if (patch.focus.focusType === "place" && entity.type !== "place") {
+        throw new Error("地点观察焦点必须引用 place 实体");
+      }
+      if (
+        patch.focus.focusType === "avatar"
+        && (entity.type !== "character" || !entity.isCreatorAvatar || entity.heat !== "active")
+      ) {
+        throw new Error("化身观察焦点必须引用活动创世主化身");
+      }
+      observer.focusId = entity.id;
+    }
+  }
+  if (patch.viewpoint !== undefined) observer.viewpoint = patch.viewpoint;
+  if (hasOwn(patch, "activeAvatarRef")) {
+    if (patch.activeAvatarRef === null) {
+      observer.activeAvatarId = null;
+    } else {
+      const avatar = await resolveObserverEntity(
+        tx,
+        timelineId,
+        refs,
+        entityIds,
+        patch.activeAvatarRef!,
+        "活动创世主化身",
+      );
+      if (avatar.type !== "character" || !avatar.isCreatorAvatar || avatar.heat !== "active") {
+        throw new Error("活动化身必须引用当前现实中的活动创世主化身");
+      }
+      observer.activeAvatarId = avatar.id;
+    }
+  }
+
+  await tx.timeline.update({
+    where: { id: timelineId },
+    data: { observerState: json(ObserverStateSchema.parse(observer)) },
+  });
+}
+
 async function annotateRetroactiveHistory(
   tx: Prisma.TransactionClient,
   timelineId: string,
@@ -912,12 +1069,28 @@ async function validateFinalGraph(
       if (observer.focusType === "god") {
         requireTimelineTarget(godIds, observer.focusId, "观察焦点神明");
       } else if (observer.focusType !== "world") {
-        requireTimelineTarget(new Set(entityById.keys()), observer.focusId, "观察焦点实体");
+        const focus = entityById.get(observer.focusId);
+        if (focus === undefined) throw new Error("观察焦点实体不在目标时间线");
+        if (observer.focusType === "place" && focus.type !== "place") {
+          throw new Error("地点观察焦点必须引用 place 实体");
+        }
+        if (
+          observer.focusType === "avatar"
+          && (focus.type !== "character" || !focus.isCreatorAvatar || focus.heat !== "active")
+        ) {
+          throw new Error("化身观察焦点必须引用活动创世主化身");
+        }
       }
     }
     if (observer.activeAvatarId !== null) {
       const avatar = entityById.get(observer.activeAvatarId);
-      if (avatar?.isCreatorAvatar !== true) throw new Error("当前观察化身无效");
+      if (
+        avatar?.type !== "character"
+        || avatar.isCreatorAvatar !== true
+        || avatar.heat !== "active"
+      ) {
+        throw new Error("当前观察化身无效");
+      }
     }
   }
   await validateAbilityReferenceGraph(tx, timelineId);
@@ -970,6 +1143,8 @@ export async function applyRewritePlan(
   await createRewriteChronicle(tx, input, plan, reality.currentEra);
   await applyMemoryPatches(tx, input.timelineId, plan, entityIds);
   await applyAgendaPatches(tx, plan, refs);
+  await applyOmenPatches(tx, input.timelineId, plan, refs, godIds);
+  await applyObserverPatch(tx, input.timelineId, plan, refs, entityIds, godIds);
   await validateFinalGraph(tx, input.worldId, input.timelineId);
 
   return {

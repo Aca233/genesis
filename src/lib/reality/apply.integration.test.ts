@@ -342,4 +342,115 @@ describe("applyRewritePlan", () => {
     }))).rejects.toThrow(/时间线|不存在/);
     expect(await prisma.entity.findUniqueOrThrow({ where: { id: other.character.id } })).toMatchObject({ summary: "记得旧星" });
   });
+
+  it("按议程后的固定阶段创建、更新、删除征兆并应用 tempRef 观察状态", async () => {
+    const data = await fixture();
+    const updatedOmen = await prisma.omenQueue.create({
+      data: { timelineId: data.timeline.id, godId: data.god.id, text: "旧星将落", consumed: false },
+    });
+    const removedOmen = await prisma.omenQueue.create({
+      data: { timelineId: data.timeline.id, godId: data.god.id, text: "此兆将被抹除", consumed: false },
+    });
+
+    await apply(data, plan({
+      godPatches: [{
+        op: "create",
+        tempRef: "new-omen-god",
+        value: {
+          name: "新兆神", aliases: [], tier: "minor", rank: "nascent", domains: ["征兆"],
+          persona: null, voice: null, agenda: { goal: "守望新兆" }, relations: [], faithScope: null,
+        },
+      }],
+      entityPatches: [{
+        op: "create",
+        tempRef: "new-observer-avatar",
+        value: {
+          type: "character", name: "天外行者", aliases: [], summary: "创世主的新化身",
+          raceRef: null, heat: "active", isMajorCharacter: true, isCreatorAvatar: true,
+          sections: [],
+        },
+      }],
+      omenPatches: [
+        {
+          op: "create", tempRef: "new-star-omen",
+          value: { godRef: "new-omen-god", text: "新星即将升起", consumed: false },
+        },
+        {
+          op: "update", targetId: updatedOmen.id,
+          changes: { godRef: "new-omen-god", text: "旧星已落", consumed: true },
+        },
+        { op: "remove", targetId: removedOmen.id },
+      ],
+      observerPatch: {
+        focus: { focusType: "avatar", focusRef: "new-observer-avatar" },
+        viewpoint: "limited",
+        activeAvatarRef: "new-observer-avatar",
+      },
+    }));
+
+    const newGod = await prisma.god.findFirstOrThrow({
+      where: { timelineId: data.timeline.id, name: "新兆神" },
+    });
+    const avatar = await prisma.entity.findFirstOrThrow({
+      where: { timelineId: data.timeline.id, name: "天外行者" },
+    });
+    expect(await prisma.omenQueue.findUniqueOrThrow({ where: { id: updatedOmen.id } })).toMatchObject({
+      godId: newGod.id, text: "旧星已落", consumed: true,
+    });
+    expect(await prisma.omenQueue.findFirstOrThrow({
+      where: { timelineId: data.timeline.id, text: "新星即将升起" },
+    })).toMatchObject({ godId: newGod.id, consumed: false });
+    expect(await prisma.omenQueue.findUnique({ where: { id: removedOmen.id } })).toBeNull();
+    expect(await prisma.timeline.findUniqueOrThrow({ where: { id: data.timeline.id } })).toMatchObject({
+      observerState: {
+        focusType: "avatar", focusId: avatar.id, viewpoint: "limited",
+        activeAvatarId: avatar.id, timeLabel: "星历二年",
+      },
+    });
+  });
+
+  it("允许通过同一计划修复待删除神明的征兆与观察引用", async () => {
+    const data = await fixture();
+    const omen = await prisma.omenQueue.create({
+      data: { timelineId: data.timeline.id, godId: data.god.id, text: "旧神仍在", consumed: false },
+    });
+    await prisma.timeline.update({
+      where: { id: data.timeline.id },
+      data: { observerState: {
+        focusType: "god", focusId: data.god.id, timeLabel: "星历二年",
+        viewpoint: "omniscient", activeAvatarId: null,
+      } },
+    });
+
+    await apply(data, plan({
+      godPatches: [{ op: "remove", targetId: data.god.id }],
+      chroniclePatches: [{ op: "update", targetId: data.chronicle.id, changes: { godRefs: [] } }],
+      omenPatches: [{ op: "remove", targetId: omen.id }],
+      observerPatch: { focus: { focusType: "world", focusRef: null } },
+    }));
+
+    expect(await prisma.god.findUnique({ where: { id: data.god.id } })).toBeNull();
+    expect(await prisma.omenQueue.findUnique({ where: { id: omen.id } })).toBeNull();
+    expect(await prisma.timeline.findUniqueOrThrow({ where: { id: data.timeline.id } })).toMatchObject({
+      observerState: { focusType: "world", focusId: null },
+    });
+  });
+
+  it.each([
+    ["普通实体", (data: Awaited<ReturnType<typeof fixture>>) => data.character.id],
+    ["跨时间线实体", (data: Awaited<ReturnType<typeof fixture>>, other: Awaited<ReturnType<typeof fixture>>) => other.character.id],
+  ])("拒绝把%s设为活动创世主化身并回滚征兆", async (_label, target) => {
+    const data = await fixture();
+    const other = await fixture();
+    await expect(apply(data, plan({
+      omenPatches: [{
+        op: "create", tempRef: "rollback-omen",
+        value: { godRef: data.god.id, text: "不应落库", consumed: false },
+      }],
+      observerPatch: { activeAvatarRef: target(data, other) },
+    }))).rejects.toThrow(/化身|时间线|不存在/);
+    expect(await prisma.omenQueue.findFirst({
+      where: { timelineId: data.timeline.id, text: "不应落库" },
+    })).toBeNull();
+  });
 });
