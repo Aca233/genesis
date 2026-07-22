@@ -11,9 +11,14 @@ import {
 } from "@/lib/abilities/types";
 import { validateAbilityOwnership } from "@/lib/abilities/validator";
 import { WorldModeSchema } from "@/lib/world-mode";
+import {
+  ObserverStateSchema,
+  RealityStateSchema,
+} from "@/lib/reality/schemas";
+import { buildRealityTree } from "@/lib/reality/tree";
 
 /**
- * POST /api/worlds/import —— 导入 version 1 或 version 2 存档。
+ * POST /api/worlds/import —— 导入 version 1、2 或 3 存档。
  * 所有记录在单个事务中用新 ID 重建，任何失败都会回滚整个新世界。
  */
 
@@ -145,6 +150,7 @@ const EntitySchema = z
     starred: z.boolean().default(false),
     isChosen: z.boolean().default(false),
     isMajorCharacter: z.boolean().default(false),
+    isCreatorAvatar: z.boolean().default(false),
     raceId: NullableIdSchema,
     heat: ShortStringSchema.default("active"),
     scenePresence: z.boolean().default(false),
@@ -242,6 +248,11 @@ const TimelineSchema = z
     worldId: OptionalIdSchema,
     parentId: NullableIdSchema,
     forkChapter: z.number().int().nonnegative().nullish(),
+    branchName: ShortStringSchema.default("原初现实"),
+    branchSummary: TextSchema.nullish(),
+    realityState: BoundedJsonSchema.optional(),
+    observerState: BoundedJsonSchema.optional(),
+    forkRewriteId: NullableIdSchema,
     chapters: z.array(ChapterSchema).max(MAX_COLLECTION_ITEMS).default([]),
     gods: z.array(GodSchema).max(MAX_COLLECTION_ITEMS).default([]),
     entities: z.array(EntitySchema).max(MAX_COLLECTION_ITEMS).default([]),
@@ -251,6 +262,24 @@ const TimelineSchema = z
     chronicles: z.array(ChronicleSchema).max(MAX_COLLECTION_ITEMS).default([]),
     omens: z.array(OmenSchema).max(MAX_COLLECTION_ITEMS).default([]),
     createdAt: z.coerce.date().optional(),
+    updatedAt: z.coerce.date().optional(),
+  })
+  .strict();
+
+const RealityRewriteSchema = z
+  .object({
+    id: IdSchema,
+    worldId: OptionalIdSchema,
+    sourceTimelineId: IdSchema,
+    resultTimelineId: NullableIdSchema,
+    sourceChapterId: IdSchema,
+    decree: TextSchema,
+    scope: z.enum(["prospective", "retroactive", "memory_only"]).default("prospective"),
+    status: ShortStringSchema.default("completed"),
+    plan: BoundedJsonSchema.optional(),
+    summary: TextSchema.nullish(),
+    createdAt: z.coerce.date().optional(),
+    updatedAt: z.coerce.date().optional(),
   })
   .strict();
 
@@ -284,6 +313,7 @@ const WorldSchema = z
     materialArchiveStatus: ShortStringSchema.optional(),
     materialArchiveError: TextSchema.nullish(),
     timelines: z.array(TimelineSchema).max(100).default([]),
+    rewrites: z.array(RealityRewriteSchema).max(MAX_COLLECTION_ITEMS).default([]),
     lorebookEntries: z.array(LorebookEntrySchema).max(MAX_COLLECTION_ITEMS).default([]),
     createdAt: z.coerce.date().optional(),
     updatedAt: z.coerce.date().optional(),
@@ -292,7 +322,7 @@ const WorldSchema = z
 
 const ImportSchema = z
   .object({
-    version: z.union([z.literal(1), z.literal(2)]),
+    version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     exportedAt: z.string().datetime().max(64).optional(),
     world: WorldSchema,
   })
@@ -580,6 +610,156 @@ async function validateTimelineReferences(
 }
 
 
+function remapArchivedJson(
+  value: unknown,
+  idMap: ReadonlyMap<string, string>,
+): Prisma.InputJsonValue | typeof Prisma.DbNull | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return Prisma.DbNull;
+  const visit = (node: unknown): Prisma.InputJsonValue | null => {
+    if (typeof node === "string") return idMap.get(node) ?? node;
+    if (node === null) return null;
+    if (typeof node !== "object") return node as string | number | boolean;
+    if (Array.isArray(node)) return node.map(visit);
+    return Object.fromEntries(
+      Object.entries(node as Record<string, unknown>).map(([key, child]) => [
+        idMap.get(key) ?? key,
+        visit(child),
+      ]),
+    ) as Prisma.InputJsonObject;
+  };
+  return visit(value) ?? Prisma.DbNull;
+}
+
+function derivedRealityState(world: ImportedWorld): Prisma.InputJsonValue {
+  return {
+    theme: world.themeCard ?? {},
+    style: world.styleCard ?? {},
+    cosmology: world.cosmology ?? {},
+    fusionAxiom: world.fusionAxiom ?? null,
+    currentEra: "",
+    establishedFacts: [],
+  } as Prisma.InputJsonObject;
+}
+
+function defaultObserverState(): Prisma.InputJsonValue {
+  return {
+    focusType: "world",
+    focusId: null,
+    timeLabel: "",
+    viewpoint: "omniscient",
+    activeAvatarId: null,
+  } as Prisma.InputJsonObject;
+}
+
+function validateVersionThreeArchive(world: ImportedWorld) {
+  if (world.timelines.length === 0) {
+    if (world.activeTimelineId !== null && world.activeTimelineId !== undefined) {
+      throw new Error("空白世界不得指定活动现实");
+    }
+    if (world.rewrites.length !== 0) throw new Error("空白世界不得包含现实改写");
+    return;
+  }
+
+  const rewriteIds = new Set(world.rewrites.map((rewrite) => rewrite.id));
+  const timelineById = new Map(world.timelines.map((timeline) => [timeline.id, timeline]));
+  const chapterTimeline = new Map<string, string>();
+  for (const timeline of world.timelines) {
+    for (const chapter of timeline.chapters) chapterTimeline.set(chapter.id, timeline.id);
+  }
+
+  for (const timeline of world.timelines) {
+    const reality = RealityStateSchema.safeParse(timeline.realityState);
+    if (!reality.success) throw new Error(`现实 ${timeline.id} 的现实状态无效`);
+    const observer = ObserverStateSchema.safeParse(timeline.observerState);
+    if (!observer.success) throw new Error(`现实 ${timeline.id} 的观察状态无效`);
+
+    const gods = new Map(timeline.gods.map((god) => [god.id, god]));
+    const entities = new Map(timeline.entities.map((entity) => [entity.id, entity]));
+    for (const fact of reality.data.establishedFacts) {
+      if (
+        fact.establishedByRewriteId !== null
+        && !rewriteIds.has(fact.establishedByRewriteId)
+      ) {
+        throw new Error(`现实事实引用不存在的改写：${fact.establishedByRewriteId}`);
+      }
+    }
+
+    const state = observer.data;
+    if (state.focusType === "world") {
+      if (state.focusId !== null) throw new Error("世界观察焦点不得携带实体 ID");
+    } else if (state.focusType === "god") {
+      if (state.focusId === null || !gods.has(state.focusId)) {
+        throw new Error("观察焦点神明必须属于当前现实");
+      }
+    } else {
+      const focused = state.focusId === null ? undefined : entities.get(state.focusId);
+      if (focused === undefined) throw new Error("观察焦点实体必须属于当前现实");
+      if (state.focusType === "place" && focused.type !== "place") {
+        throw new Error("地点焦点必须指向 place 实体");
+      }
+      if (
+        state.focusType === "avatar"
+        && (focused.type !== "character" || !focused.isCreatorAvatar)
+      ) {
+        throw new Error("化身焦点必须指向创世主化身");
+      }
+    }
+    if (state.activeAvatarId !== null) {
+      const avatar = entities.get(state.activeAvatarId);
+      if (
+        avatar === undefined
+        || avatar.type !== "character"
+        || !avatar.isCreatorAvatar
+        || avatar.heat !== "active"
+      ) {
+        throw new Error("活动化身必须是当前现实中的活跃创世主人物");
+      }
+    }
+
+    const playerGods = timeline.gods.filter(
+      (god) => god.isPlayer || god.tier === "player",
+    );
+    if (world.mode === "creator" && playerGods.length !== 0) {
+      throw new Error("创世主存档不得包含玩家神");
+    }
+    if (world.mode === "pantheon" && playerGods.length !== 1) {
+      throw new Error("诸神共世现实必须且只能包含一位玩家神");
+    }
+  }
+
+  for (const rewrite of world.rewrites) {
+    if (!timelineById.has(rewrite.sourceTimelineId)) {
+      throw new Error(`现实改写 ${rewrite.id} 的来源现实不存在`);
+    }
+    if (chapterTimeline.get(rewrite.sourceChapterId) !== rewrite.sourceTimelineId) {
+      throw new Error(`现实改写 ${rewrite.id} 的来源章节不属于来源现实`);
+    }
+  }
+
+  buildRealityTree({
+    worldId: world.id ?? "archive-world",
+    activeTimelineId: world.activeTimelineId ?? null,
+    timelines: world.timelines.map((timeline) => ({
+      id: timeline.id,
+      worldId: timeline.worldId ?? world.id ?? "archive-world",
+      parentId: timeline.parentId ?? null,
+      branchName: timeline.branchName,
+      branchSummary: timeline.branchSummary ?? null,
+      forkChapter: timeline.forkChapter ?? null,
+      forkRewriteId: timeline.forkRewriteId ?? null,
+      updatedAt: timeline.updatedAt ?? timeline.createdAt ?? new Date(0),
+    })),
+    rewrites: world.rewrites.map((rewrite) => ({
+      id: rewrite.id,
+      worldId: rewrite.worldId ?? world.id ?? "archive-world",
+      sourceTimelineId: rewrite.sourceTimelineId,
+      resultTimelineId: rewrite.resultTimelineId ?? null,
+      decree: rewrite.decree,
+    })),
+  });
+}
+
 function remapDedupeKey(
   event: z.infer<typeof AbilityEventSchema>,
   newWorldId: string,
@@ -620,9 +800,9 @@ export async function POST(request: Request) {
     typeof raw === "object" && raw !== null
       ? (raw as { version?: unknown }).version
       : undefined;
-  if (rawVersion !== 1 && rawVersion !== 2) {
+  if (rawVersion !== 1 && rawVersion !== 2 && rawVersion !== 3) {
     return NextResponse.json(
-      { error: "存档版本不受支持：仅接受 version 1 或 version 2" },
+      { error: "存档版本不受支持：仅接受 version 1、version 2 或 version 3" },
       { status: 400 },
     );
   }
@@ -634,7 +814,9 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  const archiveVersion = parsed.data.version;
   const w = parsed.data.world;
+  const importedMode = archiveVersion === 3 ? w.mode : "pantheon";
 
   const newWorldId = crypto.randomUUID();
   const timelineMap = new Map<string, string>();
@@ -645,6 +827,11 @@ export async function POST(request: Request) {
   const abilityMap = new Map<string, string>();
   const abilityEventMap = new Map<string, string>();
   const membershipMap = new Map<string, string>();
+  const sectionMap = new Map<string, string>();
+  const chronicleMap = new Map<string, string>();
+  const omenMap = new Map<string, string>();
+  const rewriteMap = new Map<string, string>();
+  const lorebookMap = new Map<string, string>();
 
   try {
     if (w.id !== undefined) {
@@ -662,7 +849,12 @@ export async function POST(request: Request) {
         for (const message of ch.messages) addMapping(messageMap, message.id, "消息");
       }
       for (const god of tl.gods) addMapping(godMap, god.id, "神明");
-      for (const entity of tl.entities) addMapping(entityMap, entity.id, "实体");
+      for (const entity of tl.entities) {
+        addMapping(entityMap, entity.id, "实体");
+        for (const section of entity.sections) {
+          if (section.id !== undefined) addMapping(sectionMap, section.id, "实体栏目");
+        }
+      }
       for (const ability of tl.abilities) addMapping(abilityMap, ability.id, "能力");
       for (const event of tl.abilityEvents) {
         addMapping(abilityEventMap, event.id, "能力事件");
@@ -670,7 +862,19 @@ export async function POST(request: Request) {
       for (const membership of tl.memberships) {
         addMapping(membershipMap, membership.id, "成员关系");
       }
+      for (const chronicle of tl.chronicles) {
+        if (chronicle.id !== undefined) addMapping(chronicleMap, chronicle.id, "编年史");
+      }
+      for (const omen of tl.omens) {
+        if (omen.id !== undefined) addMapping(omenMap, omen.id, "征兆");
+      }
     }
+    for (const rewrite of w.rewrites) addMapping(rewriteMap, rewrite.id, "现实改写");
+    for (const lorebook of w.lorebookEntries) {
+      if (lorebook.id !== undefined) addMapping(lorebookMap, lorebook.id, "世界书条目");
+    }
+
+    if (archiveVersion === 3) validateVersionThreeArchive(w);
 
     const referenceIndexes = buildReferenceIndexes(w);
     for (const timeline of w.timelines) {
@@ -688,9 +892,31 @@ export async function POST(request: Request) {
     const eventRows: Prisma.AbilityEventCreateManyInput[] = [];
     const chronicleRows: Prisma.ChronicleEntryCreateManyInput[] = [];
     const omenRows: Prisma.OmenQueueCreateManyInput[] = [];
+    const rewriteRows: Prisma.RealityRewriteCreateManyInput[] = [];
+    const allIdMap = new Map<string, string>([
+      ...timelineMap,
+      ...chapterMap,
+      ...messageMap,
+      ...godMap,
+      ...entityMap,
+      ...abilityMap,
+      ...abilityEventMap,
+      ...membershipMap,
+      ...sectionMap,
+      ...chronicleMap,
+      ...omenMap,
+      ...rewriteMap,
+      ...lorebookMap,
+    ]);
 
     for (const tl of w.timelines) {
       const newTlId = remapRequired(timelineMap, tl.id, "时间线");
+      const realityState = archiveVersion === 3
+        ? remapArchivedJson(tl.realityState, allIdMap)
+        : derivedRealityState(w);
+      const observerState = archiveVersion === 3
+        ? remapArchivedJson(tl.observerState, allIdMap)
+        : defaultObserverState();
       timelineRows.push({
         id: newTlId,
         worldId: newWorldId,
@@ -698,7 +924,19 @@ export async function POST(request: Request) {
           ? remapRequired(timelineMap, tl.parentId, "父时间线")
           : null,
         forkChapter: tl.forkChapter ?? null,
+        branchName: archiveVersion === 3
+          ? tl.branchName
+          : tl.parentId === null
+            ? "原初现实"
+            : `旧现实·${tl.forkChapter ?? 0}`,
+        branchSummary: tl.branchSummary ?? null,
+        realityState,
+        observerState,
+        forkRewriteId: archiveVersion === 3 && tl.forkRewriteId != null
+          ? remapRequired(rewriteMap, tl.forkRewriteId, "分叉改写")
+          : null,
         createdAt: tl.createdAt,
+        updatedAt: tl.updatedAt,
       });
 
       for (const ch of tl.chapters) {
@@ -710,7 +948,7 @@ export async function POST(request: Request) {
           title: ch.title ?? null,
           summary: ch.summary ?? null,
           settleState: ch.settleState,
-          snapshot: json(ch.snapshot),
+          snapshot: remapArchivedJson(ch.snapshot, allIdMap),
           createdAt: ch.createdAt,
         });
         for (const message of ch.messages) {
@@ -721,8 +959,8 @@ export async function POST(request: Request) {
             role: message.role,
             content: message.content,
             scale: message.scale,
-            variants: json(message.variants),
-            meta: json(message.meta),
+            variants: remapArchivedJson(message.variants, allIdMap),
+            meta: remapArchivedJson(message.meta, allIdMap),
             createdAt: message.createdAt,
           });
         }
@@ -741,6 +979,7 @@ export async function POST(request: Request) {
           starred: entity.starred,
           isChosen: entity.isChosen,
           isMajorCharacter: entity.isMajorCharacter,
+          isCreatorAvatar: archiveVersion === 3 ? entity.isCreatorAvatar : false,
           raceId: entity.raceId != null
             ? remapRequired(entityMap, entity.raceId, "人物种族")
             : null,
@@ -753,6 +992,9 @@ export async function POST(request: Request) {
         });
         for (const section of entity.sections) {
           sectionRows.push({
+            id: section.id !== undefined
+              ? remapRequired(sectionMap, section.id, "实体栏目")
+              : crypto.randomUUID(),
             entityId: newEntityId,
             key: section.key,
             content: jsonRequired(section.content),
@@ -848,8 +1090,8 @@ export async function POST(request: Request) {
             ? remapRequired(messageMap, event.messageId, "事件消息")
             : null,
           type: event.type,
-          before: json(event.before),
-          after: json(event.after),
+          before: remapArchivedJson(event.before, allIdMap),
+          after: remapArchivedJson(event.after, allIdMap),
           evidence: event.evidence,
           scale: event.scale,
           dedupeKey: remapDedupeKey(
@@ -866,6 +1108,9 @@ export async function POST(request: Request) {
 
       for (const chronicle of tl.chronicles) {
         chronicleRows.push({
+          id: chronicle.id !== undefined
+            ? remapRequired(chronicleMap, chronicle.id, "编年史")
+            : crypto.randomUUID(),
           timelineId: newTlId,
           chapterIndex: chronicle.chapterIndex,
           yearLabel: chronicle.yearLabel,
@@ -885,6 +1130,9 @@ export async function POST(request: Request) {
 
       for (const omen of tl.omens) {
         omenRows.push({
+          id: omen.id !== undefined
+            ? remapRequired(omenMap, omen.id, "征兆")
+            : crypto.randomUUID(),
           timelineId: newTlId,
           godId: remapRequired(godMap, omen.godId, "征兆神明"),
           text: omen.text,
@@ -894,13 +1142,44 @@ export async function POST(request: Request) {
       }
     }
 
+    for (const rewrite of w.rewrites) {
+      rewriteRows.push({
+        id: remapRequired(rewriteMap, rewrite.id, "现实改写"),
+        worldId: newWorldId,
+        sourceTimelineId: remapRequired(
+          timelineMap,
+          rewrite.sourceTimelineId,
+          "改写来源现实",
+        ),
+        resultTimelineId: rewrite.resultTimelineId != null
+          ? remapRequired(timelineMap, rewrite.resultTimelineId, "改写结果现实")
+          : null,
+        sourceChapterId: remapRequired(
+          chapterMap,
+          rewrite.sourceChapterId,
+          "改写来源章节",
+        ),
+        decree: rewrite.decree,
+        scope: rewrite.scope,
+        status: rewrite.status,
+        plan: remapArchivedJson(rewrite.plan, allIdMap),
+        summary: rewrite.summary ?? null,
+        idempotencyKey: `import:${newWorldId}:${remapRequired(rewriteMap, rewrite.id, "现实改写")}`,
+        leaseToken: null,
+        leaseExpiresAt: null,
+        error: null,
+        createdAt: rewrite.createdAt,
+        updatedAt: rewrite.updatedAt,
+      });
+    }
+
     await prisma.$transaction(async (tx) => {
       await tx.world.create({
         data: {
           id: newWorldId,
           name: w.name,
           genesisInput: w.genesisInput,
-          mode: w.mode,
+          mode: importedMode,
           status: w.status,
           draftDeck: json(w.draftDeck),
           lockedPaths: w.lockedPaths,
@@ -909,12 +1188,13 @@ export async function POST(request: Request) {
           cosmology: json(w.cosmology),
           fusionAxiom: json(w.fusionAxiom),
           materialArchiveStatus: w.materialArchiveStatus ?? "pending",
-          materialArchiveError: w.materialArchiveError ?? null,
-          activeTimelineId: w.activeTimelineId != null
-            ? remapRequired(timelineMap, w.activeTimelineId, "当前时间线")
-            : null,
+          materialArchiveError: null,
+          activeTimelineId: null,
           lorebookEntries: {
             create: w.lorebookEntries.map((entry) => ({
+              id: entry.id !== undefined
+                ? remapRequired(lorebookMap, entry.id, "世界书条目")
+                : crypto.randomUUID(),
               keys: entry.keys,
               content: entry.content,
               enabled: entry.enabled,
@@ -924,7 +1204,8 @@ export async function POST(request: Request) {
           },
         },
       });
-      await tx.timeline.createMany({ data: timelineRows });
+      const deferredTimelineRows = timelineRows.map((row) => ({ ...row, forkRewriteId: null }));
+      await tx.timeline.createMany({ data: deferredTimelineRows });
       await tx.chapter.createMany({ data: chapterRows });
       await tx.entity.createMany({ data: entityRows });
       await tx.entitySection.createMany({ data: sectionRows });
@@ -935,6 +1216,23 @@ export async function POST(request: Request) {
       await tx.abilityEvent.createMany({ data: eventRows });
       await tx.chronicleEntry.createMany({ data: chronicleRows });
       await tx.omenQueue.createMany({ data: omenRows });
+      await tx.realityRewrite.createMany({ data: rewriteRows });
+      for (const row of timelineRows) {
+        if (row.forkRewriteId !== null && row.forkRewriteId !== undefined) {
+          await tx.timeline.update({
+            where: { id: row.id },
+            data: { forkRewriteId: row.forkRewriteId },
+          });
+        }
+      }
+      if (w.activeTimelineId != null) {
+        await tx.world.update({
+          where: { id: newWorldId },
+          data: {
+            activeTimelineId: remapRequired(timelineMap, w.activeTimelineId, "当前时间线"),
+          },
+        });
+      }
     }, IMPORT_TRANSACTION_OPTIONS);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

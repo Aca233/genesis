@@ -56,12 +56,16 @@ export async function snapshotRuntimeMaterial(input: {
       where: { id: input.sourceId, timeline: { world: { userId: "local" } } },
       include: {
         abilities: { include: { sourceAbility: { select: { id: true, materialRef: true, name: true } } } },
-        timeline: { include: { world: { select: { id: true, name: true } } } },
+        timeline: { include: { world: { select: { id: true, name: true, mode: true } } } },
       },
     });
     if (!god) throw new Error("神明不存在");
     const world = god.timeline.world;
-    const kind: MaterialKind = god.isPlayer || god.tier === "player" ? "player_god" : "major_god";
+    const kind: MaterialKind = world.mode === "creator"
+      ? "major_god"
+      : god.isPlayer || god.tier === "player"
+        ? "player_god"
+        : "major_god";
     const sourceRef = await stableIdentity({ worldId: world.id, sourceType: "god", sourceId: god.id, materialRef: god.materialRef });
     const card = jsonSafe({
       ref: god.materialRef ?? sourceRef,
@@ -90,7 +94,7 @@ export async function snapshotRuntimeMaterial(input: {
         memberships: { include: { faction: { select: { id: true, materialRef: true, name: true } } } },
         membershipsAsFaction: { include: { character: { select: { id: true, materialRef: true, name: true } } } },
         abilities: { include: { sourceAbility: { select: { id: true, materialRef: true, name: true } } } },
-        timeline: { include: { world: { select: { id: true, name: true } } } },
+        timeline: { include: { world: { select: { id: true, name: true, mode: true } } } },
       },
     });
     if (!entity) throw new Error("实体不存在");
@@ -102,6 +106,7 @@ export async function snapshotRuntimeMaterial(input: {
       id: entity.id, type: entity.type, name: entity.name, aliases: entity.aliases,
       summary: entity.summary, emblemSeed: entity.emblemSeed, imageUrl: entity.imageUrl,
       starred: entity.starred, isChosen: entity.isChosen, isMajorCharacter: entity.isMajorCharacter,
+      isCreatorAvatar: entity.isCreatorAvatar,
       heat: entity.heat, scenePresence: entity.scenePresence, lockedPaths: entity.lockedPaths,
       sections: entity.sections, race: entity.race, memberships: entity.memberships,
       members: entity.membershipsAsFaction, abilities: entity.abilities,
@@ -126,7 +131,7 @@ export async function snapshotRuntimeMaterial(input: {
       entity: { select: { id: true, type: true, materialRef: true, name: true } },
       sourceAbility: { select: { id: true, materialRef: true, name: true } },
       events: { orderBy: { createdAt: "asc" } },
-      timeline: { include: { world: { select: { id: true, name: true } } } },
+      timeline: { include: { world: { select: { id: true, name: true, mode: true } } } },
     },
   });
   if (!ability) throw new Error("能力不存在");

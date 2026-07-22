@@ -39,6 +39,64 @@ describe("runtime material snapshot", () => {
     }
   });
 
+
+  it("creator god 永远归类为 major_god，化身仅按 character 保存", async () => {
+    const world = await prisma.world.create({
+      data: {
+        name: `runtime-creator-${crypto.randomUUID()}`,
+        genesisInput: "test",
+        mode: "creator",
+        lockedPaths: [],
+        timelines: { create: { branchName: "原初现实" } },
+      },
+    });
+    try {
+      const timeline = await prisma.timeline.findFirstOrThrow({ where: { worldId: world.id } });
+      const legacyPlayerShapedGod = await prisma.god.create({
+        data: {
+          timelineId: timeline.id,
+          name: "旧形态神",
+          aliases: [],
+          tier: "player",
+          isPlayer: true,
+          domains: ["测试"],
+        },
+      });
+      const avatar = await prisma.entity.create({
+        data: {
+          timelineId: timeline.id,
+          type: "character",
+          name: "天外化身",
+          aliases: [],
+          emblemSeed: "creator-avatar",
+          isCreatorAvatar: true,
+          summary: "创世主化身",
+          lockedPaths: [],
+        },
+      });
+
+      const godSnapshot = await snapshotRuntimeMaterial({
+        sourceType: "god",
+        sourceId: legacyPlayerShapedGod.id,
+      });
+      const avatarSnapshot = await snapshotRuntimeMaterial({
+        sourceType: "entity",
+        sourceId: avatar.id,
+      });
+
+      expect(godSnapshot.cardIdentity.kind).toBe("major_god");
+      expect(godSnapshot.content).toMatchObject({ kind: "major_god" });
+      expect(JSON.stringify(godSnapshot)).not.toContain('"kind":"player_god"');
+      expect(avatarSnapshot.cardIdentity.kind).toBe("character");
+      expect(avatarSnapshot.content).toMatchObject({
+        kind: "character",
+        card: { isCreatorAvatar: true },
+      });
+    } finally {
+      await prisma.world.delete({ where: { id: world.id } });
+    }
+  });
+
   it("uses a stable runtime identity when a story-created object has no materialRef", async () => {
     const world = await prisma.world.create({ data: { name: `runtime-new-${crypto.randomUUID()}`, genesisInput: "test", lockedPaths: [], timelines: { create: {} } } });
     try {

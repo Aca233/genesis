@@ -1,10 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { completeCreatorDeck } from "@/lib/abilities/embark.test-fixtures";
+import { initialObserverState, initialRealityState } from "@/lib/reality/schemas";
 
 const mocks = vi.hoisted(() => {
-  const model = () => ({ create: vi.fn(), createMany: vi.fn() });
+  const model = () => ({
+    create: vi.fn(),
+    createMany: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn(),
+  });
   return {
     prisma: {
-      world: { findUnique: vi.fn(), create: vi.fn() },
+      world: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
       timeline: model(),
       chapter: model(),
       message: model(),
@@ -16,6 +23,7 @@ const mocks = vi.hoisted(() => {
       abilityEvent: model(),
       chronicleEntry: model(),
       omenQueue: model(),
+      realityRewrite: model(),
       $transaction: vi.fn(),
     },
   };
@@ -307,11 +315,166 @@ function twoTimelineArchive() {
   return archive;
 }
 
+
+function versionThreeArchive() {
+  const deck = completeCreatorDeck();
+  const reality = initialRealityState(deck);
+  const observer = initialObserverState(deck);
+  const root = {
+    id: "timeline-root",
+    worldId: "world-v3",
+    parentId: null,
+    forkChapter: null,
+    branchName: "原初现实",
+    branchSummary: "创世之初",
+    realityState: reality,
+    observerState: observer,
+    forkRewriteId: null,
+    chapters: [{
+      id: "chapter-root",
+      timelineId: "timeline-root",
+      index: 0,
+      title: "原初",
+      summary: null,
+      settleState: "settled",
+      snapshot: { gods: { "god-root": { id: "god-root" } } },
+      messages: [],
+    }],
+    gods: [{
+      id: "god-root",
+      timelineId: "timeline-root",
+      name: "根源神",
+      aliases: [],
+      tier: "major",
+      isPlayer: false,
+      rank: "nascent",
+      domains: ["根源"],
+      persona: { public: true },
+      voice: null,
+      agenda: { secret: "隐藏议程" },
+      agendaRevealed: false,
+      relations: {},
+      faithScope: null,
+      codexEntityId: null,
+    }],
+    entities: [],
+    abilities: [],
+    abilityEvents: [],
+    memberships: [],
+    chronicles: [],
+    omens: [],
+  };
+  const child = (suffix: "a" | "b", rewriteId: string) => ({
+    ...structuredClone(root),
+    id: `timeline-${suffix}`,
+    parentId: "timeline-root",
+    forkChapter: 0,
+    branchName: suffix === "a" ? "星海长明" : "群星沉眠",
+    branchSummary: suffix === "a" ? "第一条现实" : "第二条现实",
+    forkRewriteId: rewriteId,
+    chapters: [],
+    gods: [],
+    realityState: {
+      ...structuredClone(reality),
+      establishedFacts: [{
+        ref: `fact-${suffix}`,
+        text: suffix === "a" ? "群星永不熄灭" : "群星进入沉眠",
+        establishedByRewriteId: rewriteId,
+      }],
+    },
+    observerState: suffix === "b"
+      ? { ...observer, focusType: "avatar", focusId: "avatar-b", activeAvatarId: "avatar-b" }
+      : observer,
+    entities: suffix === "b" ? [{
+      id: "avatar-b",
+      timelineId: "timeline-b",
+      type: "character",
+      name: "天外化身",
+      aliases: [],
+      emblemSeed: "avatar",
+      imageUrl: null,
+      starred: true,
+      isChosen: false,
+      isMajorCharacter: true,
+      isCreatorAvatar: true,
+      raceId: null,
+      heat: "active",
+      scenePresence: true,
+      summary: "创世主行于世间的化身",
+      lockedPaths: [],
+      materialRef: null,
+      sections: [{
+        id: "section-avatar-b",
+        entityId: "avatar-b",
+        key: "identity",
+        content: { hiddenTruth: "来自世界之外" },
+        revealed: false,
+        rumorText: "身份不明",
+        playerLocked: false,
+      }],
+    }] : [],
+  });
+  return {
+    version: 3,
+    exportedAt: "2026-07-22T00:00:00.000Z",
+    world: {
+      id: "world-v3",
+      userId: "local",
+      name: "创世主存档",
+      genesisInput: "让世界自行运转",
+      mode: "creator",
+      status: "playing",
+      draftDeck: deck,
+      lockedPaths: [],
+      themeCard: deck.theme,
+      styleCard: deck.style,
+      cosmology: deck.cosmology,
+      fusionAxiom: deck.fusionAxiom,
+      activeTimelineId: "timeline-b",
+      materialArchiveStatus: "completed",
+      timelines: [root, child("a", "rewrite-a"), child("b", "rewrite-b")],
+      rewrites: [
+        {
+          id: "rewrite-a",
+          worldId: "world-v3",
+          sourceTimelineId: "timeline-root",
+          resultTimelineId: "timeline-a",
+          sourceChapterId: "chapter-root",
+          decree: "令群星长明",
+          scope: "prospective",
+          status: "completed",
+          plan: { targetId: "god-root" },
+          summary: "群星永不熄灭",
+        },
+        {
+          id: "rewrite-b",
+          worldId: "world-v3",
+          sourceTimelineId: "timeline-root",
+          resultTimelineId: "timeline-b",
+          sourceChapterId: "chapter-root",
+          decree: "令群星沉眠",
+          scope: "retroactive",
+          status: "completed",
+          plan: { focusId: "avatar-b" },
+          summary: "群星已沉眠",
+        },
+      ],
+      lorebookEntries: [],
+    },
+  };
+}
+
 function installSuccessfulTransaction() {
   mocks.prisma.$transaction.mockImplementation(async (run) => run(mocks.prisma));
   for (const value of Object.values(mocks.prisma)) {
     if (typeof value === "object" && value && "createMany" in value) {
       value.createMany.mockResolvedValue({ count: 0 });
+    }
+  }
+  for (const value of Object.values(mocks.prisma)) {
+    if (typeof value === "object" && value && "update" in value) {
+      value.update.mockResolvedValue({});
+      if ("updateMany" in value) value.updateMany.mockResolvedValue({ count: 1 });
     }
   }
   mocks.prisma.world.create.mockResolvedValue({});
@@ -390,7 +553,7 @@ describe("存档导入", () => {
     );
   });
 
-  it("version 2 导入保留 creator mode", async () => {
+  it("version 2 导入兼容为 pantheon mode", async () => {
     const archive = versionTwoArchive();
     (archive.world as typeof archive.world & { mode: "creator" }).mode = "creator";
     (archive.world as unknown as { activeTimelineId: string | null }).activeTimelineId = null;
@@ -400,7 +563,7 @@ describe("存档导入", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.prisma.world.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ mode: "creator" }),
+      data: expect.objectContaining({ mode: "pantheon" }),
     }));
   });
 
@@ -721,6 +884,142 @@ describe("存档导入", () => {
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 
+
+  it("导入 version 3 时重映射现实树、改写、观察焦点、化身和活动分支", async () => {
+    const response = await importWorld(request(versionThreeArchive()));
+
+    expect(response.status).toBe(200);
+    const { worldId } = await response.json();
+    const timelines = lastCreateManyData(mocks.prisma.timeline);
+    const rewrites = lastCreateManyData(mocks.prisma.realityRewrite);
+    const root = timelines.find((timeline) => timeline.branchName === "原初现实")!;
+    const branchA = timelines.find((timeline) => timeline.branchName === "星海长明")!;
+    const branchB = timelines.find((timeline) => timeline.branchName === "群星沉眠")!;
+    const avatar = lastCreateManyData(mocks.prisma.entity).find(
+      (entity) => entity.isCreatorAvatar === true,
+    )!;
+    const rewriteA = rewrites.find((rewrite) => rewrite.decree === "令群星长明")!;
+    const rewriteB = rewrites.find((rewrite) => rewrite.decree === "令群星沉眠")!;
+
+    expect(worldId).not.toBe("world-v3");
+    expect(root).toMatchObject({ worldId, parentId: null, forkRewriteId: null });
+    expect(branchA).toMatchObject({ worldId, parentId: root.id });
+    expect(branchB).toMatchObject({ worldId, parentId: root.id });
+    expect(mocks.prisma.timeline.update).toHaveBeenCalledWith({
+      where: { id: branchA.id },
+      data: { forkRewriteId: rewriteA.id },
+    });
+    expect(mocks.prisma.timeline.update).toHaveBeenCalledWith({
+      where: { id: branchB.id },
+      data: { forkRewriteId: rewriteB.id },
+    });
+    expect(rewriteA).toMatchObject({
+      worldId,
+      sourceTimelineId: root.id,
+      resultTimelineId: branchA.id,
+      sourceChapterId: expect.not.stringContaining("chapter-root"),
+      leaseToken: null,
+      leaseExpiresAt: null,
+      error: null,
+    });
+    expect(rewriteB).toMatchObject({ sourceTimelineId: root.id, resultTimelineId: branchB.id });
+    expect(branchB.observerState).toMatchObject({
+      focusType: "avatar",
+      focusId: avatar.id,
+      activeAvatarId: avatar.id,
+    });
+    expect(branchB.realityState).toMatchObject({
+      establishedFacts: [expect.objectContaining({ establishedByRewriteId: rewriteB.id })],
+    });
+    expect(mocks.prisma.world.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ mode: "creator", activeTimelineId: null }),
+    }));
+    expect(mocks.prisma.world.update).toHaveBeenCalledWith({
+      where: { id: worldId },
+      data: { activeTimelineId: branchB.id },
+    });
+  });
+
+  it.each([
+    ["cycle", (archive: ReturnType<typeof versionThreeArchive>) => {
+      archive.world.timelines[0].parentId = "timeline-a";
+    }],
+    ["cross-world parent", (archive: ReturnType<typeof versionThreeArchive>) => {
+      archive.world.timelines[1].worldId = "another-world";
+    }],
+    ["missing active", (archive: ReturnType<typeof versionThreeArchive>) => {
+      archive.world.activeTimelineId = "timeline-missing";
+    }],
+    ["mismatched rewrite", (archive: ReturnType<typeof versionThreeArchive>) => {
+      archive.world.rewrites[0].resultTimelineId = "timeline-b";
+    }],
+    ["creator player god", (archive: ReturnType<typeof versionThreeArchive>) => {
+      archive.world.timelines[0].gods[0].isPlayer = true;
+      archive.world.timelines[0].gods[0].tier = "player";
+    }],
+  ])("version 3 图校验拒绝 %s", async (_label, mutate) => {
+    const archive = versionThreeArchive();
+    mutate(archive);
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+
+  it.each([
+    ["missing source chapter", (archive: ReturnType<typeof versionThreeArchive>) => {
+      archive.world.rewrites[0].sourceChapterId = "chapter-missing";
+    }],
+    ["cross-reality source chapter", (archive: ReturnType<typeof versionThreeArchive>) => {
+      (archive.world.timelines[1].chapters as Array<Record<string, unknown>>).push({
+        id: "chapter-a",
+        timelineId: "timeline-a",
+        index: 0,
+        title: null,
+        summary: null,
+        settleState: "settled",
+        snapshot: null,
+        messages: [],
+      });
+      archive.world.rewrites[0].sourceChapterId = "chapter-a";
+    }],
+    ["dangling established-fact rewrite", (archive: ReturnType<typeof versionThreeArchive>) => {
+      archive.world.timelines[1].realityState.establishedFacts[0]!
+        .establishedByRewriteId = "rewrite-missing";
+    }],
+    ["cross-reality observer avatar", (archive: ReturnType<typeof versionThreeArchive>) => {
+      archive.world.timelines[1].observerState = {
+        focusType: "avatar",
+        focusId: "avatar-b",
+        timeLabel: "分叉纪元",
+        viewpoint: "omniscient",
+        activeAvatarId: "avatar-b",
+      };
+    }],
+  ])("version 3 语义引用校验拒绝 %s", async (_label, mutate) => {
+    const archive = versionThreeArchive();
+    mutate(archive);
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("旧 version 2 即使携带 creator 字段也按 pantheon 兼容导入", async () => {
+    const archive = versionTwoArchive();
+    (archive.world as typeof archive.world & { mode: string }).mode = "creator";
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(200);
+    expect(mocks.prisma.world.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ mode: "pantheon" }),
+    }));
+  });
+
   it("严格拒绝未知字段与不支持的版本", async () => {
     const archive = versionTwoArchive() as ReturnType<typeof versionTwoArchive> & {
       unexpected?: boolean;
@@ -728,7 +1027,7 @@ describe("存档导入", () => {
     archive.unexpected = true;
 
     const malformed = await importWorld(request(archive));
-    const unsupported = await importWorld(request({ ...legacyArchive(), version: 3 }));
+    const unsupported = await importWorld(request({ ...legacyArchive(), version: 4 }));
 
     expect(malformed.status).toBe(400);
     expect(unsupported.status).toBe(400);
@@ -741,7 +1040,7 @@ describe("存档导出", () => {
     vi.clearAllMocks();
   });
 
-  it("导出 version 2 的完整私有数据并查询时间线能力事件、成员关系与种族", async () => {
+  it("导出 version 3 的完整私有数据、现实树与改写，但排除租约和 provider error", async () => {
     const hiddenAbility = {
       id: "hidden-ability",
       visibility: "hidden",
@@ -757,13 +1056,42 @@ describe("存档导出", () => {
       operationKind: "rewrite",
       operationToken: "secret-operation-token",
       operationLeaseExpiresAt: new Date("2026-07-22T00:00:00Z"),
+      materialArchiveError: "provider leaked details",
+      activeTimelineId: "timeline-1",
+      rewrites: [{
+        id: "rewrite-1",
+        worldId: "world-1",
+        sourceTimelineId: "timeline-1",
+        resultTimelineId: null,
+        sourceChapterId: "chapter-1",
+        decree: "改写",
+        scope: "prospective",
+        status: "failed",
+        plan: null,
+        summary: null,
+        idempotencyKey: "private-idempotency-key",
+        leaseToken: "private-rewrite-token",
+        leaseExpiresAt: new Date("2026-07-22T00:00:00Z"),
+        error: "provider raw response",
+        createdAt: new Date("2026-07-22T00:00:00Z"),
+        updatedAt: new Date("2026-07-22T00:00:00Z"),
+      }],
       timelines: [
         {
           id: "timeline-1",
+          worldId: "world-1",
+          parentId: null,
+          forkChapter: null,
+          branchName: "原初现实",
+          branchSummary: "根现实",
+          realityState: { hiddenFact: "天外真相" },
+          observerState: { viewpoint: "omniscient" },
+          forkRewriteId: null,
           abilities: [hiddenAbility],
           entities: [
             {
               id: "character-1",
+              isCreatorAvatar: true,
               raceId: "race-1",
               race: { id: "race-1" },
               memberships: [
@@ -784,23 +1112,42 @@ describe("存档导出", () => {
     });
     const payload = await response.json();
 
-    expect(payload.version).toBe(2);
+    expect(payload.version).toBe(3);
     expect(payload.world.mode).toBe("creator");
     expect(JSON.stringify(payload)).not.toContain("secret-operation-token");
     expect(payload.world).not.toHaveProperty("operationKind");
     expect(payload.world).not.toHaveProperty("operationToken");
     expect(payload.world).not.toHaveProperty("operationLeaseExpiresAt");
+    expect(payload.world).not.toHaveProperty("materialArchiveError");
+    expect(JSON.stringify(payload)).not.toContain("provider leaked details");
+    expect(JSON.stringify(payload)).not.toContain("private-rewrite-token");
+    expect(JSON.stringify(payload)).not.toContain("private-idempotency-key");
+    expect(JSON.stringify(payload)).not.toContain("provider raw response");
+    expect(payload.world.rewrites).toEqual([
+      expect.objectContaining({
+        id: "rewrite-1",
+        sourceTimelineId: "timeline-1",
+        status: "failed",
+      }),
+    ]);
+    expect(payload.world.rewrites[0]).not.toHaveProperty("error");
+    expect(payload.world.rewrites[0]).not.toHaveProperty("leaseToken");
+    expect(payload.world.rewrites[0]).not.toHaveProperty("idempotencyKey");
     expect(payload.world.timelines[0]).toMatchObject({
+      branchName: "原初现实",
+      realityState: { hiddenFact: "天外真相" },
+      observerState: { viewpoint: "omniscient" },
       abilities: [{ id: "hidden-ability", visibility: "hidden" }],
       abilityEvents: [{ id: "hidden-event", abilityId: "hidden-ability" }],
       memberships: [
         { id: "membership-1", characterId: "character-1", factionId: "faction-1" },
       ],
-      entities: [{ id: "character-1", raceId: "race-1" }],
+      entities: [{ id: "character-1", isCreatorAvatar: true, raceId: "race-1" }],
     });
     expect(mocks.prisma.world.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({
         include: expect.objectContaining({
+          rewrites: expect.anything(),
           timelines: expect.objectContaining({
             include: expect.objectContaining({
               abilities: expect.objectContaining({ include: { events: true } }),

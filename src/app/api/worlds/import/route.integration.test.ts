@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { completeDeck } from "@/lib/abilities/embark.test-fixtures";
+import { completeCreatorDeck, completeDeck } from "@/lib/abilities/embark.test-fixtures";
 import { runClaimedEmbarkTransaction } from "@/lib/embark/mutations";
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
@@ -112,7 +112,7 @@ describe("存档导出导入 PostgreSQL 往返", () => {
         { params: Promise.resolve({ id: originalWorld.id }) },
       );
       const archive = await exportResponse.json();
-      expect(archive.version).toBe(2);
+      expect(archive.version).toBe(3);
       expect(
         archive.world.timelines[0].gods.find((god: { id: string }) => god.id === majorGod.id)
           .relations.player,
@@ -181,7 +181,7 @@ describe("存档导出导入 PostgreSQL 往返", () => {
     }
   });
 
-  it("version 2 草稿世界往返保留 creator mode 且不导出操作凭证", async () => {
+  it("version 3 草稿世界往返保留 creator mode 且不导出操作凭证", async () => {
     const source = await prisma.world.create({
       data: {
         name: `creator-archive-${crypto.randomUUID()}`,
@@ -206,10 +206,170 @@ describe("存档导出导入 PostgreSQL 往返", () => {
       expect(archive.world).not.toHaveProperty("operationKind");
 
       const imported = await importWorld(importRequest(archive));
-      expect(imported.status).toBe(200);
-      importedWorldId = (await imported.json()).worldId;
+      const importedPayload = await imported.json();
+      expect(imported.status, JSON.stringify(importedPayload)).toBe(200);
+      importedWorldId = importedPayload.worldId;
       await expect(prisma.world.findUniqueOrThrow({ where: { id: importedWorldId } }))
         .resolves.toMatchObject({ mode: "creator" });
+    } finally {
+      if (importedWorldId) await prisma.world.delete({ where: { id: importedWorldId } });
+      await prisma.world.delete({ where: { id: source.id } });
+    }
+  });
+
+
+  it("creator version 3 往返保留两条兄弟现实、改写、隐藏事实、观察化身与活动分支", async () => {
+    const deck = completeCreatorDeck();
+    const source = await prisma.world.create({
+      data: {
+        name: `creator-tree-archive-${crypto.randomUUID()}`,
+        genesisInput: "创造分叉的现实",
+        mode: "creator",
+        draftDeck: deck,
+        themeCard: deck.theme,
+        styleCard: deck.style,
+        cosmology: deck.cosmology,
+        fusionAxiom: deck.fusionAxiom ?? undefined,
+        lockedPaths: [],
+      },
+    });
+    let importedWorldId: string | undefined;
+
+    try {
+      const { timelineId: rootId, chapterId } = await runClaimedEmbarkTransaction(
+        prisma,
+        source.id,
+        async () => deck,
+      );
+      const root = await prisma.timeline.findUniqueOrThrow({ where: { id: rootId } });
+      const createBranch = async (name: string, decree: string, avatar: boolean) => {
+        const rewriteId = crypto.randomUUID();
+        const branchId = crypto.randomUUID();
+        const avatarId = avatar ? crypto.randomUUID() : null;
+        await prisma.$transaction(async (tx) => {
+          await tx.timeline.create({
+            data: {
+              id: branchId,
+              worldId: source.id,
+              parentId: rootId,
+              forkChapter: 0,
+              branchName: name,
+              branchSummary: `${name}的隐秘摘要`,
+              realityState: {
+                ...(root.realityState as object),
+                establishedFacts: [{
+                  ref: `fact-${name}`,
+                  text: `${name}隐藏事实`,
+                  establishedByRewriteId: rewriteId,
+                }],
+              },
+              observerState: {
+                focusType: avatar ? "avatar" : "world",
+                focusId: avatarId,
+                timeLabel: "分叉纪元",
+                viewpoint: "omniscient",
+                activeAvatarId: avatarId,
+              },
+            },
+          });
+          if (avatarId !== null) {
+            await tx.entity.create({
+              data: {
+                id: avatarId,
+                timelineId: branchId,
+                type: "character",
+                name: "天外化身",
+                aliases: [],
+                emblemSeed: "archive-avatar",
+                isCreatorAvatar: true,
+                summary: "只在此现实显现",
+                lockedPaths: [],
+                sections: {
+                  create: {
+                    key: "identity",
+                    content: { hiddenTruth: "来自世界之外" },
+                    revealed: false,
+                    rumorText: "无名旅者",
+                  },
+                },
+              },
+            });
+          }
+          await tx.realityRewrite.create({
+            data: {
+              id: rewriteId,
+              worldId: source.id,
+              sourceTimelineId: rootId,
+              resultTimelineId: branchId,
+              sourceChapterId: chapterId,
+              decree,
+              scope: "retroactive",
+              status: "completed",
+              plan: { branchId, avatarId },
+              summary: `${name}已经成立`,
+              idempotencyKey: `integration:${rewriteId}`,
+              error: "provider private diagnostic",
+            },
+          });
+          await tx.timeline.update({
+            where: { id: branchId },
+            data: { forkRewriteId: rewriteId },
+          });
+        });
+        return branchId;
+      };
+      await createBranch("长明现实", "群星长明", false);
+      const activeBranchId = await createBranch("沉眠现实", "群星沉眠", true);
+      await prisma.world.update({
+        where: { id: source.id },
+        data: { activeTimelineId: activeBranchId },
+      });
+
+      const exported = await exportWorld(
+        new Request(`http://localhost/api/worlds/${source.id}/export`),
+        { params: Promise.resolve({ id: source.id }) },
+      );
+      const archive = await exported.json();
+      expect(archive.version).toBe(3);
+      expect(archive.world.timelines).toHaveLength(3);
+      expect(archive.world.rewrites).toHaveLength(2);
+      expect(JSON.stringify(archive)).not.toContain("provider private diagnostic");
+
+      const imported = await importWorld(importRequest(archive));
+      expect(imported.status).toBe(200);
+      importedWorldId = (await imported.json()).worldId;
+      const restored = await prisma.world.findUniqueOrThrow({
+        where: { id: importedWorldId },
+        include: {
+          timelines: { include: { entities: { include: { sections: true } } } },
+          rewrites: true,
+        },
+      });
+      const restoredRoot = restored.timelines.find((timeline) => timeline.parentId === null)!;
+      const restoredChildren = restored.timelines.filter((timeline) => timeline.parentId !== null);
+      const restoredActive = restored.timelines.find(
+        (timeline) => timeline.id === restored.activeTimelineId,
+      )!;
+      const restoredAvatar = restoredActive.entities.find((entity) => entity.isCreatorAvatar)!;
+
+      expect(restored.mode).toBe("creator");
+      expect(restoredChildren).toHaveLength(2);
+      expect(restoredChildren.every((timeline) => timeline.parentId === restoredRoot.id)).toBe(true);
+      expect(restored.rewrites).toHaveLength(2);
+      expect(restoredChildren.map((timeline) => timeline.forkRewriteId).sort()).toEqual(
+        restored.rewrites.map((rewrite) => rewrite.id).sort(),
+      );
+      expect(restoredActive.branchName).toBe("沉眠现实");
+      expect(restoredActive.observerState).toMatchObject({
+        focusType: "avatar",
+        focusId: restoredAvatar.id,
+        activeAvatarId: restoredAvatar.id,
+      });
+      expect(restoredAvatar.sections[0]).toMatchObject({
+        revealed: false,
+        content: { hiddenTruth: "来自世界之外" },
+      });
+      expect(restored.rewrites.every((rewrite) => rewrite.error === null)).toBe(true);
     } finally {
       if (importedWorldId) await prisma.world.delete({ where: { id: importedWorldId } });
       await prisma.world.delete({ where: { id: source.id } });

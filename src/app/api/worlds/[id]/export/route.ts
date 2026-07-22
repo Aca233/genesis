@@ -3,10 +3,85 @@ import { prisma } from "@/lib/db";
 import { projectVersionTwoWorld } from "@/lib/archive/v2";
 
 /**
- * GET /api/worlds/[id]/export —— 导出存档
- * 组装 { version: 2, exportedAt, world: {...全量私有数据} } JSON 并以附件下载。
- * 导出格式与 POST /api/worlds/import 对偶。
+ * GET /api/worlds/[id]/export —— 导出 owner-private version 3 存档。
+ *
+ * Runtime leases, idempotency credentials and provider-facing error details are
+ * intentionally outside the archive. Hidden world facts remain present because
+ * this endpoint exports the owner's complete reality graph.
  */
+
+function record(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function projectRewrite(value: unknown) {
+  const rewrite = record(value);
+  return {
+    id: rewrite.id,
+    worldId: rewrite.worldId,
+    sourceTimelineId: rewrite.sourceTimelineId,
+    resultTimelineId: rewrite.resultTimelineId,
+    sourceChapterId: rewrite.sourceChapterId,
+    decree: rewrite.decree,
+    scope: rewrite.scope,
+    status: rewrite.status,
+    plan: rewrite.plan,
+    summary: rewrite.summary,
+    createdAt: rewrite.createdAt,
+    updatedAt: rewrite.updatedAt,
+  };
+}
+
+function projectVersionThreeWorld(value: unknown) {
+  const world = record(value);
+  const versionTwo = projectVersionTwoWorld(value);
+  const timelines = Array.isArray(world.timelines) ? world.timelines : [];
+  const projectedTimelines = Array.isArray(versionTwo.timelines)
+    ? versionTwo.timelines
+    : [];
+  const sourceTimelineById = new Map(
+    timelines.map((timeline) => {
+      const source = record(timeline);
+      return [source.id, source] as const;
+    }),
+  );
+
+  const safeWorld = { ...versionTwo } as Record<string, unknown>;
+  delete safeWorld.materialArchiveError;
+
+  return {
+    ...safeWorld,
+    timelines: projectedTimelines.map((timelineValue) => {
+      const timeline = record(timelineValue);
+      const source = sourceTimelineById.get(timeline.id) ?? {};
+      const sourceEntities = Array.isArray(source.entities) ? source.entities : [];
+      const avatarById = new Map(sourceEntities.map((entityValue) => {
+        const entity = record(entityValue);
+        return [entity.id, entity.isCreatorAvatar ?? false] as const;
+      }));
+      const entities = Array.isArray(timeline.entities) ? timeline.entities : [];
+      return {
+        ...timeline,
+        branchName: source.branchName,
+        branchSummary: source.branchSummary,
+        realityState: source.realityState,
+        observerState: source.observerState,
+        forkRewriteId: source.forkRewriteId,
+        updatedAt: source.updatedAt,
+        entities: entities.map((entityValue) => {
+          const entity = record(entityValue);
+          return {
+            ...entity,
+            isCreatorAvatar: avatarById.get(entity.id) ?? false,
+          };
+        }),
+      };
+    }),
+    rewrites: (Array.isArray(world.rewrites) ? world.rewrites : []).map(projectRewrite),
+  };
+}
 
 export async function GET(
   _request: Request,
@@ -37,6 +112,7 @@ export async function GET(
           omens: { orderBy: { createdAt: "asc" } },
         },
       },
+      rewrites: { orderBy: { createdAt: "asc" } },
       lorebookEntries: true,
     },
   });
@@ -45,15 +121,12 @@ export async function GET(
     return NextResponse.json({ error: "不存在" }, { status: 404 });
   }
 
-  const exportWorld = projectVersionTwoWorld(world);
-
   const payload = {
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
-    world: exportWorld,
+    world: projectVersionThreeWorld(world),
   };
 
-  // 中文文件名：filename 提供 ASCII 回退，filename* 携带 UTF-8 原名
   const encodedName = encodeURIComponent(`genesis-${world.name}.json`);
   return new NextResponse(JSON.stringify(payload, null, 2), {
     headers: {
