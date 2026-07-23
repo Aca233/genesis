@@ -1,12 +1,68 @@
 export type WorldSettlementState =
   | { status: "idle" }
-  | { status: "running"; segmentId: string }
-  | { status: "failed"; segmentId: string; error: string };
+  | {
+      status: "running";
+      segmentId: string;
+      stage: string;
+      completedStages: string[];
+    }
+  | {
+      status: "failed";
+      segmentId: string;
+      stage: string;
+      completedStages: string[];
+      error: string;
+      retryable: boolean;
+    };
 
 type SettlementEvent =
-  | { type: "progress"; step: string; detail?: string }
-  | { type: "done"; nextChapterId?: string | null; nextSegmentId?: string | null }
-  | { type: "error"; message: string };
+  | {
+      type: "progress";
+      taskId: string;
+      taskKind: "settlement";
+      stage: string;
+      status: "running" | "completed";
+      detail?: string;
+      occurredAt: string;
+    }
+  | { type: "done"; taskId: string; followUp: { kind: "none" } }
+  | {
+      type: "failed";
+      taskId: string;
+      stage: string;
+      message: string;
+      retryable: boolean;
+    };
+
+const SETTLEMENT_STAGES = [
+  "checkpoint_read",
+  "pantheon",
+  "extract",
+  "chronicle",
+  "snapshot",
+  "completed",
+] as const;
+
+function completedBefore(stage: string): string[] {
+  const index = SETTLEMENT_STAGES.indexOf(stage as typeof SETTLEMENT_STAGES[number]);
+  return index < 0 ? [] : SETTLEMENT_STAGES.slice(0, index);
+}
+
+function failed(
+  segmentId: string,
+  error: string,
+  stage = "checkpoint_read",
+  retryable = true,
+): WorldSettlementState {
+  return {
+    status: "failed",
+    segmentId,
+    stage,
+    completedStages: completedBefore(stage),
+    error,
+    retryable,
+  };
+}
 
 export async function followWorldSettlement(
   segmentId: string,
@@ -19,24 +75,16 @@ export async function followWorldSettlement(
       headers: { Accept: "text/event-stream" },
     });
   } catch (error) {
-    return {
-      status: "failed",
-      segmentId,
-      error: error instanceof Error ? error.message : String(error),
-    };
+    return failed(segmentId, error instanceof Error ? error.message : String(error));
   }
   if (!response.ok) {
     const body = await response.json().catch(() => null) as {
       error?: string;
     } | null;
-    return {
-      status: "failed",
-      segmentId,
-      error: body?.error ?? `世界整理请求失败（${response.status}）`,
-    };
+    return failed(segmentId, body?.error ?? `世界整理请求失败（${response.status}）`);
   }
   if (!response.body) {
-    return { status: "failed", segmentId, error: "世界整理响应无正文流" };
+    return failed(segmentId, "世界整理响应无正文流");
   }
 
   const reader = response.body.getReader();
@@ -45,14 +93,26 @@ export async function followWorldSettlement(
   let terminal: WorldSettlementState = {
     status: "running",
     segmentId,
+    stage: "checkpoint_read",
+    completedStages: [],
   };
   const consume = (chunk: string) => {
     for (const line of chunk.split("\n")) {
       if (!line.startsWith("data:")) continue;
       const event = JSON.parse(line.slice(5).trim()) as SettlementEvent;
       if (event.type === "done") terminal = { status: "idle" };
-      if (event.type === "error") {
-        terminal = { status: "failed", segmentId, error: event.message };
+      if (event.type === "progress") {
+        terminal = {
+          status: "running",
+          segmentId,
+          stage: event.stage,
+          completedStages: event.status === "completed"
+            ? [...completedBefore(event.stage), event.stage]
+            : completedBefore(event.stage),
+        };
+      }
+      if (event.type === "failed") {
+        terminal = failed(segmentId, event.message, event.stage, event.retryable);
       }
     }
   };
@@ -69,6 +129,11 @@ export async function followWorldSettlement(
   }
   if (buffer.trim()) consume(buffer.trim());
   return terminal.status === "running"
-    ? { status: "failed", segmentId, error: "世界整理进度流意外结束" }
+    ? failed(
+        segmentId,
+        "世界整理进度流意外结束",
+        terminal.stage,
+        true,
+      )
     : terminal;
 }

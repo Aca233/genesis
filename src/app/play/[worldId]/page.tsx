@@ -202,7 +202,12 @@ export default function PlayPage({
     const segmentId = state.checkpoint.segmentId;
     const timer = setTimeout(() => {
       setSettling(true);
-      setSettlementState({ status: "running", segmentId });
+      setSettlementState({
+        status: "running",
+        segmentId,
+        stage: "checkpoint_read",
+        completedStages: [],
+      });
       void followWorldSettlement(segmentId).then(async (result) => {
         setSettlementState(result);
         setSettling(false);
@@ -255,6 +260,8 @@ export default function PlayPage({
               setSettlementState({
                 status: "running",
                 segmentId: followUp.segmentId,
+                stage: "checkpoint_read",
+                completedStages: [],
               });
               const settled = await followWorldSettlement(followUp.segmentId);
               setSettlementState(settled);
@@ -435,7 +442,12 @@ export default function PlayPage({
     if (settlementState.status !== "failed") return;
     const segmentId = settlementState.segmentId;
     setSettling(true);
-    setSettlementState({ status: "running", segmentId });
+    setSettlementState({
+      status: "running",
+      segmentId,
+      stage: settlementState.stage,
+      completedStages: settlementState.completedStages,
+    });
     void followWorldSettlement(segmentId).then(async (result) => {
       setSettlementState(result);
       setSettling(false);

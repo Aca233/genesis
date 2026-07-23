@@ -2,15 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   prisma: {
-    chapter: { findUnique: vi.fn() },
+    chapter: { findUnique: vi.fn(), update: vi.fn() },
   },
   claimWorldOperation: vi.fn(),
+  releaseWorldOperation: vi.fn(),
   settleChapter: vi.fn(),
+  ensureSettlementRunning: vi.fn(),
+  createSettlementTaskSSE: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mocks.prisma }));
 vi.mock("@/lib/reality/operation-lock", () => ({
   claimWorldOperation: mocks.claimWorldOperation,
+  releaseWorldOperation: mocks.releaseWorldOperation,
   WorldOperationConflictError: class WorldOperationConflictError extends Error {
     constructor(activeKind: string) {
       super(`世界正在进行${activeKind === "chat" ? "叙事生成" : activeKind}，请稍后再试`);
@@ -18,6 +22,10 @@ vi.mock("@/lib/reality/operation-lock", () => ({
   },
 }));
 vi.mock("@/lib/settle/pipeline", () => ({ settleChapter: mocks.settleChapter }));
+vi.mock("@/lib/settle/task-runner", () => ({
+  ensureSettlementRunning: mocks.ensureSettlementRunning,
+  createSettlementTaskSSE: mocks.createSettlementTaskSSE,
+}));
 
 import { POST } from "./route";
 
@@ -35,12 +43,22 @@ describe("POST /api/chapters/[id]/settle", () => {
           world: { activeTimelineId: "timeline-1" },
         },
         messages: [{ id: "message-1" }],
+        settleState: "open",
+        settleError: null,
+        settleRetryable: true,
+        settleUpdatedAt: new Date("2026-07-23T00:00:00.000Z"),
         title: null,
         summary: null,
       };
       return null;
     });
     mocks.claimWorldOperation.mockResolvedValue({ acquired: true });
+    mocks.releaseWorldOperation.mockResolvedValue(true);
+    mocks.prisma.chapter.update.mockResolvedValue({});
+    mocks.ensureSettlementRunning.mockResolvedValue(undefined);
+    mocks.createSettlementTaskSSE.mockImplementation(() => new Response("settlement stream", {
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    }));
     mocks.settleChapter.mockImplementation(async function* () {
       yield { step: "done" };
     });
@@ -78,20 +96,40 @@ describe("POST /api/chapters/[id]/settle", () => {
     const response = await POST(new Request("http://localhost", { method: "POST" }), {
       params: Promise.resolve({ id: "chapter-1" }),
     });
-    await response.text();
-
     expect(mocks.claimWorldOperation).toHaveBeenCalledTimes(1);
     expect(mocks.claimWorldOperation).toHaveBeenCalledWith(
       mocks.prisma,
       "world-1",
       "settlement",
-      expect.any(String),
+      "chapter-1",
     );
-    const token = mocks.claimWorldOperation.mock.calls[0][3];
+    expect(mocks.ensureSettlementRunning).toHaveBeenCalledWith(
+      "chapter-1",
+      expect.any(Function),
+    );
+    expect(mocks.createSettlementTaskSSE).toHaveBeenCalledWith(
+      "chapter-1",
+      expect.any(Array),
+    );
+    const run = mocks.ensureSettlementRunning.mock.calls[0][1];
+    const emit = vi.fn();
+    await run(emit);
     expect(mocks.settleChapter).toHaveBeenCalledWith("chapter-1", {
       worldId: "world-1",
-      token,
+      token: "chapter-1",
       claimed: true,
     });
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "progress",
+      taskKind: "settlement",
+      stage: "completed",
+      status: "completed",
+    }));
+    expect(mocks.releaseWorldOperation).toHaveBeenCalledWith(
+      mocks.prisma,
+      "world-1",
+      "settlement",
+      "chapter-1",
+    );
   });
 });

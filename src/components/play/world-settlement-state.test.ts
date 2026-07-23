@@ -14,8 +14,15 @@ describe("followWorldSettlement", () => {
     const result = await followWorldSettlement(
       "segment-1",
       async () => response([
-        { type: "progress", step: "extract" },
-        { type: "done", nextSegmentId: "segment-2" },
+        {
+          type: "progress",
+          taskId: "segment-1",
+          taskKind: "settlement",
+          stage: "extract",
+          status: "running",
+          occurredAt: "2026-07-23T00:00:00.000Z",
+        },
+        { type: "done", taskId: "segment-1", followUp: { kind: "none" } },
       ]),
     );
     expect(result).toEqual({ status: "idle" });
@@ -25,14 +32,30 @@ describe("followWorldSettlement", () => {
     const result = await followWorldSettlement(
       "segment-1",
       async () => response([
-        { type: "progress", step: "extract" },
-        { type: "error", message: "抽取中断" },
+        {
+          type: "progress",
+          taskId: "segment-1",
+          taskKind: "settlement",
+          stage: "chronicle",
+          status: "running",
+          occurredAt: "2026-07-23T00:00:00.000Z",
+        },
+        {
+          type: "failed",
+          taskId: "segment-1",
+          stage: "chronicle",
+          message: "编年史写入中断",
+          retryable: true,
+        },
       ]),
     );
     expect(result).toEqual({
       status: "failed",
       segmentId: "segment-1",
-      error: "抽取中断",
+      stage: "chronicle",
+      completedStages: ["checkpoint_read", "pantheon", "extract"],
+      error: "编年史写入中断",
+      retryable: true,
     });
   });
 
@@ -46,7 +69,10 @@ describe("followWorldSettlement", () => {
     expect(result).toEqual({
       status: "failed",
       segmentId: "segment-1",
+      stage: "checkpoint_read",
+      completedStages: [],
       error: "连接断开",
+      retryable: true,
     });
   });
 });
