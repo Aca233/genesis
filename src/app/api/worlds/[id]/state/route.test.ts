@@ -54,6 +54,7 @@ const observer = (viewpoint: "omniscient" | "limited") => ({
   timeLabel: "星海元年",
   viewpoint,
   activeAvatarId: null,
+  focusedEventId: null,
 });
 const worldFixture = {
   id: "world-1",

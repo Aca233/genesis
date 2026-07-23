@@ -28,6 +28,7 @@ const originalObserver = {
   timeLabel: "星海元年",
   viewpoint: "omniscient" as const,
   activeAvatarId: null,
+  focusedEventId: null,
 };
 const ability = {
   name: "化星为刃",
