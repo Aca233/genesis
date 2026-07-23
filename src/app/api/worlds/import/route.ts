@@ -362,10 +362,6 @@ function json(v: unknown): Prisma.InputJsonValue | undefined {
   return v == null ? undefined : (v as Prisma.InputJsonValue);
 }
 
-function jsonRequired(v: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
-  return v == null ? Prisma.JsonNull : (v as Prisma.InputJsonValue);
-}
-
 function addMapping(
   map: Map<string, string>,
   archiveIds: Map<string, string>,
@@ -620,6 +616,22 @@ async function validateTimelineReferences(
 }
 
 
+function remapArchivedJson(
+  value: null,
+  idMap: ReadonlyMap<string, string>,
+): typeof Prisma.DbNull;
+function remapArchivedJson(
+  value: undefined,
+  idMap: ReadonlyMap<string, string>,
+): undefined;
+function remapArchivedJson(
+  value: object | string | number | boolean,
+  idMap: ReadonlyMap<string, string>,
+): Prisma.InputJsonValue;
+function remapArchivedJson(
+  value: unknown,
+  idMap: ReadonlyMap<string, string>,
+): Prisma.InputJsonValue | typeof Prisma.DbNull | undefined;
 function remapArchivedJson(
   value: unknown,
   idMap: ReadonlyMap<string, string>,
@@ -1008,7 +1020,9 @@ export async function POST(request: Request) {
               : crypto.randomUUID(),
             entityId: newEntityId,
             key: section.key,
-            content: jsonRequired(section.content),
+            content: section.content == null
+              ? Prisma.JsonNull
+              : remapArchivedJson(section.content, allIdMap),
             revealed: section.revealed,
             rumorText: section.rumorText ?? null,
             playerLocked: section.playerLocked,

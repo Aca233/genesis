@@ -338,7 +338,16 @@ function versionThreeArchive() {
       summary: null,
       settleState: "settled",
       snapshot: { gods: { "god-root": { id: "god-root" } } },
-      messages: [],
+      messages: [{
+        id: "message-root",
+        chapterId: "chapter-root",
+        index: 0,
+        role: "narrator",
+        content: "根源见证者记录了世界。",
+        scale: "scene",
+        variants: null,
+        meta: null,
+      }],
     }],
     gods: [{
       id: "god-root",
@@ -357,8 +366,62 @@ function versionThreeArchive() {
       faithScope: null,
       codexEntityId: null,
     }],
-    entities: [],
-    abilities: [],
+    entities: [{
+      id: "entity-root",
+      timelineId: "timeline-root",
+      type: "character",
+      name: "根源见证者",
+      aliases: [],
+      emblemSeed: "root-witness",
+      imageUrl: null,
+      starred: false,
+      isChosen: false,
+      isMajorCharacter: true,
+      isCreatorAvatar: false,
+      raceId: null,
+      heat: "active",
+      scenePresence: true,
+      summary: "记录根源现实",
+      lockedPaths: [],
+      materialRef: null,
+      sections: [{
+        id: "section-root-links",
+        entityId: "entity-root",
+        key: "graph-links",
+        content: {
+          "god-root": {
+            entityId: "entity-root",
+            abilityId: "ability-root",
+            chapterId: "chapter-root",
+            messageId: "message-root",
+            nested: { "entity-root": ["god-root", null, "message-root"] },
+          },
+        },
+        revealed: true,
+        rumorText: null,
+        playerLocked: false,
+      }],
+    }],
+    abilities: [{
+      id: "ability-root",
+      timelineId: "timeline-root",
+      entityId: null,
+      godId: "god-root",
+      sourceAbilityId: null,
+      name: "根源凝视",
+      kind: "divine",
+      effect: "见证现实",
+      trigger: "世界变化",
+      cost: "无",
+      limitations: "仅记录",
+      mastery: "master",
+      state: "normal",
+      visibility: "known",
+      rumorText: null,
+      bloodlineJustification: null,
+      lockedFields: [],
+      version: 1,
+    }],
     abilityEvents: [],
     memberships: [],
     chronicles: [],
@@ -374,6 +437,7 @@ function versionThreeArchive() {
     forkRewriteId: rewriteId,
     chapters: [],
     gods: [],
+    abilities: [],
     realityState: {
       ...structuredClone(reality),
       establishedFacts: [{
@@ -937,8 +1001,28 @@ describe("存档导入", () => {
     const avatar = lastCreateManyData(mocks.prisma.entity).find(
       (entity) => entity.isCreatorAvatar === true,
     )!;
+    const rootWitness = lastCreateManyData(mocks.prisma.entity).find(
+      (entity) => entity.name === "根源见证者",
+    )!;
+    const rootGod = lastCreateManyData(mocks.prisma.god).find((god) => god.name === "根源神")!;
+    const rootAbility = lastCreateManyData(mocks.prisma.ability).find(
+      (ability) => ability.name === "根源凝视",
+    )!;
+    const rootChapter = lastCreateManyData(mocks.prisma.chapter).find(
+      (chapter) => chapter.timelineId === root.id,
+    )!;
+    const rootMessage = lastCreateManyData(mocks.prisma.message).find(
+      (message) => message.chapterId === rootChapter.id,
+    )!;
+    const rootLinks = lastCreateManyData(mocks.prisma.entitySection).find(
+      (section) => section.key === "graph-links",
+    )!;
     const rewriteA = rewrites.find((rewrite) => rewrite.decree === "令群星长明")!;
     const rewriteB = rewrites.find((rewrite) => rewrite.decree === "令群星沉眠")!;
+    expect(typeof rootGod.id).toBe("string");
+    expect(typeof rootWitness.id).toBe("string");
+    const rootGodId = String(rootGod.id);
+    const rootWitnessId = String(rootWitness.id);
 
     expect(worldId).not.toBe("world-v3");
     expect(root).toMatchObject({ worldId, parentId: null, forkRewriteId: null });
@@ -970,6 +1054,21 @@ describe("存档导入", () => {
     expect(branchB.realityState).toMatchObject({
       establishedFacts: [expect.objectContaining({ establishedByRewriteId: rewriteB.id })],
     });
+    expect(rootLinks).toMatchObject({
+      entityId: rootWitnessId,
+      content: {
+        [rootGodId]: {
+          entityId: rootWitnessId,
+          abilityId: rootAbility.id,
+          chapterId: rootChapter.id,
+          messageId: rootMessage.id,
+          nested: { [rootWitnessId]: [rootGodId, null, rootMessage.id] },
+        },
+      },
+    });
+    expect(JSON.stringify(rootLinks.content)).not.toMatch(
+      /god-root|entity-root|ability-root|chapter-root|message-root/,
+    );
     expect(mocks.prisma.world.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ mode: "creator", activeTimelineId: null }),
     }));

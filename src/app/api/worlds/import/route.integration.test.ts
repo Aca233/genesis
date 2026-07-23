@@ -234,6 +234,7 @@ describe("存档导出导入 PostgreSQL 往返", () => {
       },
     });
     let importedWorldId: string | undefined;
+    let archivedSectionSourceIds: string[] = [];
 
     try {
       const { timelineId: rootId, chapterId } = await runClaimedEmbarkTransaction(
@@ -273,6 +274,60 @@ describe("存档导出导入 PostgreSQL 往返", () => {
             },
           });
           if (avatarId !== null) {
+            const branchGodId = crypto.randomUUID();
+            const branchAbilityId = crypto.randomUUID();
+            const branchChapterId = crypto.randomUUID();
+            const branchMessageId = crypto.randomUUID();
+            await tx.chapter.create({
+              data: {
+                id: branchChapterId,
+                timelineId: branchId,
+                index: 0,
+                settleState: "settled",
+              },
+            });
+            await tx.message.create({
+              data: {
+                id: branchMessageId,
+                chapterId: branchChapterId,
+                index: 0,
+                role: "narrator",
+                content: "化身见证群星沉眠。",
+              },
+            });
+            await tx.god.create({
+              data: {
+                id: branchGodId,
+                timelineId: branchId,
+                name: "沉眠守望神",
+                aliases: [],
+                tier: "major",
+                rank: "ascendant",
+                domains: ["沉眠"],
+              },
+            });
+            await tx.ability.create({
+              data: {
+                id: branchAbilityId,
+                timelineId: branchId,
+                godId: branchGodId,
+                name: "沉眠见证",
+                kind: "divine",
+                effect: "记录沉眠现实",
+                trigger: "群星沉眠",
+                cost: "无",
+                limitations: "仅限此现实",
+                mastery: "master",
+                lockedFields: [],
+              },
+            });
+            archivedSectionSourceIds = [
+              branchGodId,
+              avatarId,
+              branchAbilityId,
+              branchChapterId,
+              branchMessageId,
+            ];
             await tx.entity.create({
               data: {
                 id: avatarId,
@@ -287,7 +342,16 @@ describe("存档导出导入 PostgreSQL 往返", () => {
                 sections: {
                   create: {
                     key: "identity",
-                    content: { hiddenTruth: "来自世界之外" },
+                    content: {
+                      hiddenTruth: "来自世界之外",
+                      [branchGodId]: {
+                        entityId: avatarId,
+                        abilityId: branchAbilityId,
+                        chapterId: branchChapterId,
+                        messageId: branchMessageId,
+                        nested: { [avatarId]: [branchGodId, null, branchMessageId] },
+                      },
+                    },
                     revealed: false,
                     rumorText: "无名旅者",
                   },
@@ -341,7 +405,14 @@ describe("存档导出导入 PostgreSQL 往返", () => {
       const restored = await prisma.world.findUniqueOrThrow({
         where: { id: importedWorldId },
         include: {
-          timelines: { include: { entities: { include: { sections: true } } } },
+          timelines: {
+            include: {
+              chapters: { include: { messages: true } },
+              gods: true,
+              entities: { include: { sections: true } },
+              abilities: true,
+            },
+          },
           rewrites: true,
         },
       });
@@ -351,6 +422,10 @@ describe("存档导出导入 PostgreSQL 往返", () => {
         (timeline) => timeline.id === restored.activeTimelineId,
       )!;
       const restoredAvatar = restoredActive.entities.find((entity) => entity.isCreatorAvatar)!;
+      const restoredGod = restoredActive.gods.find((god) => god.name === "沉眠守望神")!;
+      const restoredAbility = restoredActive.abilities.find((ability) => ability.name === "沉眠见证")!;
+      const restoredChapter = restoredActive.chapters[0]!;
+      const restoredMessage = restoredChapter.messages[0]!;
 
       expect(restored.mode).toBe("creator");
       expect(restoredChildren).toHaveLength(2);
@@ -367,8 +442,20 @@ describe("存档导出导入 PostgreSQL 往返", () => {
       });
       expect(restoredAvatar.sections[0]).toMatchObject({
         revealed: false,
-        content: { hiddenTruth: "来自世界之外" },
+        content: {
+          hiddenTruth: "来自世界之外",
+          [restoredGod.id]: {
+            entityId: restoredAvatar.id,
+            abilityId: restoredAbility.id,
+            chapterId: restoredChapter.id,
+            messageId: restoredMessage.id,
+            nested: { [restoredAvatar.id]: [restoredGod.id, null, restoredMessage.id] },
+          },
+        },
       });
+      for (const sourceId of archivedSectionSourceIds) {
+        expect(JSON.stringify(restoredAvatar.sections[0].content)).not.toContain(sourceId);
+      }
       expect(restored.rewrites.every((rewrite) => rewrite.error === null)).toBe(true);
     } finally {
       if (importedWorldId) await prisma.world.delete({ where: { id: importedWorldId } });

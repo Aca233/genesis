@@ -264,6 +264,23 @@ async function fixture() {
       dedupeKey: `${chapterOne.id}:${learnedAbility.id}:learned:${messageOne.id}`,
     },
   });
+  await prisma.entitySection.create({
+    data: {
+      entityId: avatar.id,
+      key: "graph-links",
+      content: {
+        [dawnGod.id]: {
+          entityId: avatar.id,
+          abilityId: learnedAbility.id,
+          chapterId: chapterOne.id,
+          messageId: messageOne.id,
+          nested: {
+            [faction.id]: [race.id, null, duskGod.id],
+          },
+        },
+      },
+    },
+  });
   const chronicle = await prisma.chronicleEntry.create({
     data: {
       timelineId: timeline.id,
@@ -528,6 +545,27 @@ describe("cloneTimelineGraph", () => {
       const clonedAvatar = cloned.timeline.entities.find((item) => item.name === data.avatar.name)!;
       expect(clonedAvatar.raceId).toBe(clonedRace.id);
       expect(clonedAvatar.id).toBe(result.maps.entityIds.get(data.avatar.id));
+      const graphLinks = clonedAvatar.sections.find((section) => section.key === "graph-links")!;
+      expect(graphLinks.content).toEqual({
+        [result.maps.godIds.get(data.dawnGod.id)!]: {
+          entityId: result.maps.entityIds.get(data.avatar.id),
+          abilityId: result.maps.abilityIds.get(data.learnedAbility.id),
+          chapterId: result.maps.chapterIds.get(data.chapterOne.id),
+          messageId: result.maps.messageIds.get(data.messageOne.id),
+          nested: {
+            [result.maps.entityIds.get(data.faction.id)!]: [
+              result.maps.entityIds.get(data.race.id),
+              null,
+              result.maps.godIds.get(data.duskGod.id),
+            ],
+          },
+        },
+      });
+      expect(JSON.stringify(graphLinks.content)).not.toContain(data.dawnGod.id);
+      expect(JSON.stringify(graphLinks.content)).not.toContain(data.avatar.id);
+      expect(JSON.stringify(graphLinks.content)).not.toContain(data.learnedAbility.id);
+      expect(JSON.stringify(graphLinks.content)).not.toContain(data.chapterOne.id);
+      expect(JSON.stringify(graphLinks.content)).not.toContain(data.messageOne.id);
       expect(cloned.timeline.entities.flatMap((item) => item.sections).map((item) => item.id))
         .not.toEqual(expect.arrayContaining(before.timeline.entities.flatMap((item) => item.sections).map((item) => item.id)));
 

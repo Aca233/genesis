@@ -30,17 +30,29 @@ function nullableJson(value: Prisma.JsonValue | null) {
     : deepCopyJson(value) as Prisma.InputJsonValue;
 }
 
-function requiredJson(value: Prisma.JsonValue) {
-  return value === null
-    ? Prisma.JsonNull
-    : deepCopyJson(value) as Prisma.InputJsonValue;
-}
-
 /**
  * Runtime snapshots and narration metadata embed graph IDs in both values and
  * relation-map keys. Remap exact source IDs and remove request-only metadata;
  * the corresponding GenerationRequest rows deliberately do not cross realities.
  */
+function remapRuntimeJson(
+  value: Exclude<Prisma.JsonValue, null>,
+  idMap: ReadonlyMap<string, string>,
+  sourceIds: ReadonlySet<string>,
+  label: string,
+): Prisma.InputJsonValue;
+function remapRuntimeJson(
+  value: null,
+  idMap: ReadonlyMap<string, string>,
+  sourceIds: ReadonlySet<string>,
+  label: string,
+): typeof Prisma.DbNull;
+function remapRuntimeJson(
+  value: Prisma.JsonValue | null,
+  idMap: ReadonlyMap<string, string>,
+  sourceIds: ReadonlySet<string>,
+  label: string,
+): Prisma.InputJsonValue | typeof Prisma.DbNull;
 function remapRuntimeJson(
   value: Prisma.JsonValue | null,
   idMap: ReadonlyMap<string, string>,
@@ -397,7 +409,9 @@ export async function cloneTimelineGraph(
         data: {
           entityId,
           key: section.key,
-          content: requiredJson(section.content),
+          content: section.content === null
+            ? Prisma.JsonNull
+            : remapRuntimeJson(section.content, idMap, sourceIds, "实体栏目内容"),
           revealed: section.revealed,
           rumorText: section.rumorText,
           playerLocked: section.playerLocked,
