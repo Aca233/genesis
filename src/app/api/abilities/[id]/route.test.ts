@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     message: { findUnique: vi.fn() },
     timeline: { findUnique: vi.fn() },
     realityRewrite: { findFirst: vi.fn() },
+    generationRequest: { findFirst: vi.fn().mockResolvedValue(null) },
     ability: { findUnique: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn(), create: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
     abilityEvent: { findUnique: vi.fn(), create: vi.fn(), findMany: vi.fn(), count: vi.fn() },
     $transaction: vi.fn(),

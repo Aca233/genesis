@@ -4,7 +4,14 @@ const mocks = vi.hoisted(() => ({
   ensure: vi.fn(),
   findFirst: vi.fn(),
   dto: vi.fn((task: Record<string, unknown>) => task),
-  stages: vi.fn(() => ["planning", "branching", "applying", "narrating", "completed"]),
+  progress: vi.fn(() => ({
+    taskKind: "rewrite",
+    taskId: "rewrite-1",
+    stage: "completed",
+    status: "completed",
+    retryable: false,
+    updatedAt: "2026-07-22T00:00:00.000Z",
+  })),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -12,7 +19,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/reality/task-runner", () => ({
   ensureRealityRewriteRunning: mocks.ensure,
-  rewriteStages: mocks.stages,
+  rewriteDurableProgress: mocks.progress,
   toRealityRewriteDto: mocks.dto,
 }));
 
@@ -36,9 +43,9 @@ describe("rewrite SSE events", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toContain("text/event-stream");
     const body = await response.text();
-    for (const stage of ["planning", "branching", "applying", "narrating", "completed"]) {
-      expect(body).toContain(`event: ${stage}`);
-    }
+    expect(body).toContain("\"type\":\"progress\"");
+    expect(body).toContain("\"stage\":\"completed\"");
+    expect(body).toContain("\"type\":\"done\"");
     expect(body).not.toContain("leaseToken");
     expect(mocks.ensure).not.toHaveBeenCalled();
   });
