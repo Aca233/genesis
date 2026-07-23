@@ -473,7 +473,13 @@ function remapStableRef(
 /** Translate source-graph IDs in a validated plan to the cloned graph. */
 export function remapRewritePlanForClone(
   plan: RewritePlan,
-  maps: TimelineCloneMaps,
+  maps: Pick<
+    TimelineCloneMaps,
+    "godIds" | "entityIds" | "abilityIds" | "chronicleIds"
+  > & Partial<Omit<
+    TimelineCloneMaps,
+    "godIds" | "entityIds" | "abilityIds" | "chronicleIds"
+  >>,
   omenIds: ReadonlyMap<string, string> = new Map(),
 ): RewritePlan {
   const godRef = (ref: string) => remapStableRef(ref, [maps.godIds]);

@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { remapWorldActivityGraph } from "@/lib/world-activity/clone";
 
 const RESERVED_GOD_RELATION_KEYS = new Set(["player"]);
 
@@ -10,6 +11,8 @@ export type TimelineCloneMaps = {
   abilityIds: Map<string, string>;
   abilityEventIds: Map<string, string>;
   chronicleIds: Map<string, string>;
+  eventIds: Map<string, string>;
+  activityIds: Map<string, string>;
 };
 
 type CloneInput = {
@@ -130,7 +133,7 @@ function remapGodRelations(
 
 function remapObserverState(
   value: Prisma.JsonValue | null,
-  maps: Pick<TimelineCloneMaps, "godIds" | "entityIds">,
+  maps: Pick<TimelineCloneMaps, "godIds" | "entityIds" | "eventIds">,
 ): Prisma.InputJsonValue | typeof Prisma.DbNull {
   if (value === null) return Prisma.DbNull;
   const cloned = deepCopyJson(value);
@@ -155,6 +158,13 @@ function remapObserverState(
       maps.entityIds,
       observer.activeAvatarId,
       "当前化身实体",
+    );
+  }
+  if (typeof observer.focusedEventId === "string") {
+    observer.focusedEventId = requireMapped(
+      maps.eventIds,
+      observer.focusedEventId,
+      "关注事件",
     );
   }
   return observer as Prisma.InputJsonValue;
@@ -217,6 +227,8 @@ export async function cloneTimelineGraph(
       },
       chronicles: { orderBy: [{ chapterIndex: "asc" }, { createdAt: "asc" }] },
       omens: { orderBy: { createdAt: "asc" } },
+      worldEvents: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+      worldActivities: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
     },
   });
   if (source.worldId !== input.worldId) {
@@ -249,6 +261,8 @@ export async function cloneTimelineGraph(
       ability.events.map((row) => [row.id, crypto.randomUUID()] as const)
     )),
     chronicleIds: new Map(source.chronicles.map((row) => [row.id, crypto.randomUUID()])),
+    eventIds: new Map(source.worldEvents.map((row) => [row.id, crypto.randomUUID()])),
+    activityIds: new Map(source.worldActivities.map((row) => [row.id, crypto.randomUUID()])),
   };
 
   // Pass 1: create the child and identity-bearing roots. Forward references are
@@ -274,6 +288,8 @@ export async function cloneTimelineGraph(
     ...maps.abilityIds,
     ...maps.abilityEventIds,
     ...maps.chronicleIds,
+    ...maps.eventIds,
+    ...maps.activityIds,
   ]);
   const sourceIds = new Set(idMap.keys());
 
@@ -542,6 +558,74 @@ export async function cloneTimelineGraph(
         text: omen.text,
         consumed: omen.consumed,
         createdAt: omen.createdAt,
+      },
+    });
+  }
+
+  const worldActivityGraph = remapWorldActivityGraph({
+    events: source.worldEvents,
+    activities: source.worldActivities,
+    observerState: null,
+  }, {
+    event: maps.eventIds,
+    activity: maps.activityIds,
+    message: maps.messageIds,
+    god: maps.godIds,
+    entity: maps.entityIds,
+  }, child.id);
+
+  // Events and activities form a cyclic graph through originActivityId and
+  // eventId. Create identity-bearing event rows first, then activities, and
+  // only then restore event-to-event and event-to-origin edges.
+  for (const event of worldActivityGraph.events) {
+    await tx.worldEvent.create({
+      data: {
+        id: event.id,
+        timelineId: child.id,
+        kind: event.kind,
+        title: event.title,
+        summary: event.summary,
+        phase: event.phase,
+        visibility: event.visibility,
+        participantIds: event.participantIds,
+        originMessageId: event.originMessageId,
+        originActivityId: null,
+        latestMessageId: event.latestMessageId,
+        parentEventId: null,
+        createdAt: event.createdAt,
+        updatedAt: event.updatedAt,
+        resolvedAt: event.resolvedAt,
+      },
+    });
+  }
+  for (const activity of worldActivityGraph.activities) {
+    await tx.worldActivity.create({
+      data: {
+        id: activity.id,
+        timelineId: child.id,
+        eventId: activity.eventId,
+        recordType: activity.recordType,
+        kind: activity.kind,
+        text: activity.text,
+        visibility: activity.visibility,
+        actorId: activity.actorId,
+        targetIds: activity.targetIds,
+        subjectIds: activity.subjectIds,
+        sourceMessageId: activity.sourceMessageId,
+        eraLabel: activity.eraLabel,
+        timeLabel: activity.timeLabel,
+        createdAt: activity.createdAt,
+      },
+    });
+  }
+  for (const event of worldActivityGraph.events) {
+    if (event.parentEventId === null && event.originActivityId === null) continue;
+    await tx.worldEvent.update({
+      where: { id: event.id },
+      data: {
+        parentEventId: event.parentEventId,
+        originActivityId: event.originActivityId,
+        updatedAt: event.updatedAt,
       },
     });
   }

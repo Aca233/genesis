@@ -29,6 +29,8 @@ async function sourceGraph(timelineId: string) {
       },
       chronicles: { orderBy: [{ chapterIndex: "asc" }, { id: "asc" }] },
       omens: { orderBy: { id: "asc" } },
+      worldEvents: { orderBy: { createdAt: "asc" } },
+      worldActivities: { orderBy: { createdAt: "asc" } },
     },
   });
   const memberships = await prisma.entityMembership.findMany({
@@ -347,6 +349,83 @@ async function fixture() {
   await prisma.omenQueue.create({
     data: { timelineId: timeline.id, godId: duskGod.id, text: "暮色将遮蔽星图", consumed: false },
   });
+  const originActivity = await prisma.worldActivity.create({
+    data: {
+      id: `activity-${crypto.randomUUID()}`,
+      timelineId: timeline.id,
+      eventId: null,
+      recordType: "activity",
+      kind: "politics",
+      text: "观星会使者在雪夜失踪。",
+      visibility: "public",
+      actorId: avatar.id,
+      targetIds: [faction.id, dawnGod.id],
+      subjectIds: [avatar.id, faction.id],
+      sourceMessageId: messageOne.id,
+      eraLabel: "星历二年",
+      timeLabel: "雪夜",
+    },
+  });
+  const parentWorldEvent = await prisma.worldEvent.create({
+    data: {
+      id: `event-${crypto.randomUUID()}`,
+      timelineId: timeline.id,
+      kind: "war",
+      title: "双神边境冲突",
+      summary: "曙光与暮色的信众在山口对峙。",
+      phase: "escalating",
+      visibility: "public",
+      participantIds: [dawnGod.id, duskGod.id, faction.id],
+      originMessageId: messageOne.id,
+      originActivityId: originActivity.id,
+      latestMessageId: messageTwo.id,
+    },
+  });
+  const childWorldEvent = await prisma.worldEvent.create({
+    data: {
+      id: `event-${crypto.randomUUID()}`,
+      timelineId: timeline.id,
+      kind: "conspiracy",
+      title: "失踪者的星图",
+      summary: "有人借冲突掩盖被篡改的星图。",
+      phase: "emerging",
+      visibility: "hidden",
+      participantIds: [avatar.id, faction.id],
+      originMessageId: messageTwo.id,
+      latestMessageId: messageTwo.id,
+      parentEventId: parentWorldEvent.id,
+    },
+  });
+  const progressActivity = await prisma.worldActivity.create({
+    data: {
+      id: `activity-${crypto.randomUUID()}`,
+      timelineId: timeline.id,
+      eventId: childWorldEvent.id,
+      recordType: "event_progress",
+      kind: "conspiracy",
+      text: "阿岚发现星图上有暮色神的印记。",
+      visibility: "hidden",
+      actorId: null,
+      targetIds: [duskGod.id],
+      subjectIds: [avatar.id, duskGod.id],
+      sourceMessageId: messageTwo.id,
+      eraLabel: "星历二年",
+      timeLabel: "次日",
+    },
+  });
+  await prisma.timeline.update({
+    where: { id: timeline.id },
+    data: {
+      observerState: {
+        focusType: "god",
+        focusId: dawnGod.id,
+        timeLabel: "星历二年",
+        viewpoint: "limited",
+        activeAvatarId: avatar.id,
+        focusedEventId: childWorldEvent.id,
+      },
+    },
+  });
   await prisma.generationRequest.create({
     data: {
       id: `generation-${crypto.randomUUID()}`,
@@ -377,7 +456,8 @@ async function fixture() {
   return {
     world, timeline, rewrite, chapterOne, chapterTwo, messageOne, messageTwo,
     dawnGod, duskGod, race, faction, avatar, sourceAbility, learnedAbility,
-    abilityEvent, chronicle,
+    abilityEvent, chronicle, originActivity, parentWorldEvent, childWorldEvent,
+    progressActivity,
   };
 }
 
@@ -419,6 +499,7 @@ describe("cloneTimelineGraph", () => {
       expect(cloned.timeline.observerState).toMatchObject({
         focusId: result.maps.godIds.get(data.dawnGod.id),
         activeAvatarId: result.maps.entityIds.get(data.avatar.id),
+        focusedEventId: result.maps.eventIds.get(data.childWorldEvent.id),
       });
       expect(cloned.timeline.chapters).toHaveLength(2);
       expect(cloned.timeline.gods).toHaveLength(2);
@@ -426,18 +507,24 @@ describe("cloneTimelineGraph", () => {
       expect(cloned.timeline.abilities).toHaveLength(3);
       expect(cloned.timeline.chronicles).toHaveLength(1);
       expect(cloned.timeline.omens).toHaveLength(1);
+      expect(cloned.timeline.worldEvents).toHaveLength(2);
+      expect(cloned.timeline.worldActivities).toHaveLength(2);
       expect(cloned.memberships).toHaveLength(1);
       expect(result.maps.chapterIds.size).toBe(2);
       expect(result.maps.messageIds.size).toBe(2);
       expect(result.maps.godIds.size).toBe(2);
       expect(result.maps.entityIds.size).toBe(3);
       expect(result.maps.abilityIds.size).toBe(3);
+      expect(result.maps.eventIds.size).toBe(2);
+      expect(result.maps.activityIds.size).toBe(2);
       expect(cloned.timeline.chapters.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.gods.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.entities.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.abilities.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.chronicles.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.omens.every((row) => row.timelineId === result.timelineId)).toBe(true);
+      expect(cloned.timeline.worldEvents.every((row) => row.timelineId === result.timelineId)).toBe(true);
+      expect(cloned.timeline.worldActivities.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.entities.every((entity) =>
         entity.sections.every((section) => section.entityId === entity.id)
       )).toBe(true);
@@ -465,6 +552,8 @@ describe("cloneTimelineGraph", () => {
       expectDisjointIds(before.memberships, cloned.memberships);
       expectDisjointIds(before.timeline.chronicles, cloned.timeline.chronicles);
       expectDisjointIds(before.timeline.omens, cloned.timeline.omens);
+      expectDisjointIds(before.timeline.worldEvents, cloned.timeline.worldEvents);
+      expectDisjointIds(before.timeline.worldActivities, cloned.timeline.worldActivities);
 
       for (const sourceChapter of before.timeline.chapters) {
         const chapter = cloned.timeline.chapters.find((item) => item.index === sourceChapter.index)!;
@@ -606,6 +695,45 @@ describe("cloneTimelineGraph", () => {
       expect(cloned.timeline.chronicles[0]!.id).not.toBe(before.timeline.chronicles[0]!.id);
       expect(cloned.timeline.omens[0]).toMatchObject({ godId: clonedDusk.id, text: "暮色将遮蔽星图" });
       expect(cloned.timeline.omens[0]!.id).not.toBe(before.timeline.omens[0]!.id);
+
+      const clonedParentEvent = cloned.timeline.worldEvents.find((event) =>
+        event.id === result.maps.eventIds.get(data.parentWorldEvent.id)
+      )!;
+      const clonedChildEvent = cloned.timeline.worldEvents.find((event) =>
+        event.id === result.maps.eventIds.get(data.childWorldEvent.id)
+      )!;
+      const clonedOriginActivity = cloned.timeline.worldActivities.find((activity) =>
+        activity.id === result.maps.activityIds.get(data.originActivity.id)
+      )!;
+      const clonedProgressActivity = cloned.timeline.worldActivities.find((activity) =>
+        activity.id === result.maps.activityIds.get(data.progressActivity.id)
+      )!;
+      expect(clonedParentEvent).toMatchObject({
+        participantIds: [clonedDawn.id, clonedDusk.id, clonedFaction.id],
+        originMessageId: result.maps.messageIds.get(data.messageOne.id),
+        originActivityId: clonedOriginActivity.id,
+        latestMessageId: result.maps.messageIds.get(data.messageTwo.id),
+      });
+      expect(clonedChildEvent).toMatchObject({
+        parentEventId: clonedParentEvent.id,
+        participantIds: [clonedAvatar.id, clonedFaction.id],
+        originMessageId: result.maps.messageIds.get(data.messageTwo.id),
+        latestMessageId: result.maps.messageIds.get(data.messageTwo.id),
+      });
+      expect(clonedOriginActivity).toMatchObject({
+        eventId: null,
+        actorId: clonedAvatar.id,
+        targetIds: [clonedFaction.id, clonedDawn.id],
+        subjectIds: [clonedAvatar.id, clonedFaction.id],
+        sourceMessageId: result.maps.messageIds.get(data.messageOne.id),
+      });
+      expect(clonedProgressActivity).toMatchObject({
+        eventId: clonedChildEvent.id,
+        actorId: null,
+        targetIds: [clonedDusk.id],
+        subjectIds: [clonedAvatar.id, clonedDusk.id],
+        sourceMessageId: result.maps.messageIds.get(data.messageTwo.id),
+      });
     } finally {
       await prisma.world.delete({ where: { id: data.world.id } });
     }

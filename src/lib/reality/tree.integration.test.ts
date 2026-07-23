@@ -8,6 +8,7 @@ import {
   switchReality,
   undoReality,
 } from "./tree";
+import { settleChapter } from "@/lib/settle/pipeline";
 
 const { prisma } = await import("@/lib/db");
 const worldIds: string[] = [];
@@ -187,6 +188,40 @@ describe("reality tree persistence operations", () => {
     })).rejects.toBeInstanceOf(RealityTreeValidationError);
     expect(await prisma.timeline.findUnique({ where: { id: data.child.id } })).not.toBeNull();
     expect(await prisma.realityRewrite.findUnique({ where: { id: data.rewriteOne.id } })).not.toBeNull();
+  });
+
+  it("冻结现实不能通过世界整理推进事件", async () => {
+    const data = await fixture();
+    const event = await prisma.worldEvent.create({
+      data: {
+        id: `frozen-event-${crypto.randomUUID()}`,
+        timelineId: data.root.id,
+        kind: "war",
+        title: "冻结的战火",
+        summary: "此事件属于非活动现实。",
+        phase: "developing",
+        visibility: "public",
+        participantIds: [],
+        originMessageId: "frozen-origin",
+        latestMessageId: "frozen-latest",
+      },
+    });
+    const before = await prisma.worldEvent.findUniqueOrThrow({ where: { id: event.id } });
+
+    const run = async () => {
+      for await (const progress of settleChapter(
+        (await prisma.chapter.findFirstOrThrow({
+          where: { timelineId: data.root.id },
+          select: { id: true },
+        })).id,
+      )) {
+        // Consume the runner so the frozen-reality guard executes.
+        void progress;
+      }
+    };
+
+    await expect(run()).rejects.toThrow("该现实已被冻结");
+    expect(await prisma.worldEvent.findUniqueOrThrow({ where: { id: event.id } })).toEqual(before);
   });
 });
 
