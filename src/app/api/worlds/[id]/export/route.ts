@@ -118,6 +118,17 @@ const WORLD_ACTIVITY_KEYS = [
   "createdAt",
 ] as const;
 
+const ENTITY_RELATION_KEYS = [
+  "id",
+  "timelineId",
+  "sourceEntityId",
+  "targetEntityId",
+  "label",
+  "note",
+  "createdAt",
+  "updatedAt",
+] as const;
+
 function projectFields(value: unknown, keys: readonly string[]) {
   const source = record(value);
   return Object.fromEntries(keys.map((key) => [key, source[key]]));
@@ -143,6 +154,8 @@ function projectVersionFourWorld(value: unknown) {
           .map((event) => projectFields(event, WORLD_EVENT_KEYS)),
         worldActivities: (Array.isArray(source.worldActivities) ? source.worldActivities : [])
           .map((activity) => projectFields(activity, WORLD_ACTIVITY_KEYS)),
+        entityRelations: (Array.isArray(source.entityRelations) ? source.entityRelations : [])
+          .map((relation) => projectFields(relation, ENTITY_RELATION_KEYS)),
       };
     }),
   };
@@ -177,6 +190,7 @@ export async function GET(
           omens: { orderBy: { createdAt: "asc" } },
           worldEvents: { orderBy: { createdAt: "asc" } },
           worldActivities: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+          entityRelations: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
         },
       },
       rewrites: { orderBy: { createdAt: "asc" } },

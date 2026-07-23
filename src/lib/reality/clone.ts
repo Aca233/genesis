@@ -16,6 +16,7 @@ export type TimelineCloneMaps = {
   chronicleIds: Map<string, string>;
   eventIds: Map<string, string>;
   activityIds: Map<string, string>;
+  entityRelationIds: Map<string, string>;
 };
 
 type CloneInput = {
@@ -232,6 +233,7 @@ export async function cloneTimelineGraph(
       omens: { orderBy: { createdAt: "asc" } },
       worldEvents: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       worldActivities: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+      entityRelations: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
     },
   });
   if (source.worldId !== input.worldId) {
@@ -267,6 +269,7 @@ export async function cloneTimelineGraph(
     chronicleIds: new Map(source.chronicles.map((row) => [row.id, crypto.randomUUID()])),
     eventIds: new Map(source.worldEvents.map((row) => [row.id, crypto.randomUUID()])),
     activityIds: new Map(source.worldActivities.map((row) => [row.id, crypto.randomUUID()])),
+    entityRelationIds: new Map(source.entityRelations.map((row) => [row.id, crypto.randomUUID()])),
   };
 
   // Pass 1: create the child and identity-bearing roots. Forward references are
@@ -294,6 +297,7 @@ export async function cloneTimelineGraph(
     ...maps.chronicleIds,
     ...maps.eventIds,
     ...maps.activityIds,
+    ...maps.entityRelationIds,
   ]);
   const sourceIds = new Set(idMap.keys());
 
@@ -562,6 +566,29 @@ export async function cloneTimelineGraph(
         text: omen.text,
         consumed: omen.consumed,
         createdAt: omen.createdAt,
+      },
+    });
+  }
+
+  for (const relation of source.entityRelations) {
+    await tx.entityRelation.create({
+      data: {
+        id: requireMapped(maps.entityRelationIds, relation.id, "实体关系"),
+        timelineId: child.id,
+        sourceEntityId: requireMapped(
+          maps.entityIds,
+          relation.sourceEntityId,
+          "关系来源实体",
+        ),
+        targetEntityId: requireMapped(
+          maps.entityIds,
+          relation.targetEntityId,
+          "关系目标实体",
+        ),
+        label: relation.label,
+        note: relation.note,
+        createdAt: relation.createdAt,
+        updatedAt: relation.updatedAt,
       },
     });
   }

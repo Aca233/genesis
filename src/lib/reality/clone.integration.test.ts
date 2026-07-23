@@ -31,6 +31,7 @@ async function sourceGraph(timelineId: string) {
       omens: { orderBy: { id: "asc" } },
       worldEvents: { orderBy: { createdAt: "asc" } },
       worldActivities: { orderBy: { createdAt: "asc" } },
+      entityRelations: { orderBy: { id: "asc" } },
     },
   });
   const memberships = await prisma.entityMembership.findMany({
@@ -253,6 +254,15 @@ async function fixture() {
   await prisma.entityMembership.create({
     data: { characterId: avatar.id, factionId: faction.id, role: "观星者", isPrimary: true },
   });
+  const entityRelation = await prisma.entityRelation.create({
+    data: {
+      timelineId: timeline.id,
+      sourceEntityId: avatar.id,
+      targetEntityId: faction.id,
+      label: "盟友",
+      note: "阿岚受观星会接纳。",
+    },
+  });
   const abilityEvent = await prisma.abilityEvent.create({
     data: {
       abilityId: learnedAbility.id,
@@ -457,7 +467,7 @@ async function fixture() {
     world, timeline, rewrite, chapterOne, chapterTwo, messageOne, messageTwo,
     dawnGod, duskGod, race, faction, avatar, sourceAbility, learnedAbility,
     abilityEvent, chronicle, originActivity, parentWorldEvent, childWorldEvent,
-    progressActivity,
+    progressActivity, entityRelation,
   };
 }
 
@@ -509,6 +519,7 @@ describe("cloneTimelineGraph", () => {
       expect(cloned.timeline.omens).toHaveLength(1);
       expect(cloned.timeline.worldEvents).toHaveLength(2);
       expect(cloned.timeline.worldActivities).toHaveLength(2);
+      expect(cloned.timeline.entityRelations).toHaveLength(1);
       expect(cloned.memberships).toHaveLength(1);
       expect(result.maps.chapterIds.size).toBe(2);
       expect(result.maps.messageIds.size).toBe(2);
@@ -517,6 +528,7 @@ describe("cloneTimelineGraph", () => {
       expect(result.maps.abilityIds.size).toBe(3);
       expect(result.maps.eventIds.size).toBe(2);
       expect(result.maps.activityIds.size).toBe(2);
+      expect(result.maps.entityRelationIds.size).toBe(1);
       expect(cloned.timeline.chapters.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.gods.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.entities.every((row) => row.timelineId === result.timelineId)).toBe(true);
@@ -525,6 +537,7 @@ describe("cloneTimelineGraph", () => {
       expect(cloned.timeline.omens.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.worldEvents.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.worldActivities.every((row) => row.timelineId === result.timelineId)).toBe(true);
+      expect(cloned.timeline.entityRelations.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.entities.every((entity) =>
         entity.sections.every((section) => section.entityId === entity.id)
       )).toBe(true);
@@ -554,6 +567,7 @@ describe("cloneTimelineGraph", () => {
       expectDisjointIds(before.timeline.omens, cloned.timeline.omens);
       expectDisjointIds(before.timeline.worldEvents, cloned.timeline.worldEvents);
       expectDisjointIds(before.timeline.worldActivities, cloned.timeline.worldActivities);
+      expectDisjointIds(before.timeline.entityRelations, cloned.timeline.entityRelations);
 
       for (const sourceChapter of before.timeline.chapters) {
         const chapter = cloned.timeline.chapters.find((item) => item.index === sourceChapter.index)!;
@@ -688,6 +702,13 @@ describe("cloneTimelineGraph", () => {
 
       expect(cloned.memberships[0]).toMatchObject({ characterId: clonedAvatar.id, factionId: clonedFaction.id, role: "观星者" });
       expect(cloned.memberships[0]!.id).not.toBe(before.memberships[0]!.id);
+      expect(cloned.timeline.entityRelations[0]).toMatchObject({
+        id: result.maps.entityRelationIds.get(data.entityRelation.id),
+        sourceEntityId: clonedAvatar.id,
+        targetEntityId: clonedFaction.id,
+        label: "盟友",
+        note: "阿岚受观星会接纳。",
+      });
       expect(cloned.timeline.chronicles[0]).toMatchObject({
         entityIds: [clonedAvatar.id, clonedRace.id, clonedFaction.id],
         godIds: [clonedDawn.id, clonedDusk.id],

@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
       realityRewrite: model(),
       worldEvent: model(),
       worldActivity: model(),
+      entityRelation: model(),
       $transaction: vi.fn(),
     },
   };
@@ -544,6 +545,7 @@ function versionFourArchive() {
   const root = archive.world.timelines[0] as typeof archive.world.timelines[0] & {
     worldEvents: Array<Record<string, unknown>>;
     worldActivities: Array<Record<string, unknown>>;
+    entityRelations: Array<Record<string, unknown>>;
   };
   root.observerState = {
     ...root.observerState,
@@ -613,8 +615,18 @@ function versionFourArchive() {
     timeLabel: "第二日",
     createdAt: "2026-07-22T00:02:00.000Z",
   }];
+  root.entityRelations = [{
+    id: "entity-relation-root",
+    timelineId: "timeline-root",
+    sourceEntityId: "entity-root",
+    targetEntityId: "entity-root",
+    label: "自省",
+    note: "见证者审视自身。",
+    createdAt: "2026-07-22T00:00:00.000Z",
+    updatedAt: "2026-07-22T00:03:00.000Z",
+  }];
   for (const timeline of archive.world.timelines.slice(1)) {
-    Object.assign(timeline, { worldEvents: [], worldActivities: [] });
+    Object.assign(timeline, { worldEvents: [], worldActivities: [], entityRelations: [] });
   }
   return archive;
 }
@@ -728,6 +740,7 @@ describe("存档导入", () => {
     expect(response.status).toBe(200);
     expect(lastCreateManyData(mocks.prisma.worldEvent)).toEqual([]);
     expect(lastCreateManyData(mocks.prisma.worldActivity)).toEqual([]);
+    expect(lastCreateManyData(mocks.prisma.entityRelation)).toEqual([]);
     expect(lastCreateManyData(mocks.prisma.timeline)[0].observerState).toMatchObject({
       focusedEventId: null,
     });
@@ -1211,6 +1224,7 @@ describe("存档导入", () => {
     )!;
     const events = lastCreateManyData(mocks.prisma.worldEvent);
     const activities = lastCreateManyData(mocks.prisma.worldActivity);
+    const relations = lastCreateManyData(mocks.prisma.entityRelation);
     const parent = events.find((row) => row.title === "无声议会")!;
     const child = events.find((row) => row.title === "黑蜡盟约")!;
     const origin = activities.find((row) => row.text === "议会在暗处召开。")!;
@@ -1255,6 +1269,32 @@ describe("存档导入", () => {
     expect(JSON.stringify({ timeline, events, activities })).not.toMatch(
       /world-event-(?:parent|child)|world-activity-(?:origin|progress)/,
     );
+    expect(relations).toEqual([expect.objectContaining({
+      sourceEntityId: expect.any(String),
+      targetEntityId: expect.any(String),
+      label: "自省",
+      note: "见证者审视自身。",
+    })]);
+    expect(relations[0].id).not.toBe("entity-relation-root");
+    expect(relations[0].timelineId).toBe(timeline.id);
+    expect(relations[0].sourceEntityId).not.toBe("entity-root");
+    expect(relations[0].targetEntityId).not.toBe("entity-root");
+  });
+
+  it.each([
+    ["来源实体", "sourceEntityId", "avatar-b"],
+    ["目标实体", "targetEntityId", "missing-entity"],
+  ])("version 4 拒绝跨现实或悬空的关系%s", async (_label, key, value) => {
+    const archive = versionFourArchive();
+    const relation = (archive.world.timelines[0] as unknown as {
+      entityRelations: Array<Record<string, unknown>>;
+    }).entityRelations[0];
+    relation[key] = value;
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -300,6 +300,19 @@ const WorldActivitySchema = z
   })
   .strict();
 
+const EntityRelationSchema = z
+  .object({
+    id: IdSchema,
+    timelineId: OptionalIdSchema,
+    sourceEntityId: IdSchema,
+    targetEntityId: IdSchema,
+    label: ShortStringSchema.min(1),
+    note: TextSchema,
+    createdAt: z.coerce.date().optional(),
+    updatedAt: z.coerce.date().optional(),
+  })
+  .strict();
+
 const TimelineSchema = z
   .object({
     id: IdSchema,
@@ -321,6 +334,7 @@ const TimelineSchema = z
     omens: z.array(OmenSchema).max(MAX_COLLECTION_ITEMS).default([]),
     worldEvents: z.array(WorldEventSchema).max(MAX_COLLECTION_ITEMS).default([]),
     worldActivities: z.array(WorldActivitySchema).max(MAX_COLLECTION_ITEMS).default([]),
+    entityRelations: z.array(EntityRelationSchema).max(MAX_COLLECTION_ITEMS).default([]),
     createdAt: z.coerce.date().optional(),
     updatedAt: z.coerce.date().optional(),
   })
@@ -640,6 +654,25 @@ async function validateTimelineReferences(
   for (const omen of timeline.omens) {
     assertDeclaredOwner(omen.timelineId, timeline.id, "征兆");
     requireTimelineRecord(indexes.gods, omen.godId, timeline.id, "征兆神明");
+  }
+  const relationPairs = new Set<string>();
+  for (const relation of timeline.entityRelations) {
+    assertDeclaredOwner(relation.timelineId, timeline.id, "实体关系");
+    requireTimelineRecord(
+      indexes.entities,
+      relation.sourceEntityId,
+      timeline.id,
+      "关系来源实体",
+    );
+    requireTimelineRecord(
+      indexes.entities,
+      relation.targetEntityId,
+      timeline.id,
+      "关系目标实体",
+    );
+    const pair = `${relation.sourceEntityId}\u0000${relation.targetEntityId}`;
+    if (relationPairs.has(pair)) throw new Error("同一对实体只能有一条关系");
+    relationPairs.add(pair);
   }
   for (const event of timeline.worldEvents) {
     assertDeclaredOwner(event.timelineId, timeline.id, "世界事件");
@@ -1014,6 +1047,7 @@ export async function POST(request: Request) {
     for (const timeline of w.timelines) {
       timeline.worldEvents = [];
       timeline.worldActivities = [];
+      timeline.entityRelations = [];
       timeline.observerState = {
         ...(typeof timeline.observerState === "object" && timeline.observerState !== null
           ? timeline.observerState as Record<string, unknown>
@@ -1041,6 +1075,7 @@ export async function POST(request: Request) {
   const lorebookMap = new Map<string, string>();
   const worldEventMap = new Map<string, string>();
   const worldActivityMap = new Map<string, string>();
+  const entityRelationMap = new Map<string, string>();
 
   try {
     if (w.id !== undefined) {
@@ -1083,6 +1118,9 @@ export async function POST(request: Request) {
       for (const activity of tl.worldActivities) {
         addMapping(worldActivityMap, archiveIds, activity.id, "世界动态");
       }
+      for (const relation of tl.entityRelations) {
+        addMapping(entityRelationMap, archiveIds, relation.id, "实体关系");
+      }
     }
     for (const rewrite of w.rewrites) addMapping(rewriteMap, archiveIds, rewrite.id, "现实改写");
     for (const lorebook of w.lorebookEntries) {
@@ -1110,6 +1148,7 @@ export async function POST(request: Request) {
     const rewriteRows: Prisma.RealityRewriteCreateManyInput[] = [];
     const worldEventRows: Prisma.WorldEventCreateManyInput[] = [];
     const worldActivityRows: Prisma.WorldActivityCreateManyInput[] = [];
+    const entityRelationRows: Prisma.EntityRelationCreateManyInput[] = [];
     const allIdMap = new Map<string, string>([
       ...timelineMap,
       ...chapterMap,
@@ -1126,6 +1165,7 @@ export async function POST(request: Request) {
       ...lorebookMap,
       ...worldEventMap,
       ...worldActivityMap,
+      ...entityRelationMap,
     ]);
 
     for (const tl of w.timelines) {
@@ -1362,6 +1402,27 @@ export async function POST(request: Request) {
         });
       }
 
+      for (const relation of tl.entityRelations) {
+        entityRelationRows.push({
+          id: remapRequired(entityRelationMap, relation.id, "实体关系"),
+          timelineId: newTlId,
+          sourceEntityId: remapRequired(
+            entityMap,
+            relation.sourceEntityId,
+            "关系来源实体",
+          ),
+          targetEntityId: remapRequired(
+            entityMap,
+            relation.targetEntityId,
+            "关系目标实体",
+          ),
+          label: relation.label,
+          note: relation.note,
+          createdAt: relation.createdAt,
+          updatedAt: relation.updatedAt,
+        });
+      }
+
       for (const event of tl.worldEvents) {
         worldEventRows.push({
           id: remapRequired(worldEventMap, event.id, "世界事件"),
@@ -1494,6 +1555,7 @@ export async function POST(request: Request) {
       await tx.timeline.createMany({ data: deferredTimelineRows });
       await tx.chapter.createMany({ data: chapterRows });
       await tx.entity.createMany({ data: entityRows });
+      await tx.entityRelation.createMany({ data: entityRelationRows });
       await tx.entitySection.createMany({ data: sectionRows });
       await tx.god.createMany({ data: godRows });
       await tx.message.createMany({ data: messageRows });

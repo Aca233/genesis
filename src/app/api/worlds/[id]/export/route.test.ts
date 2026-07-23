@@ -71,6 +71,16 @@ describe("version 4 世界存档导出", () => {
         gods: [],
         abilities: [],
         entities: [],
+        entityRelations: [{
+          id: "relation-1",
+          timelineId: "timeline-1",
+          sourceEntityId: "entity-1",
+          targetEntityId: "entity-2",
+          label: "盟友",
+          note: "共同守护边境。",
+          createdAt: new Date("2026-07-23T00:00:00Z"),
+          updatedAt: new Date("2026-07-23T00:01:00Z"),
+        }],
         chronicles: [],
         omens: [],
         worldEvents: [{
@@ -122,6 +132,13 @@ describe("version 4 世界存档导出", () => {
     expect(archive.world.timelines[0].worldActivities).toContainEqual(
       expect.objectContaining({ id: "world-activity-1", visibility: "hidden" }),
     );
+    expect(archive.world.timelines[0].entityRelations).toEqual([expect.objectContaining({
+      id: "relation-1",
+      sourceEntityId: "entity-1",
+      targetEntityId: "entity-2",
+      label: "盟友",
+      note: "共同守护边境。",
+    })]);
     expect(serialized).not.toContain("generationRequests");
     expect(serialized).not.toContain("outputSnapshot");
     expect(serialized).not.toContain("leaseExpiresAt");
@@ -134,6 +151,7 @@ describe("version 4 世界存档导出", () => {
           include: expect.objectContaining({
             worldEvents: expect.anything(),
             worldActivities: expect.anything(),
+            entityRelations: expect.anything(),
             chapters: expect.objectContaining({
               include: { messages: { orderBy: { index: "asc" } } },
             }),
