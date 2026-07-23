@@ -27,7 +27,7 @@ export type BusyKinds = {
   rewrite: boolean;
 };
 
-export type ModeDrawerTab = "starmap" | "chronicle" | "god" | "creator" | "realities" | "lore" | "codex";
+export type ModeDrawerTab = "activity" | "starmap" | "chronicle" | "god" | "creator" | "realities" | "lore" | "codex";
 export type DrawerTabDefinition = {
   tab: ModeDrawerTab;
   glyph: string;
@@ -36,6 +36,7 @@ export type DrawerTabDefinition = {
 };
 
 export const pantheonDrawerTabs: readonly DrawerTabDefinition[] = [
+  { tab: "activity", glyph: "◌", label: "动态", title: "◌ 世界动态" },
   { tab: "starmap", glyph: "✦", label: "星图", title: "✦ 星图" },
   { tab: "chronicle", glyph: "📜", label: "年表", title: "📜 编年史" },
   { tab: "god", glyph: "◈", label: "神格", title: "◈ 本尊神格" },
@@ -44,6 +45,7 @@ export const pantheonDrawerTabs: readonly DrawerTabDefinition[] = [
 ] as const;
 
 export const creatorDrawerTabs: readonly DrawerTabDefinition[] = [
+  { tab: "activity", glyph: "◌", label: "动态", title: "◌ 世界动态" },
   { tab: "starmap", glyph: "✦", label: "星图", title: "✦ 星图" },
   { tab: "chronicle", glyph: "📜", label: "编年史", title: "📜 编年史" },
   { tab: "creator", glyph: "◉", label: "天外视界", title: "◉ 天外视界" },

@@ -82,6 +82,7 @@ describe("reality tree state", () => {
 
   it("uses creator tabs without 本尊神格 while keeping pantheon tabs unchanged", () => {
     expect(creatorDrawerTabs.map((tab) => [tab.tab, tab.label])).toEqual([
+      ["activity", "动态"],
       ["starmap", "星图"],
       ["chronicle", "编年史"],
       ["creator", "天外视界"],
@@ -91,12 +92,18 @@ describe("reality tree state", () => {
     ]);
     expect(creatorDrawerTabs.some((tab) => tab.label.includes("本尊神格"))).toBe(false);
     expect(pantheonDrawerTabs.map((tab) => [tab.tab, tab.label])).toEqual([
+      ["activity", "动态"],
       ["starmap", "星图"],
       ["chronicle", "年表"],
       ["god", "神格"],
       ["lore", "设定集"],
       ["codex", "众生录"],
     ]);
+  });
+
+  it("exposes world activity as a standalone rune in both modes", () => {
+    expect(creatorDrawerTabs.map((tab) => tab.tab)).toContain("activity");
+    expect(pantheonDrawerTabs.map((tab) => tab.tab)).toContain("activity");
   });
 
   it("implements the basic fully-expanded tree keyboard navigation model", () => {
@@ -161,13 +168,20 @@ it("RuneRail exposes the exact creator labels and the unchanged pantheon labels"
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { RuneRail } = await import("./RuneRail");
-  const creator = renderToStaticMarkup(createElement(RuneRail, { mode: "creator", active: null, onOpen: () => undefined }));
+  const creator = renderToStaticMarkup(createElement(RuneRail, {
+    mode: "creator",
+    active: null,
+    unreadActivityCount: 12,
+    onOpen: () => undefined,
+  }));
   const pantheon = renderToStaticMarkup(createElement(RuneRail, { mode: "pantheon", active: null, onOpen: () => undefined }));
-  for (const label of ["星图", "编年史", "天外视界", "现实树", "设定集", "众生录"]) {
+  for (const label of ["动态", "星图", "编年史", "天外视界", "现实树", "设定集", "众生录"]) {
     expect(creator).toContain(`aria-label="${label}"`);
   }
   expect(creator).not.toContain("本尊神格");
-  for (const label of ["星图", "年表", "神格", "设定集", "众生录"]) {
+  for (const label of ["动态", "星图", "年表", "神格", "设定集", "众生录"]) {
     expect(pantheon).toContain(`aria-label="${label}"`);
   }
+  expect(creator).toContain('aria-label="12 条未读动态"');
+  expect(creator).toContain("9+");
 });

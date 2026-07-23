@@ -12,10 +12,12 @@ import { drawerTabsForMode } from "./reality-tree-state";
 export function RuneRail({
   mode = "pantheon",
   active,
+  unreadActivityCount = 0,
   onOpen,
 }: {
   mode?: WorldInfo["mode"];
   active: DrawerTab | null;
+  unreadActivityCount?: number;
   onOpen: (tab: DrawerTab) => void;
 }) {
   const runes = drawerTabsForMode(mode);
@@ -36,6 +38,14 @@ export function RuneRail({
           aria-label={r.label}
         >
           <span>{r.glyph}</span>
+          {r.tab === "activity" && unreadActivityCount > 0 ? (
+            <span
+              className="absolute right-0 top-0 min-w-3 rounded-full bg-gilt px-0.5 text-center text-[8px] leading-3 text-paper"
+              aria-label={`${unreadActivityCount} 条未读动态`}
+            >
+              {unreadActivityCount > 9 ? "9+" : unreadActivityCount}
+            </span>
+          ) : null}
           <span className="pointer-events-none absolute right-full mr-1 hidden whitespace-nowrap rounded border border-line bg-paper-raised px-1.5 py-0.5 text-xs text-ink-soft shadow-sm group-hover:block max-sm:group-hover:hidden">
             {r.label}
           </span>

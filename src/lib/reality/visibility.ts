@@ -10,6 +10,7 @@ export type RealityViewer =
 const limitedObserverState: ObserverState = {
   focusType: "world",
   focusId: null,
+  focusedEventId: null,
   timeLabel: "",
   viewpoint: "limited",
   activeAvatarId: null,
@@ -46,6 +47,27 @@ export function isOmniscientViewer(
   viewer: RealityViewer,
 ): viewer is "creator_omniscient" {
   return viewer === "creator_omniscient";
+}
+
+export type WorldKnowledgeVisibility = "public" | "player_known" | "hidden";
+export type WorldKnowledgeLabel = "世界内尚未知晓";
+
+/** Shared deny-by-default rule for any browser-facing world knowledge. */
+export function canViewWorldKnowledge(
+  viewer: RealityViewer,
+  visibility: WorldKnowledgeVisibility,
+): boolean {
+  return visibility !== "hidden" || isOmniscientViewer(viewer);
+}
+
+/** Omniscience exposes hidden facts while preserving their in-world status. */
+export function knowledgeLabelForViewer(
+  viewer: RealityViewer,
+  visibility: WorldKnowledgeVisibility,
+): WorldKnowledgeLabel | undefined {
+  return visibility === "hidden" && isOmniscientViewer(viewer)
+    ? "世界内尚未知晓"
+    : undefined;
 }
 
 type SectionLike = { revealed: boolean; content: unknown };

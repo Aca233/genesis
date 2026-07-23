@@ -18,6 +18,7 @@ import { ChroniclePanel } from "./ChroniclePanel";
 import { StarmapPanel } from "./StarmapPanel";
 import { CreatorViewPanel } from "./CreatorViewPanel";
 import { RealityTreePanel } from "./RealityTreePanel";
+import { WorldActivityPanel, type WorldActivityResponse } from "./WorldActivityPanel";
 import { drawerTabsForMode } from "./reality-tree-state";
 
 /**
@@ -38,6 +39,8 @@ export function PlayDrawer({
   recentRewrite = null,
   busyKinds = { chat: false, settlement: false, rewrite: false },
   initialEntityId,
+  onOpenEntity,
+  onActivitiesLoaded,
   onStateChanged,
   onTimelineChanged,
   onClose,
@@ -53,6 +56,8 @@ export function PlayDrawer({
   onTimelineChanged?: (timelineId: string) => Promise<void>;
   /** 正文实体链接点开时的定位实体 */
   initialEntityId?: string | null;
+  onOpenEntity?: (id: string) => void;
+  onActivitiesLoaded?: (data: WorldActivityResponse) => void;
   onClose: () => void;
 }) {
   // Esc 关闭
@@ -109,7 +114,15 @@ export function PlayDrawer({
             </header>
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
-              {tab === "god" ? (
+              {tab === "activity" ? (
+                <WorldActivityPanel
+                  worldId={world.id}
+                  timelineId={timeline.id}
+                  worldName={world.name}
+                  onOpenEntity={onOpenEntity ?? (() => undefined)}
+                  onLoaded={onActivitiesLoaded}
+                />
+              ) : tab === "god" ? (
                 <GodPanel gods={gods} theme={world.themeCard} />
               ) : tab === "lore" ? (
                 <LorePanel world={world} />

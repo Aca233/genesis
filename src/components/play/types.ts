@@ -242,6 +242,7 @@ export type PlayState = {
 
 /** 右缘符文抽屉页签（香炉为独立 Link，不在此列） */
 export type DrawerTab =
+  | "activity"
   | "starmap"
   | "chronicle"
   | "god"

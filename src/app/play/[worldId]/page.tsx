@@ -69,6 +69,7 @@ export default function PlayPage({
   const [drawerTab, setDrawerTab] = useState<DrawerTab | null>(null);
   /** 正文实体链接点开时定位的实体（进入众生录详情） */
   const [drawerEntityId, setDrawerEntityId] = useState<string | null>(null);
+  const [unreadActivityCount, setUnreadActivityCount] = useState(0);
 
   // 自动世界整理
   const [settling, setSettling] = useState(false);
@@ -572,7 +573,15 @@ export default function PlayPage({
         </div>
 
         {/* 右缘符文列 + 抽屉 */}
-        <RuneRail mode={state.world.mode} active={drawerTab} onOpen={(t) => setDrawerTab(t)} />
+        <RuneRail
+          mode={state.world.mode}
+          active={drawerTab}
+          unreadActivityCount={unreadActivityCount}
+          onOpen={(tab) => {
+            setDrawerTab(tab);
+            if (tab === "activity") setUnreadActivityCount(0);
+          }}
+        />
         <PlayDrawer
           tab={drawerTab}
           world={state.world}
@@ -582,6 +591,8 @@ export default function PlayPage({
           recentRewrite={state.recentRewrite}
           busyKinds={{ chat: busy, settlement: settling, rewrite: rewriteBusy }}
           initialEntityId={drawerEntityId}
+          onOpenEntity={openEntity}
+          onActivitiesLoaded={() => setUnreadActivityCount(0)}
           onStateChanged={() => reloadState()}
           onTimelineChanged={async () => {
             await reloadState();

@@ -5,6 +5,8 @@ import {
   projectGodAgendaForViewer,
   projectGodRelationsForViewer,
   projectSectionsForViewer,
+  canViewWorldKnowledge,
+  knowledgeLabelForViewer,
   realityViewer,
   realityViewerFromPersistence,
 } from "./visibility";
@@ -12,6 +14,7 @@ import {
 const observer = (viewpoint: ObserverState["viewpoint"]): ObserverState => ({
   focusType: "world",
   focusId: null,
+  focusedEventId: null,
   timeLabel: "星海元年",
   viewpoint,
   activeAvatarId: null,
@@ -83,4 +86,23 @@ describe("reality projections", () => {
     });
   });
 
+});
+
+describe("world knowledge visibility", () => {
+  it.each([
+    ["pantheon_player", "public", true],
+    ["pantheon_player", "player_known", true],
+    ["pantheon_player", "hidden", false],
+    ["creator_limited", "hidden", false],
+    ["creator_omniscient", "hidden", true],
+  ] as const)("%s viewing %s is %s", (viewer, visibility, expected) => {
+    expect(canViewWorldKnowledge(viewer, visibility)).toBe(expected);
+  });
+
+  it("only annotates omniscient hidden knowledge as unknown inside the world", () => {
+    expect(knowledgeLabelForViewer("creator_omniscient", "hidden"))
+      .toBe("世界内尚未知晓");
+    expect(knowledgeLabelForViewer("creator_omniscient", "public")).toBeUndefined();
+    expect(knowledgeLabelForViewer("creator_limited", "hidden")).toBeUndefined();
+  });
 });
