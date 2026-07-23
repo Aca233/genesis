@@ -96,6 +96,7 @@ describe("POST /api/chapters/[id]/settle", () => {
     const response = await POST(new Request("http://localhost", { method: "POST" }), {
       params: Promise.resolve({ id: "chapter-1" }),
     });
+    expect(response.status).toBe(200);
     expect(mocks.claimWorldOperation).toHaveBeenCalledTimes(1);
     expect(mocks.claimWorldOperation).toHaveBeenCalledWith(
       mocks.prisma,
