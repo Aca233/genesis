@@ -2,6 +2,9 @@ import type { Prisma } from "@prisma/client";
 import type { Scale } from "@/lib/cards/schemas";
 import type { NarratorMeta } from "@/lib/prompts/narrator";
 import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
+import { applyContinuousStateInTransaction } from "./continuous-state";
+import { decideSettlement } from "./settlement-policy";
+import type { GenerationCompletion, StoredGenerationResult } from "./follow-up";
 import { FrozenRealityError, parseGenerationRequestMeta, type GenerationRequestMeta } from "./request";
 import {
   revealAbilityInTransaction,
@@ -39,6 +42,9 @@ export type NarrationFinalizationTx = Omit<AbilityMutationTx, "message" | "abili
       meta?: unknown;
     } | null>;
     create(args: { data: Record<string, unknown> }): Promise<{ id: string }>;
+    count(args: {
+      where: { chapterId: string; role: string };
+    }): Promise<number>;
   };
   ability: AbilityMutationTx["ability"] & {
     findFirst(args: {
@@ -80,7 +86,7 @@ export async function finalizeNarration(
     signal?: AbortSignal;
     logInvalidReveal?: (details: { abilityId: string; generationId: string }) => void;
   },
-): Promise<{ messageId: string; reused: boolean }> {
+): Promise<GenerationCompletion & { reused: boolean }> {
   const checkCancelled = () => input.signal?.throwIfAborted();
   checkCancelled();
   return client.$transaction(async (tx) => {
@@ -114,8 +120,61 @@ export async function finalizeNarration(
       ) {
         throw new Error("generationId 已被其他叙事请求占用");
       }
-      return { messageId: existing.id, reused: true };
+      return {
+        messageId: existing.id,
+        meta: input.meta,
+        followUp: { kind: "none" },
+        reused: true,
+      };
     }
+
+    if (
+      input.requestMeta?.playerMessageId
+      && input.requestMeta.playerIndex !== null
+    ) {
+      const existingPlayer = await tx.message.findUnique({
+        where: { id: input.requestMeta.playerMessageId },
+      });
+      if (!existingPlayer) {
+        await tx.message.create({
+          data: {
+            id: input.requestMeta.playerMessageId,
+            chapterId: input.chapterId,
+            index: input.requestMeta.playerIndex,
+            role: "player",
+            content: input.requestMeta.content,
+            scale: input.scale,
+            meta: {
+              generationRequest: input.requestMeta,
+            } as unknown as Prisma.InputJsonValue,
+          },
+        });
+      }
+    }
+
+    if (input.meta.temporalState || input.meta.immediateChanges.length > 0) {
+      await applyContinuousStateInTransaction(tx as never, {
+        worldId: input.worldId,
+        timelineId: input.timelineId,
+        temporalPatch: input.meta.temporalState,
+        changes: input.meta.immediateChanges,
+      });
+    }
+    const narratorCountBefore = await tx.message.count({
+      where: { chapterId: input.chapterId, role: "narrator" },
+    });
+    const temporalChanged = input.meta.temporalState !== undefined;
+    const settlement = decideSettlement({
+      scale: input.scale,
+      narratorCountAfter: narratorCountBefore + 1,
+      temporalChanged,
+      eraChanged: input.meta.temporalState?.era !== undefined,
+      significantEvent: input.meta.significantEvent,
+      settlementReasons: input.meta.settlementReasons,
+    });
+    const followUp = settlement.required
+      ? { kind: "settlement" as const, segmentId: input.chapterId }
+      : { kind: "none" as const };
 
     const saved = await tx.message.create({
       data: {
@@ -128,6 +187,8 @@ export async function finalizeNarration(
         variants: [{ content: input.prose, meta: input.meta, chosen: true }] as Prisma.InputJsonValue,
         meta: {
           ...input.meta,
+          settlementRequired: settlement.required,
+          settlementReasons: settlement.reasons,
           ...(input.requestMeta ? { generationRequest: input.requestMeta } : {}),
         } as unknown as Prisma.InputJsonValue,
       },
@@ -184,6 +245,12 @@ export async function finalizeNarration(
     }
     checkCancelled();
 
+    const completion: StoredGenerationResult = {
+      version: 1,
+      messageId: saved.id,
+      meta: input.meta,
+      followUp,
+    };
     await tx.generationRequest.update({
       where: { id: input.generationId },
       data: {
@@ -191,11 +258,11 @@ export async function finalizeNarration(
         error: null,
         leaseExpiresAt: null,
         narratorMessageId: saved.id,
-        resultMeta: input.meta as unknown as Prisma.InputJsonValue,
+        resultMeta: completion as unknown as Prisma.InputJsonValue,
       },
     });
     checkCancelled();
 
-    return { messageId: saved.id, reused: false };
+    return { ...completion, reused: false };
   });
 }

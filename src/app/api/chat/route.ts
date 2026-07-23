@@ -155,9 +155,8 @@ export async function POST(request: Request) {
   }
   const narratorIndex = prepared.meta.narratorIndex;
 
-  // 组装上下文（say 模式下玩家消息已落库，builder 会把它计入窗口；
-  // playerInput 只用于世界书匹配，末尾输入由窗口内最后一条承担会重复——
-  // 因此这里以 beforeIndex 剔除刚落库的那条，由 builder 在末尾单独注入）
+  // 组装上下文。say 输入在意图分类完成前只存在 durable request 中，
+  // 由 builder 在末尾注入；只有普通 continue 完成后才原子落玩家消息。
   let messages;
   try {
     messages = await buildNarratorContext({
@@ -167,7 +166,6 @@ export async function POST(request: Request) {
       scale,
       mode,
       directive,
-      beforeIndex: mode === "say" ? narratorIndex - 1 : undefined,
     });
   } catch (error) {
     try {
@@ -240,7 +238,11 @@ export async function POST(request: Request) {
             },
           },
         );
-        return { messageId: result.messageId };
+        return {
+          messageId: result.messageId,
+          meta: result.meta,
+          followUp: result.followUp,
+        };
       } finally {
         await releaseOperation();
       }

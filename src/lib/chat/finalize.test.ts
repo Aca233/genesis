@@ -37,6 +37,7 @@ function fixture() {
         state.messages.set(row.id, row);
         return row;
       }),
+      count: vi.fn().mockResolvedValue(0),
     },
     ability: { findFirst: vi.fn() },
     chronicleEntry: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
@@ -72,7 +73,10 @@ const base = {
   scale: "scene" as const,
   meta: {
     suggestions: [],
-    chapterBreakHint: false,
+    operation: "continue" as const,
+    immediateChanges: [],
+    significantEvent: false,
+    settlementReasons: [],
     revealedEventIds: ["chronicle-1"],
     abilityReveals: [
       { abilityId: "ability-1", visibility: "known" as const, evidence: "能力被清楚见证" },
@@ -98,7 +102,7 @@ describe("finalizeNarration", () => {
       where: { id: "generation-1", status: "pending", attempt: 1 },
       data: { leaseExpiresAt: expect.any(Date) },
     });
-    expect(tx.message.create).toHaveBeenCalledTimes(1);
+    expect(tx.message.create).toHaveBeenCalledTimes(2);
     expect(mocks.reveal).toHaveBeenCalledWith(tx, expect.objectContaining({
       abilityId: "ability-1",
       event: expect.objectContaining({ messageId: "generation-1" }),
@@ -112,7 +116,12 @@ describe("finalizeNarration", () => {
         error: null,
         leaseExpiresAt: null,
         narratorMessageId: "generation-1",
-        resultMeta: base.meta,
+        resultMeta: expect.objectContaining({
+          version: 1,
+          messageId: "generation-1",
+          meta: base.meta,
+          followUp: { kind: "none" },
+        }),
       }),
     });
   });
@@ -127,8 +136,13 @@ describe("finalizeNarration", () => {
     await finalizeNarration(client as never, base);
     const second = await finalizeNarration(client as never, base);
 
-    expect(second).toEqual({ messageId: "generation-1", reused: true });
-    expect(tx.message.create).toHaveBeenCalledTimes(1);
+    expect(second).toEqual({
+      messageId: "generation-1",
+      meta: base.meta,
+      followUp: { kind: "none" },
+      reused: true,
+    });
+    expect(tx.message.create).toHaveBeenCalledTimes(2);
     expect(mocks.reveal).toHaveBeenCalledTimes(1);
     expect(tx.chronicleEntry.updateMany).toHaveBeenCalledTimes(1);
   });
@@ -174,7 +188,11 @@ describe("reveal merge/no-op", () => {
     await finalizeNarration(client as never, {
       ...base,
       meta: {
-        suggestions: [], chapterBreakHint: false,
+        suggestions: [],
+        operation: "continue",
+        immediateChanges: [],
+        significantEvent: false,
+        settlementReasons: [],
         abilityReveals: [
           { abilityId: "ability-1", visibility: "rumored", evidence: "先有传闻" },
           { abilityId: "ability-1", visibility: "known", evidence: "继而亲见" },
@@ -194,7 +212,11 @@ describe("reveal merge/no-op", () => {
     await finalizeNarration(client as never, {
       ...base,
       meta: {
-        suggestions: [], chapterBreakHint: false,
+        suggestions: [],
+        operation: "continue",
+        immediateChanges: [],
+        significantEvent: false,
+        settlementReasons: [],
         abilityReveals: [{ abilityId: "ability-1", visibility: "rumored", evidence: "旧闻" }],
       },
     });

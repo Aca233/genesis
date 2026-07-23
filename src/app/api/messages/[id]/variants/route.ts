@@ -94,7 +94,11 @@ export async function POST(
           variants: variants as Prisma.InputJsonValue,
         },
       });
-      return { messageId: id };
+      return {
+        messageId: id,
+        meta,
+        followUp: { kind: "none" },
+      };
     },
   });
 }

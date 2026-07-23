@@ -83,7 +83,7 @@ describe("prepareGenerationRequest", () => {
           leaseExpiresAt: expect.any(Date),
         }),
       });
-      expect(tx.message.create).toHaveBeenCalledTimes(mode === "say" ? 1 : 0);
+      expect(tx.message.create).not.toHaveBeenCalled();
     },
   );
 
@@ -102,7 +102,7 @@ describe("prepareGenerationRequest", () => {
     expect(requests.size).toBe(0);
   });
 
-  it("相同 ID 并发 loser 复用 pending reservation，不重复玩家写入", async () => {
+  it("相同 ID 并发 loser 复用 pending reservation，分类前不写玩家消息", async () => {
     const { client, tx } = fixture();
     const first = await prepareGenerationRequest(client as never, input);
     const second = await prepareGenerationRequest(client as never, {
@@ -113,13 +113,13 @@ describe("prepareGenerationRequest", () => {
 
     expect(first.state).toBe("owner");
     expect(second).toMatchObject({ state: "pending", meta: { playerIndex: 3, narratorIndex: 4 } });
-    expect(tx.message.create).toHaveBeenCalledTimes(1);
+    expect(tx.message.create).not.toHaveBeenCalled();
   });
 
   it.each([
     { status: "failed", leaseExpiresAt: null },
     { status: "pending", leaseExpiresAt: new Date(0) },
-  ])("$status 或过期 lease 可原子接管且不重复玩家消息", async (state) => {
+  ])("$status 或过期 lease 可原子接管且不提前写玩家消息", async (state) => {
     const { client, tx, requests } = fixture();
     const first = await prepareGenerationRequest(client as never, input);
     Object.assign(requests.get(input.generationId)!, state);
@@ -132,7 +132,7 @@ describe("prepareGenerationRequest", () => {
       where: expect.objectContaining({ id: input.generationId, attempt: 1 }),
       data: expect.objectContaining({ status: "pending", attempt: 2, error: null }),
     }));
-    expect(tx.message.create).toHaveBeenCalledTimes(1);
+    expect(tx.message.create).not.toHaveBeenCalled();
   });
 
   it("owner 失败只按当前 attempt 标记 failed，旧 owner 不覆盖接管者", async () => {

@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import type { Scale } from "@/lib/cards/schemas";
 import {
   ContinuousNarratorMetaSchema,
@@ -158,9 +157,6 @@ async function reserveInTx(tx: GenerationRequestTx, input: PrepareGenerationInpu
     status: "pending", error: null, attempt: 1, leaseExpiresAt: new Date(Date.now() + LEASE_MS),
     playerMessageId, narratorMessageId: input.generationId, playerIndex: meta.playerIndex,
     narratorIndex: input.narratorIndex } });
-  if (playerMessageId) await tx.message.create({ data: { id: playerMessageId,
-    chapterId: input.chapterId, index: input.playerIndex, role: "player", content: meta.content,
-    scale: input.scale, meta: { generationRequest: meta } as unknown as Prisma.InputJsonValue } });
   return { meta, state: "owner" as const, attempt: 1 };
 }
 

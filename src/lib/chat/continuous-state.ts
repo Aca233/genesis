@@ -109,7 +109,10 @@ export async function applyContinuousStateInTransaction(
   });
   const temporal = mergeTemporalState(current, input.temporalPatch);
   const nextReality = { ...reality, currentEra: temporal.era };
-  let nextObserver = { ...observer, timeLabel: temporal.time };
+  let nextObserver: Record<string, unknown> = {
+    ...observer,
+    timeLabel: temporal.time,
+  };
 
   for (const change of input.changes ?? []) {
     if (change.kind === "set_scene_presence") {
@@ -195,4 +198,3 @@ export async function applyContinuousState(
 ): Promise<TemporalState> {
   return client.$transaction((tx) => applyContinuousStateInTransaction(tx, input));
 }
-
