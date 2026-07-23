@@ -37,6 +37,11 @@ import {
   buildDeckPatchPayload,
   parseWorldRevision,
 } from "@/components/genesis/editor-revision";
+import {
+  createEmbarkFlow,
+  type EmbarkMaterialization,
+} from "@/components/genesis/embark-flow";
+import { streamNarration } from "@/components/play/sse-client";
 
 /**
  * 卡片编辑器（M1.4）+ 创世开局演出（M1.5）
@@ -84,6 +89,7 @@ export default function GenesisEditorPage({
   // ── 演出状态 ──
   const [ceremony, setCeremony] = useState<EmbarkState | null>(null);
   const embarkOnce = useRef(false);
+  const embarkFlow = useRef<ReturnType<typeof createEmbarkFlow> | null>(null);
 
   const dirty = dirtyPaths.size > 0 || structDirty;
 
@@ -246,20 +252,41 @@ export default function GenesisEditorPage({
     embarkOnce.current = true;
     setCeremony({ phase: "pending" });
     try {
-      const res = await fetch(`/api/worlds/${worldId}/embark`, { method: "POST" });
-      const json = await res.json();
-      if (!res.ok) {
-        const message = json.error ?? `开局失败（${res.status}）`;
-        embarkOnce.current = false;
-        setCeremony({ phase: "error", message });
-        setNotice({ ok: false, text: `创世未成：${message}` });
-        return;
-      }
+      embarkFlow.current ??= createEmbarkFlow({
+        worldId,
+        materialize: async (): Promise<EmbarkMaterialization> => {
+          const res = await fetch(`/api/worlds/${worldId}/embark`, {
+            method: "POST",
+          });
+          const json = await res.json();
+          if (!res.ok) {
+            throw new Error(json.error ?? `开局失败（${res.status}）`);
+          }
+          return { chapterId: json.chapterId, temporal: json.temporal };
+        },
+        generateOpening: async (body) => {
+          let failure: string | null = null;
+          await streamNarration("/api/chat", body, {
+            onText: () => undefined,
+            onDone: () => undefined,
+            onError: (message) => { failure = message; },
+          });
+          if (failure !== null) throw new Error(failure);
+        },
+      });
+      await (embarkFlow.current.materialized
+        ? embarkFlow.current.retryOpening()
+        : embarkFlow.current.start());
       setCeremony({ phase: "done" });
     } catch (err) {
       embarkOnce.current = false;
       setCeremony({ phase: "error", message: String(err) });
-      setNotice({ ok: false, text: `创世未成：${String(err)}` });
+      setNotice({
+        ok: false,
+        text: embarkFlow.current?.materialized
+          ? `开篇未成：${String(err)}`
+          : `创世未成：${String(err)}`,
+      });
     }
   }, [deck, dirty, save, worldId]);
 
@@ -631,7 +658,7 @@ export default function GenesisEditorPage({
                 onClick={embark}
                 className="rounded-md border border-cinnabar px-3 py-1 text-cinnabar transition hover:bg-cinnabar/10"
               >
-                重试创世
+                {embarkFlow.current?.materialized ? "重试开篇" : "重试创世"}
               </button>
             )}
           </div>

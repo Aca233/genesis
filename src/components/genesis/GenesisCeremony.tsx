@@ -15,6 +15,15 @@ type EmbarkState =
   | { phase: "done" }
   | { phase: "error"; message: string };
 
+export function ceremonyTitle(deck: WorldDeck) {
+  return {
+    world: deck.worldName,
+    era: deck.epochConflict.epochName,
+    time: deck.epochConflict.yearLabel,
+    seal: "自此有史" as const,
+  };
+}
+
 /** 拓印条目：从卡组提炼的名目 */
 export function buildCeremonyStamps(deck: WorldDeck): string[] {
   return [
@@ -56,6 +65,7 @@ export function GenesisCeremony({
 
   const chars = useMemo(() => Array.from(decree), [decree]);
   const stamps = useMemo(() => buildCeremonyStamps(deck), [deck]);
+  const title = useMemo(() => ceremonyTitle(deck), [deck]);
 
   // 每字 ~80ms；超 ~150 字加速，压住总时长
   const charInterval = chars.length > 150 ? Math.max(30, 12000 / chars.length) : 80;
@@ -160,18 +170,22 @@ export function GenesisCeremony({
               </motion.ul>
             )}
 
-            {/* 第三幕：第一章标题晕开 */}
+            {/* 第三幕：世界时间与史册印记晕开 */}
             {(act === "title" || act === "hold") && (
-              <motion.h1
+              <motion.div
                 key="title"
                 initial={{ opacity: 0, filter: "blur(10px)" }}
                 animate={{ opacity: 1, filter: "blur(0px)" }}
                 transition={{ duration: 2, ease: "easeOut" }}
-                className="text-4xl tracking-[0.3em] text-ink md:text-5xl"
+                className="text-center text-ink"
                 style={{ fontFamily: "var(--font-display)" }}
               >
-                第一章 · 创世
-              </motion.h1>
+                <h1 className="text-4xl tracking-[0.2em] md:text-5xl">{title.world}</h1>
+                <p className="mt-5 text-base tracking-widest text-ink-soft">
+                  {title.era} · {title.time}
+                </p>
+                <p className="mt-4 text-sm tracking-[0.4em] text-gilt">{title.seal}</p>
+              </motion.div>
             )}
           </AnimatePresence>
         </div>

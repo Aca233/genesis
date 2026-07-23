@@ -41,6 +41,10 @@ describe("POST /api/worlds/[id]/embark mode boundary", () => {
     await expect(response.json()).resolves.toEqual({
       timelineId: "timeline-1",
       chapterId: "chapter-1",
+      temporal: {
+        era: completeCreatorDeck().epochConflict.epochName,
+        time: completeCreatorDeck().epochConflict.yearLabel,
+      },
     });
     expect(mocks.archiveWorldMaterials).toHaveBeenCalledWith("world-1");
   });

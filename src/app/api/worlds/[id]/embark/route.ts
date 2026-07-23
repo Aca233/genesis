@@ -31,6 +31,7 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
+    let temporal = { era: "未名纪元", time: "此刻" };
     const result = await runClaimedEmbarkTransaction(prisma, id, async (tx) => {
       const world = await tx.world.findUnique({ where: { id } });
       if (!world?.draftDeck) {
@@ -43,6 +44,10 @@ export async function POST(
         throw new EmbarkModeMismatchError("世界模式不可更改");
       }
       validateDeckReferences(deck);
+      temporal = {
+        era: deck.epochConflict.epochName,
+        time: deck.epochConflict.yearLabel,
+      };
       return deck;
     });
     try {
@@ -50,7 +55,7 @@ export async function POST(
     } catch (archiveError) {
       console.error("Failed to archive initial materials", archiveError);
     }
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, temporal });
   } catch (error) {
     if (error instanceof EmbarkModeMismatchError) {
       return NextResponse.json({ error: "世界模式不可更改" }, { status: 409 });
