@@ -31,7 +31,7 @@ import {
 
 /**
  * 对局主界面（M1.6–M1.8）：中央书页正文 + 底部输入区 + 右缘符文列/抽屉。
- * 编排：GET state → （空章）自动 opening → say/continue/reroll SSE 流。
+ * 编排：GET state → （空现实）自动 opening → say/continue/reroll SSE 流。
  */
 
 export default function PlayPage({
@@ -64,7 +64,7 @@ export default function PlayPage({
   /** 正文实体链接点开时定位的实体（进入众生录详情） */
   const [drawerEntityId, setDrawerEntityId] = useState<string | null>(null);
 
-  // 岁月流转：结算演出
+  // 自动世界整理
   const [settling, setSettling] = useState(false);
   const [settlementState, setSettlementState] = useState<WorldSettlementState>({
     status: "idle",
@@ -80,7 +80,7 @@ export default function PlayPage({
 
   // ── 数据同步 ──
 
-  /** 与后端对齐当前章消息（error 后、done 后统一调用） */
+  /** 与后端对齐当前内部记录段消息（error 后、done 后统一调用） */
   const syncMessages = useCallback(async (cid: string) => {
     const res = await fetch(`/api/chapters/${cid}/messages`);
     if (!res.ok) return;
@@ -190,6 +190,37 @@ export default function PlayPage({
       cancelled = true;
     };
   }, [worldId]);
+
+  useEffect(() => {
+    if (
+      !state
+      || settling
+      || rewriteBusy
+      || settlementState.status !== "idle"
+      || (!state.checkpoint.needsSettlement && !state.checkpoint.settling)
+    ) return;
+    const segmentId = state.checkpoint.segmentId;
+    const timer = setTimeout(() => {
+      setSettling(true);
+      setSettlementState({ status: "running", segmentId });
+      void followWorldSettlement(segmentId).then(async (result) => {
+        setSettlementState(result);
+        setSettling(false);
+        if (result.status === "idle") {
+          await reloadState();
+          await syncEntityIndex();
+        }
+      });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [
+    reloadState,
+    rewriteBusy,
+    settlementState.status,
+    settling,
+    state,
+    syncEntityIndex,
+  ]);
 
   // ── SSE 生成 ──
 
@@ -394,7 +425,7 @@ export default function PlayPage({
     [chapterId, syncMessages],
   );
 
-  // ── 派生：AI 建议 / 翻章提示（最新 narrator 消息） ──
+  // ── 派生：AI 建议（最新 narrator 消息） ──
 
   const lastNarrator = [...messages].reverse().find((m) => m.role === "narrator");
   const lastMeta: MessageMeta = lastNarrator?.meta ?? {};

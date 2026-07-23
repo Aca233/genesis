@@ -35,5 +35,18 @@ describe("followWorldSettlement", () => {
       error: "抽取中断",
     });
   });
-});
 
+  it("网络中断时也返回可重试状态而不是抛出异常", async () => {
+    const result = await followWorldSettlement(
+      "segment-1",
+      async () => {
+        throw new Error("连接断开");
+      },
+    );
+    expect(result).toEqual({
+      status: "failed",
+      segmentId: "segment-1",
+      error: "连接断开",
+    });
+  });
+});

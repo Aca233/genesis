@@ -93,8 +93,8 @@ export function settlementSystem(mode: WorldMode): string {
 - Every relationsUpdate.target and extraction.godUpdates[].relationChanges[].target must be an exact god name or alias listed in the input, never an entity name, ID, or the Creator.`
     : `The player is a god inside the world.
 - A proactive event is required when an action directly targets the player god.`;
-  return `You are the single chapter-settlement engine for a god-roleplay narrative game.
-Read the entire labelled chapter and world state once, then produce ALL end-of-chapter consequences in one JSON object.
+  return `You are the world-settlement engine for a continuous god-roleplay narrative.
+Read the entire labelled checkpoint window and world state once, then produce all durable consequences in one JSON object. Internal checkpoint windows are not player-visible chapters.
 
 Mode rules:
 ${turnRules}
@@ -102,7 +102,7 @@ ${turnRules}
 Tasks inside the same response:
 1. pantheonTurns: give every listed non-player major god exactly one offstage action. Respect rank order, persona, agenda, relations, abilities and earlier gods' consequences. A deliberate stillness is valid.
 2. extraction: extract only state deltas explicitly supported by labelled chapter messages. Ability changes require one exact evidenceMessageIndex and a verbatim evidence excerpt of at least 12 Chinese characters.
-3. chronicle: write 2-3 public historian entries, an epilogue and a 4-8 character chapter title. Never expose hidden pantheon actions, abilities, agendas or relations.
+3. chronicle: write 2-3 public historian entries and an epilogue. The legacy chapterTitle field is internal compatibility data only: return an empty string. Never expose hidden pantheon actions, abilities, agendas or relations.
 
 Global rules:
 - Output one JSON object only. No markdown or commentary. All user-facing strings are Chinese.
@@ -135,7 +135,7 @@ ${opts.mode}
 == ERA ==
 ${opts.eraSystem}（当前：${opts.currentYearLabel}）
 
-== CHAPTER SCALE ==
+== CHECKPOINT WINDOW SCALE ==
 ${opts.scaleNote}
 
 == NON-PLAYER MAJOR GODS AND PRIVATE CARDS ==
@@ -150,9 +150,9 @@ ${opts.abilities || "—"}
 == PLAYER-LOCKED SECTIONS ==
 ${opts.lockedPaths || "—"}
 ${opts.fusionAxiom ? `\n== FUSION AXIOM ==\n${opts.fusionAxiom}\n` : ""}
-== FULL LABELLED CHAPTER MESSAGES ==
+== FULL LABELLED CHECKPOINT WINDOW MESSAGES ==
 ${opts.chapterMessages || "—"}
 
 
-Return the one complete chapter-settlement JSON now.`;
+Return the one complete world-settlement JSON now.`;
 }

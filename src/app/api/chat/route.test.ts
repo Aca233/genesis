@@ -39,7 +39,7 @@ vi.mock("@/lib/reality/operation-lock", () => ({
   WorldOperationConflictError: class WorldOperationConflictError extends Error {
     activeKind: string;
     constructor(activeKind: string) {
-      super(`世界正在进行${activeKind === "settlement" ? "章节结算" : activeKind}，请稍后再试`);
+      super(`世界正在进行${activeKind === "settlement" ? "世界整理" : activeKind}，请稍后再试`);
       this.activeKind = activeKind;
     }
   },
@@ -364,7 +364,7 @@ describe("POST /api/chat", () => {
     }));
 
     expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toEqual({ error: "世界正在进行章节结算，请稍后再试" });
+    await expect(response.json()).resolves.toEqual({ error: "世界正在进行世界整理，请稍后再试" });
     expect(mocks.prepareGenerationRequest).not.toHaveBeenCalled();
   });
 

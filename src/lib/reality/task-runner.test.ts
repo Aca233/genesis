@@ -117,7 +117,7 @@ describe("reality rewrite creation and leases", () => {
     })).rejects.toBeInstanceOf(RealityRewriteForbiddenError);
     await expect(createRealityRewrite(makeDb("creator", null) as never, {
       worldId: "world-1", decree: "群星改道", scope: "prospective", idempotencyKey: "idem-key-1",
-    })).rejects.toThrow("当前章节");
+    })).rejects.toThrow("当前记录段");
   });
 
   it("prevents a second live runner and reclaims an expired task lease", async () => {

@@ -31,7 +31,7 @@ import { ensureRealityRewriteRunning } from "@/lib/reality/task-runner";
  * body: { chapterId, content?, scale, mode: "say"|"continue"|"opening", directive? }
  * - say：先落玩家 Message，再流式生成 narrator 回复
  * - continue：不落玩家消息，附幕后导演提示续写
- * - opening：第一章开场演出（仅当章内无消息时允许）
+ * - opening：开场正文（仅当内部记录段无消息时允许）
  */
 
 export const maxDuration = 300;
@@ -67,10 +67,10 @@ export async function POST(request: Request) {
     },
   });
   if (!chapter) {
-    return NextResponse.json({ error: "章节不存在" }, { status: 404 });
+    return NextResponse.json({ error: "内部记录段不存在" }, { status: 404 });
   }
   if (chapter.settleState !== "open") {
-    return NextResponse.json({ error: "本章已成史，不可续写" }, { status: 409 });
+    return NextResponse.json({ error: "此段已成史，不可续写" }, { status: 409 });
   }
   if (chapter.timeline.id !== chapter.timeline.world.activeTimelineId) {
     return NextResponse.json({ error: "该现实已被冻结" }, { status: 409 });

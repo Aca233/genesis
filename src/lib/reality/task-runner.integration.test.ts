@@ -132,7 +132,13 @@ describe("idempotent reality rewrite runner", () => {
       ? []
       : await prisma.message.findMany({ where: { chapterId: rewriteChapter.id }, orderBy: { index: "asc" } });
     expect(messages).toEqual([expect.objectContaining({
-      role: "narrator", content: "新星于是升起。", meta: expect.objectContaining({ realityRewriteId: task.id }),
+      role: "narrator",
+      content: "新星于是升起。",
+      meta: expect.objectContaining({
+        realityRewriteId: task.id,
+        settlementRequired: true,
+        settlementReasons: ["major_event"],
+      }),
     })]);
     expect(runner.plan).toHaveBeenCalledTimes(1);
     expect(runner.narrate).toHaveBeenCalledTimes(1);

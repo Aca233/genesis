@@ -15,7 +15,7 @@ export async function GET(
     include: { messages: { orderBy: { index: "asc" } } },
   });
   if (!chapter) {
-    return NextResponse.json({ error: "章节不存在" }, { status: 404 });
+    return NextResponse.json({ error: "内部记录段不存在" }, { status: 404 });
   }
   return NextResponse.json({ messages: chapter.messages });
 }

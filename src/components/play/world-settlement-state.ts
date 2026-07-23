@@ -12,10 +12,19 @@ export async function followWorldSettlement(
   segmentId: string,
   fetcher: typeof fetch = fetch,
 ): Promise<WorldSettlementState> {
-  const response = await fetcher(`/api/chapters/${segmentId}/settle`, {
-    method: "POST",
-    headers: { Accept: "text/event-stream" },
-  });
+  let response: Response;
+  try {
+    response = await fetcher(`/api/chapters/${segmentId}/settle`, {
+      method: "POST",
+      headers: { Accept: "text/event-stream" },
+    });
+  } catch (error) {
+    return {
+      status: "failed",
+      segmentId,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => null) as {
       error?: string;
@@ -63,4 +72,3 @@ export async function followWorldSettlement(
     ? { status: "failed", segmentId, error: "世界整理进度流意外结束" }
     : terminal;
 }
-

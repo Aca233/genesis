@@ -135,7 +135,7 @@ async function chapterProse(chapterId: string, mode: WorldMode) {
   return {
     prose: messages
       .map((message) =>
-        message.role === "player" ? `${mode === "creator" ? "【天外观测】" : "【玩家神谕】"}${message.content}` : message.content,
+        message.role === "player" ? `${mode === "creator" ? "【创世主意图】" : "【玩家神谕】"}${message.content}` : message.content,
       )
       .join("\n\n"),
     messages,
@@ -222,7 +222,7 @@ export async function* settleChapter(
       where: { id: chapterId },
       include: { timeline: { select: { id: true, worldId: true, world: { select: { activeTimelineId: true } } } } },
     });
-    if (!chapter) throw new Error("章节不存在");
+    if (!chapter) throw new Error("内部记录段不存在");
     assertActiveReality(chapter.timeline.world.activeTimelineId, chapter.timeline.id);
     if (worldId && worldId !== chapter.timeline.worldId) throw new Error("结算租约与章节世界不匹配");
     worldId = chapter.timeline.worldId;
@@ -262,7 +262,7 @@ async function* settleChapterWithLease(
     where: { id: chapterId },
     include: { timeline: { include: { world: true } } },
   });
-  if (!chapter) throw new Error("章节不存在");
+  if (!chapter) throw new Error("内部记录段不存在");
   if (chapter.settleState === "settled") {
     yield { step: "done" };
     return;
@@ -319,7 +319,7 @@ async function* settleChapterWithLease(
               settleState: "settling:pantheon",
             },
           });
-          if (stored.count !== 1) throw new Error("章节结算占用已失效");
+          if (stored.count !== 1) throw new Error("世界整理占用已失效");
         });
       } catch (error) {
         try {
@@ -384,7 +384,7 @@ async function* settleChapterWithLease(
     await assertLeaseOwned();
     await assertTimelineStillActive(world.id, timeline.id);
     await withSettlementLeaseFence(worldId, token, async (tx) => {
-      await applyChronicle(tx, timeline.id, chapterId, chapter.index, chapter.title, settlement.chronicle);
+      await applyChronicle(tx, timeline.id, chapterId, chapter.index, settlement.chronicle);
       await setState(tx, chapterId, "decay");
     });
   }
@@ -544,7 +544,7 @@ function readPendingSettlement(snapshot: Prisma.JsonValue | null, mode: WorldMod
 
 function labelledChapterMessages(messages: Awaited<ReturnType<typeof chapterProse>>["messages"], mode: WorldMode): string {
   return messages.map((message) => {
-    const content = message.role === "player" ? `${mode === "creator" ? "【天外观测】" : "【玩家神谕】"}${message.content}` : message.content;
+    const content = message.role === "player" ? `${mode === "creator" ? "【创世主意图】" : "【玩家神谕】"}${message.content}` : message.content;
     return `[${message.id} | ${message.index} | ${message.scale}]\n${content}`;
   }).join("\n\n");
 }
@@ -703,7 +703,6 @@ async function applyChronicle(
   timelineId: string,
   chapterId: string,
   chapterIndex: number,
-  currentTitle: string | null,
   chronicle: ModeAwareChapterSettlement["chronicle"],
 ) {
   const [entityMap, godMap] = await Promise.all([
@@ -737,7 +736,7 @@ async function applyChronicle(
       where: { id: chapterId },
       data: {
         summary: chronicle.epilogue,
-        title: currentTitle ?? chronicle.chapterTitle,
+        title: null,
       },
     });
   }

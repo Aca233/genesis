@@ -270,7 +270,7 @@ export function narratorSystem(opts: NarratorWorldOptions & {
 // ───────────────────────── 开场变体 ─────────────────────────
 
 /**
- * 开局第一章导演提示（docs/04 §7）：以创世/降临场景开场，
+ * 开局正文导演提示（docs/04 §7）：以创世/降临场景开场，
  * 呼应原初神谕与玩家神处境，铺开局钩子。作为末尾 user 提示注入。
  */
 export function openingDirective(mode: WorldMode): string {

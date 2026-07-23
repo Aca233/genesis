@@ -182,7 +182,7 @@ export async function createRealityRewrite(
         orderBy: { index: "desc" },
         select: { id: true },
       });
-      if (chapter === null) throw new RealityRewriteConflictError("活动现实尚无当前章节");
+      if (chapter === null) throw new RealityRewriteConflictError("活动现实尚无当前记录段");
       return tx.realityRewrite.create({
         data: {
           worldId: world.id,
@@ -669,7 +669,7 @@ async function applyInSerializableTransaction(
           select: { id: true },
         });
         if (currentChapter?.id !== task.sourceChapterId) {
-          throw new RealityRewriteConflictError("来源章节已变化，改写已取消");
+          throw new RealityRewriteConflictError("来源记录段已变化，改写已取消");
         }
 
         const cloned = await cloneTimelineGraph(tx, {
@@ -787,7 +787,7 @@ async function completeNarration(
     orderBy: { index: "desc" },
     select: { id: true },
   });
-  if (chapter === null) throw new RealityRewriteConflictError("改写结果章节不存在");
+  if (chapter === null) throw new RealityRewriteConflictError("改写结果记录段不存在");
   const existing = await deps.db.message.findMany({
     where: { chapterId: chapter.id },
     select: { meta: true },
@@ -854,6 +854,8 @@ async function completeNarration(
             realityRewriteId: taskId,
             scope: plan.scope,
             decree: task.decree,
+            settlementRequired: true,
+            settlementReasons: ["major_event"],
           },
         },
       });

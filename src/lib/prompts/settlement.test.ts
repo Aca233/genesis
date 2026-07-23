@@ -49,10 +49,18 @@ describe("creator settlement contract", () => {
     expect(system).toContain("never an entity name");
   });
 
+  it("世界整理提示词不要求玩家可见章节或章题", () => {
+    const prompt = settlementSystem("creator");
+    expect(prompt).toContain("checkpoint window");
+    expect(prompt).toContain("world-settlement");
+    expect(prompt).not.toContain("chapter-settlement engine");
+    expect(prompt).not.toContain("4-8 character chapter title");
+  });
+
   it("creator prompt treats observations as world-external and turns as internal", () => {
     const system = settlementSystem("creator");
     const user = settlementUserPrompt({
-      mode: "creator", chapterMessages: "【天外观测】看向盐沼", scaleNote: "场景",
+      mode: "creator", chapterMessages: "【创世主意图】看向盐沼", scaleNote: "场景",
       eraSystem: "纪元", currentYearLabel: "元年", entities: "盐沼城", gods: "潮神",
       abilities: "覆潮", lockedPaths: "—",
     });
@@ -61,7 +69,7 @@ describe("creator settlement contract", () => {
     expect(system).toContain("never produce stanceToPlayer");
     expect(system).not.toContain("required when an action directly targets the player god");
     expect(system).not.toContain("含玩家神");
-    expect(user).toContain("【天外观测】");
+    expect(user).toContain("【创世主意图】");
   });
 
   it("retains pantheon player-god settlement semantics", () => {

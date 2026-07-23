@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
     world: { findUnique: vi.fn() },
     entity: { findUnique: vi.fn() },
     god: { findUnique: vi.fn(), findMany: vi.fn() },
-    chapter: { findUnique: vi.fn(), findFirst: vi.fn() },
+    chapter: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn() },
     message: { findUnique: vi.fn() },
     timeline: { findUnique: vi.fn() },
     realityRewrite: { findFirst: vi.fn() },
@@ -72,6 +72,7 @@ describe("能力 API 可见性", () => {
       id: "chapter-1",
       timelineId: "timeline-1",
     });
+    mocks.prisma.chapter.findMany.mockResolvedValue([]);
     mocks.prisma.message.findUnique.mockResolvedValue({
       id: "message-1",
       chapterId: "chapter-1",
@@ -179,8 +180,16 @@ describe("能力 API 可见性", () => {
       id: "chapter-1",
       index: 1,
       title: "第一章",
+      settleState: "open",
       messages: [],
     });
+    mocks.prisma.chapter.findMany.mockResolvedValue([{
+      id: "chapter-1",
+      index: 1,
+      title: "第一章",
+      settleState: "open",
+      messages: [],
+    }]);
     mocks.prisma.chapter.findUnique.mockResolvedValue(null);
     mocks.prisma.timeline.findUnique.mockResolvedValue({
       id: "timeline-1",

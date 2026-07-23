@@ -297,7 +297,7 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
       },
     },
   });
-  if (!chapter) throw new Error("章节不存在");
+  if (!chapter) throw new Error("内部记录段不存在");
   const mode = WorldModeSchema.parse(world.mode);
   if (chapter.timelineId !== world.activeTimelineId) throw new Error("该现实已被冻结");
 

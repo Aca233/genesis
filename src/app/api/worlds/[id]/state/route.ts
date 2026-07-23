@@ -19,7 +19,7 @@ import { resolveTemporalState } from "@/lib/chat/continuous-state";
 
 /**
  * GET /api/worlds/[id]/state —— 对局引导：一次拉取对局界面所需全量状态
- * （世界核心卡 + 诸神 + 当前章 + 当前章消息 + 上章末 3 条）。
+ * （世界核心卡 + 诸神 + 最近四个内部记录段，最多 80 条连续消息）。
  */
 
 export async function GET(
@@ -53,17 +53,17 @@ export async function GET(
   const observerState = observerStateFromPersistence(timeline.observerState);
   const viewer = realityViewer(mode, observerState);
 
-  // 当前章 = index 最大的章
+  // 当前内部记录段 = index 最大的 Chapter
   const currentChapter = await prisma.chapter.findFirst({
     where: { timelineId: world.activeTimelineId },
     orderBy: { index: "desc" },
     include: { messages: { orderBy: { index: "asc" } } },
   });
   if (!currentChapter) {
-    return NextResponse.json({ error: "时间线尚无章节" }, { status: 404 });
+    return NextResponse.json({ error: "时间线尚无内部记录段" }, { status: 404 });
   }
 
-  const [gods, avatars, prevChapter, recentRewrite] = await Promise.all([
+  const [gods, avatars, recentSegments, recentRewrite] = await Promise.all([
     prisma.god.findMany({
       where: { timelineId: world.activeTimelineId },
       orderBy: { createdAt: "asc" },
@@ -89,14 +89,11 @@ export async function GET(
           },
         })
       : Promise.resolve([]),
-    prisma.chapter.findUnique({
-      where: {
-        timelineId_index: {
-          timelineId: world.activeTimelineId,
-          index: currentChapter.index - 1,
-        },
-      },
-      include: { messages: { orderBy: { index: "desc" }, take: 3 } },
+    prisma.chapter.findMany({
+      where: { timelineId: world.activeTimelineId },
+      orderBy: { index: "desc" },
+      take: 4,
+      include: { messages: { orderBy: { index: "asc" } } },
     }),
     prisma.realityRewrite.findFirst({
       where: { worldId: world.id, resultTimelineId: timeline.id },
@@ -127,14 +124,16 @@ export async function GET(
       ? (world.themeCard as { eraSystem?: string }).eraSystem
       : null,
   });
-  const currentMessages = currentChapter.messages.map((message) => ({
-    ...message,
-    editable: currentChapter.settleState === "open",
-  }));
-  const previousMessages = (prevChapter?.messages ?? []).reverse().map((message) => ({
-    ...message,
-    editable: false,
-  }));
+  const continuousMessages = [...recentSegments]
+    .reverse()
+    .flatMap((segment) => segment.messages.map((message) => ({
+      ...message,
+      editable: segment.id === currentChapter.id && segment.settleState === "open",
+    })))
+    .slice(-80);
+  const previousMessages = continuousMessages.filter(
+    (message) => message.chapterId !== currentChapter.id,
+  );
   const latestNarrator = [...currentChapter.messages]
     .reverse()
     .find((message) => message.role === "narrator");
@@ -217,7 +216,7 @@ export async function GET(
     operation: world.operationKind
       ? { kind: world.operationKind }
       : null,
-    messages: [...previousMessages, ...currentMessages],
+    messages: continuousMessages,
     prevChapterTail: previousMessages,
     recentRewrite,
   });

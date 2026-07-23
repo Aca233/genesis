@@ -293,11 +293,6 @@ export default function GenesisEditorPage({
     }
   }, [deck, dirty, save, worldId]);
 
-  const ceremonyError = useCallback((message: string) => {
-    setCeremony(null);
-    setNotice({ ok: false, text: `创世未成：${message}` });
-  }, []);
-
   const ceremonyFinished = useCallback(() => {
     router.push(`/play/${worldId}`);
   }, [router, worldId]);
@@ -696,7 +691,6 @@ export default function GenesisEditorPage({
             decree={genesisInput || `${deck.worldName}，自此有史。`}
             deck={deck}
             embark={ceremony}
-            onError={ceremonyError}
             onFinished={ceremonyFinished}
           />
         )}

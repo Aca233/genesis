@@ -43,19 +43,16 @@ export function GenesisCeremony({
   decree,
   deck,
   embark,
-  onError,
   onFinished,
 }: {
   /** 原初神谕 */
   decree: string;
   deck: WorldDeck;
   embark: EmbarkState;
-  /** embark 失败：退出演出交还编辑器（编辑器展示错误与重试） */
-  onError: (message: string) => void;
   /** embark 成功且动画结束（或被跳过）→ 跳转 */
   onFinished: () => void;
 }) {
-  // 幕次：decree（逐字神谕）→ stamps（拓印）→ title（章题）→ hold（等待 embark）
+  // 幕次：decree（逐字神谕）→ stamps（拓印）→ title（世界题名）→ hold（等待 opening）
   const [act, setAct] = useState<"decree" | "stamps" | "title" | "hold">(
     "decree",
   );
@@ -94,7 +91,7 @@ export function GenesisCeremony({
     return () => clearTimeout(t);
   }, [act, stampCount, stamps.length, stampInterval]);
 
-  // 第三幕：章题晕开后进入等待段
+  // 第三幕：世界题名晕开后进入等待段
   useEffect(() => {
     if (act !== "title") return;
     const t = setTimeout(() => setAct("hold"), 2600);
@@ -102,11 +99,6 @@ export function GenesisCeremony({
   }, [act]);
 
   const animationDone = skipped || act === "hold";
-
-  // embark 失败：退出演出
-  useEffect(() => {
-    if (embark.phase === "error") onError(embark.message);
-  }, [embark, onError]);
 
   // 成功 + 动画结束（或跳过）→ 跳转
   useEffect(() => {

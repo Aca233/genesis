@@ -8,9 +8,9 @@ import {
 } from "@/lib/reality/operation-lock";
 
 /**
- * POST /api/chapters/[id]/settle —— 章末结算（SSE 进度流，驱动岁月流转演出）
+ * POST /api/chapters/[id]/settle —— 内部世界整理（SSE 进度流）
  * 事件：data:{"type":"progress","step","detail?","index?","total?"}
- *      data:{"type":"done","nextChapterId","title"}
+ *      data:{"type":"done","nextSegmentId"}
  *      data:{"type":"error","message"}
  * 幂等：结算中断后重新 POST 从断点续跑。
  */
@@ -36,10 +36,10 @@ export async function POST(
     },
   });
   if (!chapter) {
-    return NextResponse.json({ error: "章节不存在" }, { status: 404 });
+    return NextResponse.json({ error: "内部记录段不存在" }, { status: 404 });
   }
   if (chapter.messages.length === 0) {
-    return NextResponse.json({ error: "本章尚无一字，不可结算" }, { status: 400 });
+    return NextResponse.json({ error: "此段尚无正文，不可整理" }, { status: 400 });
   }
   if (chapter.timeline.id !== chapter.timeline.world.activeTimelineId) {
     return NextResponse.json({ error: "该现实已被冻结" }, { status: 409 });

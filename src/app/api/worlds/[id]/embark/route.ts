@@ -21,7 +21,7 @@ export {
   runEmbarkTransaction,
 } from "@/lib/embark/mutations";
 
-/** POST /api/worlds/[id]/embark —— 开局：草稿卡组物化为时间线+诸神+百科实体+第一章 */
+/** POST /api/worlds/[id]/embark —— 开局：草稿卡组物化为时间线、诸神、百科实体和首个内部记录段 */
 export const maxDuration = 60;
 
 

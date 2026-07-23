@@ -6,6 +6,10 @@ import { ScaleSchema } from "@/lib/cards/schemas";
 import { buildNarratorContext } from "@/lib/context/builder";
 import { narratorSSE } from "@/lib/context/sse";
 import type { NarratorMeta } from "@/lib/prompts/narrator";
+import {
+  assertMessageEditable,
+  MessageCheckpointError,
+} from "@/lib/chat/message-edit-policy";
 
 /**
  * 消息四件套之「异文」（docs/01 §3.2）
@@ -29,7 +33,17 @@ export async function POST(
   const message = await prisma.message.findUnique({
     where: { id },
     include: {
-      chapter: { include: { timeline: { select: { worldId: true } } } },
+      chapter: {
+        include: {
+          timeline: {
+            select: {
+              id: true,
+              worldId: true,
+              world: { select: { activeTimelineId: true } },
+            },
+          },
+        },
+      },
     },
   });
   if (!message) {
@@ -38,8 +52,17 @@ export async function POST(
   if (message.role !== "narrator") {
     return NextResponse.json({ error: "只有叙事消息可另掷异文" }, { status: 400 });
   }
-  if (message.chapter.settleState !== "open") {
-    return NextResponse.json({ error: "本章已成史，不可另掷" }, { status: 409 });
+  try {
+    assertMessageEditable({
+      settleState: message.chapter.settleState,
+      timelineId: message.chapter.timeline.id,
+      activeTimelineId: message.chapter.timeline.world.activeTimelineId,
+    });
+  } catch (error) {
+    if (error instanceof MessageCheckpointError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    throw error;
   }
 
   const scaleParsed = ScaleSchema.safeParse(message.scale);
@@ -116,9 +139,35 @@ export async function PATCH(
   }
   const { index } = parsed.data;
 
-  const message = await prisma.message.findUnique({ where: { id } });
+  const message = await prisma.message.findUnique({
+    where: { id },
+    include: {
+      chapter: {
+        include: {
+          timeline: {
+            select: {
+              id: true,
+              world: { select: { activeTimelineId: true } },
+            },
+          },
+        },
+      },
+    },
+  });
   if (!message) {
     return NextResponse.json({ error: "消息不存在" }, { status: 404 });
+  }
+  try {
+    assertMessageEditable({
+      settleState: message.chapter.settleState,
+      timelineId: message.chapter.timeline.id,
+      activeTimelineId: message.chapter.timeline.world.activeTimelineId,
+    });
+  } catch (error) {
+    if (error instanceof MessageCheckpointError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    throw error;
   }
   const variants = asVariants(message.variants);
   if (index >= variants.length) {
@@ -132,7 +181,7 @@ export async function PATCH(
     where: { id },
     data: {
       content: target.content,
-      meta: (target.meta ?? { suggestions: [], chapterBreakHint: false }) as unknown as Prisma.InputJsonValue,
+      meta: (target.meta ?? { suggestions: [] }) as unknown as Prisma.InputJsonValue,
       variants: next as Prisma.InputJsonValue,
     },
   });

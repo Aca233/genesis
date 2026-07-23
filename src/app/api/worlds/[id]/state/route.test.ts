@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   timelineFindUnique: vi.fn(),
   chapterFindFirst: vi.fn(),
   chapterFindUnique: vi.fn(),
+  chapterFindMany: vi.fn(),
   godFindMany: vi.fn(),
   entityFindMany: vi.fn(),
   rewriteFindFirst: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock("@/lib/db", () => ({
     chapter: {
       findFirst: mocks.chapterFindFirst,
       findUnique: mocks.chapterFindUnique,
+      findMany: mocks.chapterFindMany,
     },
     god: { findMany: mocks.godFindMany },
     entity: { findMany: mocks.entityFindMany },
@@ -79,9 +81,17 @@ describe("GET /api/worlds/[id]/state projections", () => {
       id: "chapter-1",
       index: 1,
       title: "初燃",
+      settleState: "open",
       messages: [],
     });
     mocks.chapterFindUnique.mockResolvedValue(null);
+    mocks.chapterFindMany.mockResolvedValue([{
+      id: "chapter-1",
+      index: 1,
+      title: "初燃",
+      settleState: "open",
+      messages: [],
+    }]);
     mocks.godFindMany.mockResolvedValue([{
       id: "god-moon",
       name: "月神",
@@ -183,5 +193,36 @@ describe("GET /api/worlds/[id]/state projections", () => {
     expect(body.gods[0].agenda).toBeNull();
     expect(body.gods[0].abilities).toEqual([]);
     expect(body.avatars).toEqual([]);
+  });
+
+  it("连续返回最近四个内部记录段且只允许编辑当前开放段", async () => {
+    const segments = [0, 1, 2, 3, 4].map((index) => ({
+      id: `segment-${index}`,
+      index,
+      title: null,
+      settleState: index === 4 ? "open" : "settled",
+      messages: [{
+        id: `message-${index}`,
+        chapterId: `segment-${index}`,
+        index: 0,
+        role: "narrator",
+        content: `正文-${index}`,
+        scale: "scene",
+        meta: null,
+      }],
+    }));
+    mocks.chapterFindFirst.mockResolvedValue(segments[4]);
+    mocks.chapterFindUnique.mockResolvedValue(segments[3]);
+    mocks.chapterFindMany.mockResolvedValue([...segments].reverse().slice(0, 4));
+
+    const body = await (await GET(
+      new Request("http://localhost/api/worlds/world-1/state"),
+      context,
+    )).json();
+
+    expect(body.messages.map((message: { content: string }) => message.content))
+      .toEqual(["正文-1", "正文-2", "正文-3", "正文-4"]);
+    expect(body.messages.map((message: { editable: boolean }) => message.editable))
+      .toEqual([false, false, false, true]);
   });
 });
