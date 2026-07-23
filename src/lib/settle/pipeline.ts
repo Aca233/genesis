@@ -19,6 +19,10 @@ import {
   settlementUserPrompt,
   type ModeAwareChapterSettlement,
 } from "@/lib/prompts/settlement";
+import {
+  applySettlementActivity,
+  type SettlementActivityTx,
+} from "@/lib/world-activity/settlement";
 import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
 import { RealityStateSchema, type RealityState } from "@/lib/reality/schemas";
 import {
@@ -302,7 +306,7 @@ async function* settleChapterWithLease(
           maxAttempts: 1,
           transportMaxAttempts: 1,
           allowTransportFallback: false,
-          cache: { namespace: `settlement:v1:${mode}` },
+          cache: { namespace: `settlement:v2:${mode}` },
         });
         await assertLeaseOwned();
         await assertTimelineStillActive(world.id, timeline.id);
@@ -385,6 +389,12 @@ async function* settleChapterWithLease(
     await assertTimelineStillActive(world.id, timeline.id);
     await withSettlementLeaseFence(worldId, token, async (tx) => {
       await applyChronicle(tx, timeline.id, chapterId, chapter.index, settlement.chronicle);
+      await applySettlementActivity(tx as unknown as SettlementActivityTx, {
+        timelineId: timeline.id,
+        chapterId,
+        sourceMessageId: chapterText.messages.at(-1)?.id ?? chapterId,
+        worldActivity: settlement.worldActivity,
+      });
       await setState(tx, chapterId, "decay");
     });
   }
@@ -557,7 +567,7 @@ async function buildSettlementContext(
   mode: WorldMode,
   reality?: RealityState,
 ): Promise<Parameters<typeof settlementUserPrompt>[0]> {
-  const [entities, gods, abilities, lastEntry] = await Promise.all([
+  const [entities, gods, abilities, lastEntry, worldActivity] = await Promise.all([
     prisma.entity.findMany({
       where: { timelineId },
       select: {
@@ -589,6 +599,10 @@ async function buildSettlementContext(
       where: { timelineId, revealed: true },
       orderBy: { createdAt: "desc" },
     }),
+    settlementActivityContext(
+      timelineId,
+      chapterText.messages.map((message) => message.id),
+    ),
   ]);
   const theme = mode === "creator" && reality
     ? reality.theme
@@ -621,8 +635,47 @@ async function buildSettlementContext(
       return `[${ability.id}] ${owner}·${ability.name} kind=${ability.kind} mastery=${ability.mastery} state=${ability.state} visibility=${ability.visibility} source=${source} locked=[${ability.lockedFields.join(", ")}] effect=${ability.effect} trigger=${ability.trigger} cost=${ability.cost} limitations=${ability.limitations}`;
     }).join("\n"),
     lockedPaths: entities.flatMap((entity) => entity.lockedPaths.map((path) => `${entity.name}.${path}`)).join(", "),
+    worldActivity,
     fusionAxiom: fusionAxiom ? JSON.stringify(fusionAxiom) : undefined,
   };
+}
+
+async function settlementActivityContext(
+  timelineId: string,
+  checkpointMessageIds: string[],
+): Promise<string> {
+  const [activities, events] = await Promise.all([
+    checkpointMessageIds.length
+      ? prisma.worldActivity.findMany({
+        where: {
+          timelineId,
+          sourceMessageId: { in: checkpointMessageIds },
+          recordType: "activity",
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        take: 40,
+      })
+      : Promise.resolve([]),
+    prisma.worldEvent.findMany({
+      where: { timelineId, resolvedAt: null },
+      orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+      take: 20,
+    }),
+  ]);
+  return [
+    "CHECKPOINT ACTIVITIES:",
+    ...(activities.length
+      ? activities.map((activity) =>
+        `${activity.id} | ${activity.kind} | visibility=${activity.visibility} | subjects=[${activity.subjectIds.join(",")}] | ${activity.text}`,
+      )
+      : ["—"]),
+    "UNRESOLVED EVENTS:",
+    ...(events.length
+      ? events.map((event) =>
+        `${event.id} | ${event.kind} | ${event.phase} | visibility=${event.visibility} | participants=[${event.participantIds.join(",")}] | ${event.title}: ${event.summary}`,
+      )
+      : ["—"]),
+  ].join("\n");
 }
 
 async function applyPantheonTurns(

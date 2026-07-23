@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { WorldMode } from "@/lib/world-mode";
+import { ActivityVisibilitySchema } from "@/lib/world-activity/contracts";
 import { StrictExtractionSchema, ChronicleSchema } from "./extractor";
 import { PantheonTurnSchema } from "./pantheon";
 
@@ -56,11 +57,67 @@ const CreatorStrictExtractionSchema = StrictExtractionSchema.extend({
   godUpdates: z.array(CreatorGodUpdateSchema).describe("世界内部诸神状态变化，仅写有变化者"),
 });
 
+const SettlementIdentifierSchema = z.string().trim().min(1).max(200);
+const SettlementEventKindSchema = z.enum([
+  "war",
+  "conspiracy",
+  "disaster",
+  "religious_conflict",
+  "faction_shift",
+  "world_crisis",
+]);
+const SettlementEventPhaseSchema = z.enum([
+  "emerging",
+  "developing",
+  "escalating",
+  "resolved",
+]);
+
+export const SettlementEventMutationSchema = z.discriminatedUnion("operation", [
+  z.object({
+    operation: z.literal("create"),
+    sourceActivityIds: z.array(SettlementIdentifierSchema).min(1).max(20),
+    kind: SettlementEventKindSchema,
+    title: z.string().trim().min(1).max(160),
+    summary: z.string().trim().min(1).max(2000),
+    phase: z.enum(["emerging", "escalating"]),
+    participantIds: z.array(SettlementIdentifierSchema).min(1).max(30),
+    visibility: ActivityVisibilitySchema,
+  }).strict(),
+  z.object({
+    operation: z.literal("advance"),
+    eventId: SettlementIdentifierSchema,
+    phase: SettlementEventPhaseSchema,
+    summary: z.string().trim().min(1).max(2000),
+    participantIds: z.array(SettlementIdentifierSchema).min(1).max(30),
+    visibility: ActivityVisibilitySchema,
+    progressText: z.string().trim().min(1).max(1000),
+  }).strict(),
+  z.object({
+    operation: z.literal("derive"),
+    parentEventId: SettlementIdentifierSchema,
+    title: z.string().trim().min(1).max(160),
+    kind: SettlementEventKindSchema,
+    summary: z.string().trim().min(1).max(2000),
+    participantIds: z.array(SettlementIdentifierSchema).min(1).max(30),
+    visibility: ActivityVisibilitySchema,
+  }).strict(),
+]);
+
+export const SettlementWorldActivitySchema = z.object({
+  mergeActivityIds: z.array(SettlementIdentifierSchema).max(30).default([]),
+  eventMutations: z.array(SettlementEventMutationSchema).max(8).default([]),
+}).strict();
+
 function settlementSchema(turn: typeof SettlementPantheonTurnSchema | typeof SettlementCreatorTurnSchema) {
   return z.object({
     pantheonTurns: z.array(turn),
     extraction: StrictExtractionSchema,
     chronicle: ChronicleSchema,
+    worldActivity: SettlementWorldActivitySchema.default({
+      mergeActivityIds: [],
+      eventMutations: [],
+    }),
   });
 }
 
@@ -69,6 +126,10 @@ export const CreatorChapterSettlementSchema = z.object({
   pantheonTurns: z.array(SettlementCreatorTurnSchema),
   extraction: CreatorStrictExtractionSchema,
   chronicle: ChronicleSchema,
+  worldActivity: SettlementWorldActivitySchema.default({
+    mergeActivityIds: [],
+    eventMutations: [],
+  }),
 });
 
 export function chapterSettlementSchema(mode: WorldMode) {
@@ -78,6 +139,8 @@ export function chapterSettlementSchema(mode: WorldMode) {
 export type ChapterSettlement = z.infer<typeof ChapterSettlementSchema>;
 export type CreatorChapterSettlement = z.infer<typeof CreatorChapterSettlementSchema>;
 export type ModeAwareChapterSettlement = ChapterSettlement | CreatorChapterSettlement;
+export type SettlementWorldActivity = z.infer<typeof SettlementWorldActivitySchema>;
+export type SettlementEventMutation = z.infer<typeof SettlementEventMutationSchema>;
 
 const settlementJsonSchemas: Record<WorldMode, string> = {
   pantheon: JSON.stringify(z.toJSONSchema(ChapterSettlementSchema), null, 2),
@@ -103,10 +166,14 @@ Tasks inside the same response:
 1. pantheonTurns: give every listed non-player major god exactly one offstage action. Respect rank order, persona, agenda, relations, abilities and earlier gods' consequences. A deliberate stillness is valid.
 2. extraction: extract only state deltas explicitly supported by labelled chapter messages. Ability changes require one exact evidenceMessageIndex and a verbatim evidence excerpt of at least 12 Chinese characters.
 3. chronicle: write 2-3 public historian entries and an epilogue. The legacy chapterTitle field is internal compatibility data only: return an empty string. Never expose hidden pantheon actions, abilities, agendas or relations.
+4. worldActivity: merge duplicate activities, promote multiple related ordinary activities into an important event, advance or resolve an unresolved event, or derive a new event from one. Return empty arrays when no durable correction is justified.
 
 Global rules:
 - Output one JSON object only. No markdown or commentary. All user-facing strings are Chinese.
 - Never invent IDs. Use exact known names and ability IDs from input.
+- Never guess an activity or event ID from its title. worldActivity may reference only exact IDs listed in CHECKPOINT WORLD ACTIVITY.
+- A create mutation must cite the exact related sourceActivityIds. An advance or derive mutation must cite an exact unresolved event ID.
+- Do not create unrelated news. Every worldActivity mutation must follow from the checkpoint messages, listed activities, or listed unresolved events.
 - Respect player-locked sections and ability fields.
 - For new entities, only named story-relevant entities qualify. New characters may reference only an exact known/new race name.
 - New abilities require explicit learned/awakened evidence; characters may create personal, gods divine, races racial_innate/racial_tradition.
@@ -127,6 +194,7 @@ export function settlementUserPrompt(opts: {
   gods: string;
   abilities: string;
   lockedPaths: string;
+  worldActivity?: string;
   fusionAxiom?: string;
 }): string {
   return `== WORLD MODE ==
@@ -150,6 +218,9 @@ ${opts.abilities || "—"}
 == PLAYER-LOCKED SECTIONS ==
 ${opts.lockedPaths || "—"}
 ${opts.fusionAxiom ? `\n== FUSION AXIOM ==\n${opts.fusionAxiom}\n` : ""}
+== CHECKPOINT WORLD ACTIVITY ==
+${opts.worldActivity || "—"}
+
 == FULL LABELLED CHECKPOINT WINDOW MESSAGES ==
 ${opts.chapterMessages || "—"}
 

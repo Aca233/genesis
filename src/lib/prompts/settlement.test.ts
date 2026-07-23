@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ChapterSettlementSchema, chapterSettlementSchema, settlementSystem, settlementUserPrompt } from "./settlement";
+import {
+  ChapterSettlementSchema,
+  SettlementWorldActivitySchema,
+  chapterSettlementSchema,
+  settlementSystem,
+  settlementUserPrompt,
+} from "./settlement";
 
 describe("ChapterSettlementSchema", () => {
   it("拒绝缺少证据字段的能力变化，避免单次响应静默丢技能", () => {
@@ -13,6 +19,48 @@ describe("ChapterSettlementSchema", () => {
       chronicle: { entries: [{ yearLabel: "元年", text: "盐潮越过旧堤。", entityNames: ["盐沼城"], godNames: ["潮神"] }], epilogue: "终", chapterTitle: "终章" },
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it("接受同一次整理中的动态合并、事件升级、解决和派生", () => {
+    const parsed = SettlementWorldActivitySchema.parse({
+      mergeActivityIds: ["activity-a", "activity-b"],
+      eventMutations: [
+        {
+          operation: "create",
+          sourceActivityIds: ["activity-a", "activity-b"],
+          kind: "war",
+          title: "盐路之战",
+          summary: "港口冲突已升级为持续战争。",
+          phase: "escalating",
+          participantIds: ["god-tide", "entity-port"],
+          visibility: "public",
+        },
+        {
+          operation: "advance",
+          eventId: "event-war",
+          phase: "resolved",
+          summary: "双方签订停战约。",
+          participantIds: ["god-tide", "entity-port"],
+          visibility: "public",
+          progressText: "盐路之战正式结束。",
+        },
+        {
+          operation: "derive",
+          parentEventId: "event-war",
+          title: "港口复兴",
+          kind: "faction_shift",
+          summary: "停战后的港口势力重新洗牌。",
+          participantIds: ["entity-port"],
+          visibility: "player_known",
+        },
+      ],
+    });
+
+    expect(parsed.eventMutations.map((mutation) => mutation.operation)).toEqual([
+      "create",
+      "advance",
+      "derive",
+    ]);
   });
 });
 
@@ -76,5 +124,33 @@ describe("creator settlement contract", () => {
     const prompt = settlementSystem("pantheon");
     expect(prompt).toContain("directly targets the player god");
     expect(prompt).toContain("pantheonTurns");
+  });
+
+  it("只允许按输入 ID 合并、升级、解决或派生事件", () => {
+    const system = settlementSystem("creator");
+    const user = settlementUserPrompt({
+      mode: "creator",
+      chapterMessages: "[message-1 | 1 | scene]\n盐潮越过旧堤。",
+      scaleNote: "场景",
+      eraSystem: "纪元",
+      currentYearLabel: "元年",
+      entities: "盐沼城 [entity-port]",
+      gods: "潮神 [god-tide]",
+      abilities: "—",
+      lockedPaths: "—",
+      worldActivity: [
+        "CHECKPOINT ACTIVITIES:",
+        "activity-a | conflict | 盐商在北港械斗",
+        "UNRESOLVED EVENTS:",
+        "event-war | war | developing | 盐路冲突",
+      ].join("\n"),
+    });
+
+    expect(system).toContain("merge duplicate activities");
+    expect(system).toContain("derive");
+    expect(system).toContain("Never guess an activity or event ID");
+    expect(user).toContain("activity-a");
+    expect(user).toContain("event-war");
+    expect(user).toContain("CHECKPOINT WORLD ACTIVITY");
   });
 });

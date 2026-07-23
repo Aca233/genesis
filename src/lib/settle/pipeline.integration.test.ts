@@ -3,6 +3,10 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 const responses = vi.hoisted(() => ({
   extract: {} as Record<string, unknown>,
   extractHandler: undefined as undefined | ((user: string) => Record<string, unknown>),
+  worldActivity: {
+    mergeActivityIds: [],
+    eventMutations: [],
+  } as Record<string, unknown>,
   modelDelayMs: 0,
   beforeModelResponse: undefined as undefined | (() => void | Promise<void>),
 }));
@@ -19,6 +23,7 @@ vi.mock("@/lib/llm/structured", () => ({
         epilogue: "传承已续。",
         chapterTitle: "石阶传承",
       },
+      worldActivity: responses.worldActivity,
     };
   }),
 }));
@@ -61,6 +66,74 @@ describe("章末 pipeline 习得族群技艺", () => {
       expect(consoleError).not.toHaveBeenCalled();
     } finally {
       consoleError.mockRestore();
+      await prisma.world.delete({ where: { id: data.world.id } });
+    }
+  });
+
+  it("同一次整理合并重复动态、升级事件并在断点重跑时保持幂等", async () => {
+    const data = await fixture();
+    const first = await prisma.worldActivity.create({
+      data: {
+        id: `activity-${crypto.randomUUID()}`,
+        timelineId: data.timeline.id,
+        recordType: "activity",
+        kind: "conflict",
+        text: "山民与盐商在石阶冲突。",
+        visibility: "public",
+        targetIds: [],
+        subjectIds: [data.character.id],
+        sourceMessageId: data.message.id,
+        eraLabel: "元年",
+        timeLabel: "此刻",
+      },
+    });
+    const duplicate = await prisma.worldActivity.create({
+      data: {
+        id: `activity-${crypto.randomUUID()}`,
+        timelineId: data.timeline.id,
+        recordType: "activity",
+        kind: "conflict",
+        text: "盐商再次与山民争夺石阶。",
+        visibility: "public",
+        targetIds: [],
+        subjectIds: [data.character.id],
+        sourceMessageId: data.message.id,
+        eraLabel: "元年",
+        timeLabel: "此刻",
+      },
+    });
+    responses.worldActivity = {
+      mergeActivityIds: [first.id, duplicate.id],
+      eventMutations: [{
+        operation: "create",
+        sourceActivityIds: [first.id, duplicate.id],
+        kind: "war",
+        title: "石阶争夺",
+        summary: "山民与盐商的冲突升级为持续战争。",
+        phase: "escalating",
+        participantIds: [data.character.id],
+        visibility: "public",
+      }],
+    };
+    try {
+      await settle(data.chapter.id);
+      await prisma.chapter.update({
+        where: { id: data.chapter.id },
+        data: { settleState: "settling:chronicle" },
+      });
+      await settle(data.chapter.id);
+
+      const eventId = `settlement:${data.chapter.id}:0`;
+      expect(await prisma.worldEvent.count({ where: { id: eventId } })).toBe(1);
+      expect(await prisma.worldActivity.count({
+        where: { id: `${eventId}:progress` },
+      })).toBe(1);
+      expect(await prisma.worldActivity.findUnique({ where: { id: first.id } }))
+        .toMatchObject({ eventId });
+      expect(await prisma.worldActivity.findUnique({ where: { id: duplicate.id } }))
+        .toBeNull();
+    } finally {
+      responses.worldActivity = { mergeActivityIds: [], eventMutations: [] };
       await prisma.world.delete({ where: { id: data.world.id } });
     }
   });
@@ -517,7 +590,7 @@ it("creator settlement uses creator schema/prompt and never writes stanceToPlaye
     expect(vi.mocked(completeStructured)).toHaveBeenCalledWith("backstage", expect.objectContaining({
       system: expect.stringContaining("world-external Creator"),
       user: expect.stringContaining(creatorDeck.theme.eraSystem),
-      cache: { namespace: "settlement:v1:creator" },
+      cache: { namespace: "settlement:v2:creator" },
     }));
   } finally {
     await prisma.world.delete({ where: { id: data.world.id } });
