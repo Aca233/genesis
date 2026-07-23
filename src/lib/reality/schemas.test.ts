@@ -31,7 +31,7 @@ describe("initial reality and observer state", () => {
         style: deck.style,
         cosmology: deck.cosmology,
         fusionAxiom: deck.fusionAxiom,
-        currentEra: deck.epochConflict.yearLabel,
+        currentEra: deck.epochConflict.epochName,
         establishedFacts: [],
       });
       expect(ObserverStateSchema.parse(observer)).toEqual({

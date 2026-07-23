@@ -48,7 +48,7 @@ export function initialRealityState(deck: WorldDeck): RealityState {
     style: deck.style,
     cosmology: deck.cosmology,
     fusionAxiom: deck.fusionAxiom,
-    currentEra: deck.epochConflict.yearLabel,
+    currentEra: deck.epochConflict.epochName,
     establishedFacts: [],
   });
 }
