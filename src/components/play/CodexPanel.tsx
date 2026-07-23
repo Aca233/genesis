@@ -5,6 +5,8 @@ import type {
   AbilityEventView,
   AbilityView,
   CharacterMembershipView,
+  CharacterRelationsView,
+  EntityRelationView,
   ThemeCard,
 } from "./types";
 import { Emblem } from "./Emblem";
@@ -54,6 +56,7 @@ type EntityDetail = EntityLite & {
   abilities: AbilityView[];
   race?: { id: string; name: string; summary: string } | null;
   memberships?: CharacterMembershipView[];
+  relations?: CharacterRelationsView;
   abilityEvents?: AbilityEventView[];
 };
 
@@ -159,6 +162,75 @@ function SectionBlock({ s }: { s: SectionRow }) {
         </p>
       )}
     </section>
+  );
+}
+
+function RelationRow({
+  relation,
+  onOpenEntity,
+}: {
+  relation: EntityRelationView;
+  onOpenEntity: (id: string) => void;
+}) {
+  const related = relation.direction === "outgoing"
+    ? relation.target
+    : relation.source;
+  return (
+    <li className="rounded-md border border-line bg-paper-sunken/45 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="rounded border border-gilt/35 px-1.5 py-0.5 text-xs text-gilt">
+          {relation.label}
+        </span>
+        <span className="text-[10px] tracking-wider text-ink-faint">
+          {relation.direction === "outgoing" ? "我方所系" : "对方所系"}
+        </span>
+        <button
+          type="button"
+          data-entity-id={related.id}
+          onClick={() => onOpenEntity(related.id)}
+          className="text-gilt underline decoration-gilt/40 underline-offset-2 transition hover:text-ink"
+        >
+          {related.name}
+        </button>
+        {relation.worldVisible === false && (
+          <span className="text-[10px] text-cinnabar/80">世界内尚未知晓</span>
+        )}
+      </div>
+      {relation.note && (
+        <p className="mt-1 text-xs leading-relaxed text-ink-soft">{relation.note}</p>
+      )}
+    </li>
+  );
+}
+
+export function CharacterRelations({
+  relations,
+  onOpenEntity,
+}: {
+  relations: CharacterRelationsView;
+  onOpenEntity: (id: string) => void;
+}) {
+  const rows: EntityRelationView[] = [
+    ...relations.outgoing,
+    ...relations.incoming,
+  ];
+  return (
+    <div>
+      <h4 className="mb-2 text-xs tracking-widest text-ink-faint">人物关系</h4>
+      {rows.length > 0 ? (
+        <ul className="grid gap-2">
+          {rows.map((relation) => (
+            <RelationRow
+              key={`${relation.direction}:${relation.id}`}
+              relation={relation}
+              onOpenEntity={onOpenEntity}
+            />
+          ))}
+        </ul>
+      ) : (
+        <p className="fog-text text-sm">尚无载入册中的人物关系</p>
+      )}
+    </div>
   );
 }
 
@@ -349,6 +421,10 @@ function EntityDetailView({
               )}
             </div>
           </div>
+          <CharacterRelations
+            relations={detail.relations ?? { outgoing: [], incoming: [] }}
+            onOpenEntity={onOpenEntity}
+          />
           <AbilityList
             abilities={detail.abilities}
             historyByAbilityId={abilityHistory}

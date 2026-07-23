@@ -14,6 +14,7 @@ import {
 } from "@/lib/abilities/visibility";
 import { WorldModeSchema } from "@/lib/world-mode";
 import {
+  canViewWorldKnowledge,
   isOmniscientViewer,
   projectChronicleForViewer,
   projectSectionsForViewer,
@@ -46,6 +47,130 @@ type AbilityWithEvents = PersistedAbilityRecord & {
     createdAt: unknown;
   }>;
 };
+
+type RelatedEntity = {
+  id: string;
+  type: string;
+  name: string;
+  summary: string;
+  emblemSeed: string;
+  imageUrl: string | null;
+};
+
+type EntityRelationRecord = {
+  id: string;
+  sourceEntityId: string;
+  targetEntityId: string;
+  label: string;
+  note: string | null;
+  visibility?: string;
+  sourceEntity: RelatedEntity;
+  targetEntity: RelatedEntity;
+};
+
+type EntityRelationDelegate = {
+  findMany(args: {
+    where: {
+      timelineId: string;
+      OR: Array<
+        { sourceEntityId: string }
+        | { targetEntityId: string }
+      >;
+    };
+    include: {
+      sourceEntity: { select: typeof relatedEntitySelect };
+      targetEntity: { select: typeof relatedEntitySelect };
+    };
+    orderBy: Array<{ updatedAt: "desc" } | { id: "asc" }>;
+  }): Promise<EntityRelationRecord[]>;
+};
+
+const relatedEntitySelect = {
+  id: true,
+  type: true,
+  name: true,
+  summary: true,
+  emblemSeed: true,
+  imageUrl: true,
+} as const;
+
+const ENTITY_RELATION_LABELS: Record<string, string> = {
+  family: "亲族",
+  spouse: "伴侣",
+  lover: "恋慕",
+  friend: "友人",
+  ally: "盟友",
+  rival: "对手",
+  enemy: "敌对",
+  mentor: "师长",
+  student: "门生",
+  colleague: "同僚",
+  neutral: "相识",
+};
+
+function relationLabel(label: string): string {
+  return ENTITY_RELATION_LABELS[label] ?? label;
+}
+
+async function projectCharacterRelations(
+  entity: { id: string; timelineId: string; type: string },
+  viewer: ReturnType<typeof realityViewerFromPersistence>,
+) {
+  if (entity.type !== "character") {
+    return { outgoing: [], incoming: [] };
+  }
+
+  const delegate = (
+    prisma as unknown as { entityRelation: EntityRelationDelegate }
+  ).entityRelation;
+  const relations = await delegate.findMany({
+    where: {
+      timelineId: entity.timelineId,
+      OR: [
+        { sourceEntityId: entity.id },
+        { targetEntityId: entity.id },
+      ],
+    },
+    include: {
+      sourceEntity: { select: relatedEntitySelect },
+      targetEntity: { select: relatedEntitySelect },
+    },
+    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+  });
+  const visible = relations.filter((relation) => {
+    const visibility = relation.visibility ?? "public";
+    return visibility === "public"
+      || visibility === "player_known"
+      || visibility === "hidden"
+      ? canViewWorldKnowledge(viewer, visibility)
+      : true;
+  });
+
+  return {
+    outgoing: visible
+      .filter((relation) => relation.sourceEntityId === entity.id)
+      .map((relation) => ({
+        id: relation.id,
+        direction: "outgoing" as const,
+        label: relationLabel(relation.label),
+        note: relation.note,
+        visibility: relation.visibility ?? "public",
+        ...(relation.visibility === "hidden" ? { worldVisible: false } : {}),
+        target: relation.targetEntity,
+      })),
+    incoming: visible
+      .filter((relation) => relation.targetEntityId === entity.id)
+      .map((relation) => ({
+        id: relation.id,
+        direction: "incoming" as const,
+        label: relationLabel(relation.label),
+        note: relation.note,
+        visibility: relation.visibility ?? "public",
+        ...(relation.visibility === "hidden" ? { worldVisible: false } : {}),
+        source: relation.sourceEntity,
+      })),
+  };
+}
 
 function normalizeAbilityWithoutEvents(ability: AbilityWithEvents) {
   const { events, ...record } = ability;
@@ -116,6 +241,7 @@ export async function GET(
     entity.timeline.observerState,
   );
   const omniscient = isOmniscientViewer(viewer);
+  const relations = await projectCharacterRelations(entity, viewer);
 
   // 专属编年史：涉及该实体且已揭示
   const chronicle = await prisma.chronicleEntry.findMany({
@@ -176,6 +302,7 @@ export async function GET(
         ? {
           race: race === null ? null : { id: race.id, name: race.name, summary: race.summary },
           memberships,
+          relations,
         }
         : {}),
     },

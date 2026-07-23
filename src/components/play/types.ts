@@ -104,6 +104,44 @@ export type CharacterMembershipView = {
   faction: { id: string; name: string; summary: string };
 };
 
+export type RelatedEntityView = {
+  id: string;
+  type: string;
+  name: string;
+  summary: string;
+  emblemSeed: string;
+  imageUrl: string | null;
+};
+
+export type OutgoingEntityRelationView = {
+  id: string;
+  direction: "outgoing";
+  label: string;
+  note: string | null;
+  visibility: string;
+  worldVisible?: boolean;
+  target: RelatedEntityView;
+};
+
+export type IncomingEntityRelationView = {
+  id: string;
+  direction: "incoming";
+  label: string;
+  note: string | null;
+  visibility: string;
+  worldVisible?: boolean;
+  source: RelatedEntityView;
+};
+
+export type EntityRelationView =
+  | OutgoingEntityRelationView
+  | IncomingEntityRelationView;
+
+export type CharacterRelationsView = {
+  outgoing: OutgoingEntityRelationView[];
+  incoming: IncomingEntityRelationView[];
+};
+
 /** 神明关系：Pantheon 的 player 键或 Creator 的真实目标 God ID。 */
 export type GodRelation = { label: string; note?: string };
 export type GodRelations = {

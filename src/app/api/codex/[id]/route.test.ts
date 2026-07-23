@@ -2,12 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   entityFindUnique: vi.fn(),
+  entityRelationFindMany: vi.fn(),
   chronicleFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    entity: { findUnique: mocks.entityFindUnique },
+    entity: {
+      findUnique: mocks.entityFindUnique,
+    },
+    entityRelation: { findMany: mocks.entityRelationFindMany },
     chronicleEntry: { findMany: mocks.chronicleFindMany },
   },
 }));
@@ -75,6 +79,7 @@ describe("GET /api/codex/[id] projections", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.entityFindUnique.mockResolvedValue(entity("creator", "omniscient"));
+    mocks.entityRelationFindMany.mockResolvedValue([]);
     mocks.chronicleFindMany.mockResolvedValue([{
       id: "chronicle-hidden",
       chapterIndex: 2,
@@ -136,5 +141,133 @@ describe("GET /api/codex/[id] projections", () => {
     expect(mocks.chronicleFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ revealed: true }),
     }));
+  });
+
+  it("人物详情返回按出入方向分组的关系和另一方基本信息", async () => {
+    mocks.entityRelationFindMany.mockResolvedValue([
+      {
+        id: "relation-outgoing",
+        timelineId: "timeline-1",
+        sourceEntityId: "entity-1",
+        targetEntityId: "entity-2",
+        label: "ally",
+        note: "曾共同守卫霜河。",
+        sourceEntity: {
+          id: "entity-1",
+          type: "character",
+          name: "观星者",
+          summary: "仰望群星的人。",
+          emblemSeed: "stars",
+          imageUrl: null,
+        },
+        targetEntity: {
+          id: "entity-2",
+          type: "character",
+          name: "守河人",
+          summary: "北境斥候。",
+          emblemSeed: "river",
+          imageUrl: null,
+        },
+      },
+      {
+        id: "relation-incoming",
+        timelineId: "timeline-1",
+        sourceEntityId: "entity-3",
+        targetEntityId: "entity-1",
+        label: "mentor",
+        note: "教授了火器制造。",
+        sourceEntity: {
+          id: "entity-3",
+          type: "character",
+          name: "旧导师",
+          summary: "隐居的火器大师。",
+          emblemSeed: "master",
+          imageUrl: "/master.png",
+        },
+        targetEntity: {
+          id: "entity-1",
+          type: "character",
+          name: "观星者",
+          summary: "仰望群星的人。",
+          emblemSeed: "stars",
+          imageUrl: null,
+        },
+      },
+    ]);
+
+    const body = await (await GET(new Request("http://localhost/api/codex/entity-1"), context)).json();
+
+    expect(mocks.entityRelationFindMany).toHaveBeenCalledWith({
+      where: {
+        timelineId: "timeline-1",
+        OR: [
+          { sourceEntityId: "entity-1" },
+          { targetEntityId: "entity-1" },
+        ],
+      },
+      include: {
+        sourceEntity: { select: expect.any(Object) },
+        targetEntity: { select: expect.any(Object) },
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    });
+    expect(body.entity.relations.outgoing).toEqual([
+      expect.objectContaining({
+        id: "relation-outgoing",
+        label: "盟友",
+        note: "曾共同守卫霜河。",
+        target: expect.objectContaining({ id: "entity-2", name: "守河人" }),
+      }),
+    ]);
+    expect(body.entity.relations.incoming).toEqual([
+      expect.objectContaining({
+        id: "relation-incoming",
+        label: "师长",
+        source: expect.objectContaining({ id: "entity-3", name: "旧导师" }),
+      }),
+    ]);
+  });
+
+  it("limited 视角不返回隐藏关系，全知视角保留并标明世界内不可见", async () => {
+    const hiddenRelation = {
+      id: "relation-hidden",
+      timelineId: "timeline-1",
+      sourceEntityId: "entity-1",
+      targetEntityId: "entity-2",
+      label: "enemy",
+      note: "尚无人知晓的仇怨。",
+      visibility: "hidden",
+      sourceEntity: {
+        id: "entity-1",
+        type: "character",
+        name: "观星者",
+        summary: "仰望群星的人。",
+        emblemSeed: "stars",
+        imageUrl: null,
+      },
+      targetEntity: {
+        id: "entity-2",
+        type: "character",
+        name: "黑衣人",
+        summary: "身份不明。",
+        emblemSeed: "shadow",
+        imageUrl: null,
+      },
+    };
+    mocks.entityRelationFindMany.mockResolvedValue([hiddenRelation]);
+
+    const omniscientBody = await (
+      await GET(new Request("http://localhost/api/codex/entity-1"), context)
+    ).json();
+    expect(omniscientBody.entity.relations.outgoing[0]).toMatchObject({
+      visibility: "hidden",
+      worldVisible: false,
+    });
+
+    mocks.entityFindUnique.mockResolvedValue(entity("creator", "limited"));
+    const limitedBody = await (
+      await GET(new Request("http://localhost/api/codex/entity-1"), context)
+    ).json();
+    expect(limitedBody.entity.relations).toEqual({ outgoing: [], incoming: [] });
   });
 });
