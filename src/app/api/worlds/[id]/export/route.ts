@@ -154,8 +154,8 @@ export async function GET(
 ) {
   const { id } = await params;
 
-  const world = await prisma.world.findUnique({
-    where: { id },
+  const world = await prisma.world.findFirst({
+    where: { id, userId: "local" },
     include: {
       timelines: {
         orderBy: { createdAt: "asc" },

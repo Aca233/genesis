@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   prisma: {
-    world: { findUnique: vi.fn() },
+    world: { findFirst: vi.fn() },
   },
 }));
 
@@ -16,7 +16,7 @@ describe("version 4 世界存档导出", () => {
   });
 
   it("保留 owner-private hidden 事件和动态，但排除 GenerationRequest 私有字段", async () => {
-    mocks.prisma.world.findUnique.mockResolvedValue({
+    mocks.prisma.world.findFirst.mockResolvedValue({
       id: "world-1",
       name: "隐秘世界",
       genesisInput: "让世界运行",
@@ -127,7 +127,8 @@ describe("version 4 世界存档导出", () => {
     expect(serialized).not.toContain("leaseExpiresAt");
     expect(serialized).not.toContain("safeError");
     expect(serialized).not.toContain("provider raw error");
-    expect(mocks.prisma.world.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.prisma.world.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "world-1", userId: "local" },
       include: expect.objectContaining({
         timelines: expect.objectContaining({
           include: expect.objectContaining({
@@ -139,6 +140,19 @@ describe("version 4 世界存档导出", () => {
           }),
         }),
       }),
+    }));
+  });
+
+  it("非 local 所有者的世界按不存在处理", async () => {
+    mocks.prisma.world.findFirst.mockResolvedValue(null);
+
+    const response = await GET(new Request("http://localhost"), {
+      params: Promise.resolve({ id: "foreign-world" }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(mocks.prisma.world.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "foreign-world", userId: "local" },
     }));
   });
 });

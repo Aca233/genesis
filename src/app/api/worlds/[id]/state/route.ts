@@ -126,6 +126,7 @@ export async function GET(
         retryable: true,
         safeError: true,
         stageUpdatedAt: true,
+        leaseExpiresAt: true,
       },
     }),
   ]);
@@ -163,8 +164,24 @@ export async function GET(
     (message) => message.role === "narrator",
   ).length;
   const settleState = currentChapter.settleState ?? "open";
-  const taskProgress = world.operationKind === "rewrite" && recentRewrite
+  const now = new Date();
+  const hasLiveWorldOperation = world.operationKind !== null
+    && world.operationLeaseExpiresAt !== null
+    && world.operationLeaseExpiresAt > now;
+  const hasLiveSettlementOperation = world.operationKind === "settlement"
+    && hasLiveWorldOperation;
+  const rewriteProgress = world.operationKind === "rewrite" && recentRewrite
     ? rewriteDurableProgress(recentRewrite as never)
+    : null;
+  const taskProgress = rewriteProgress
+    ? rewriteProgress.status === "running" && !hasLiveWorldOperation
+      ? {
+          ...rewriteProgress,
+          status: "failed" as const,
+          retryable: true,
+          safeError: "现实改写执行租约已过期，请从当前步骤重试",
+        }
+      : rewriteProgress
     : world.operationKind === "settlement" || settleState.startsWith("settling:")
       ? {
           taskKind: "settlement" as const,
@@ -176,23 +193,42 @@ export async function GET(
                 ? "chronicle"
                 : settleState.slice("settling:".length)
               : "checkpoint_read",
-          status: currentChapter.settleError ? "failed" as const : "running" as const,
+          status: currentChapter.settleError || !hasLiveSettlementOperation
+            ? "failed" as const
+            : "running" as const,
           retryable: currentChapter.settleRetryable ?? true,
           ...(currentChapter.settleError
             ? { safeError: "世界整理中断，请从当前步骤重试" }
+            : !hasLiveSettlementOperation
+              ? { safeError: "世界整理执行租约已过期，请从当前步骤重试" }
             : {}),
           updatedAt: (currentChapter.settleUpdatedAt ?? currentChapter.createdAt).toISOString(),
         }
       : generationRequest
-        ? {
-            taskKind: "chat" as const,
-            taskId: generationRequest.id,
-            stage: generationRequest.stage,
-            status: generationRequest.status === "failed" ? "failed" as const : "running" as const,
-            retryable: generationRequest.retryable,
-            ...(generationRequest.safeError ? { safeError: generationRequest.safeError } : {}),
-            updatedAt: generationRequest.stageUpdatedAt.toISOString(),
-          }
+        ? (() => {
+            const leaseExpired = generationRequest.status === "pending"
+              && (
+                generationRequest.leaseExpiresAt === null
+                || generationRequest.leaseExpiresAt <= now
+                || world.operationKind !== "chat"
+                || !hasLiveWorldOperation
+              );
+            return {
+              taskKind: "chat" as const,
+              taskId: generationRequest.id,
+              stage: generationRequest.stage,
+              status: generationRequest.status === "failed" || leaseExpired
+                ? "failed" as const
+                : "running" as const,
+              retryable: generationRequest.retryable,
+              ...(generationRequest.safeError
+                ? { safeError: generationRequest.safeError }
+                : leaseExpired
+                  ? { safeError: "叙事生成执行租约已过期，请从当前步骤重试" }
+                  : {}),
+              updatedAt: generationRequest.stageUpdatedAt.toISOString(),
+            };
+          })()
         : null;
 
   return NextResponse.json({
@@ -260,10 +296,9 @@ export async function GET(
       segmentId: currentChapter.id,
       needsSettlement: settleState !== "settled"
         && (latestMeta.settlementRequired === true || narratorCount >= 6),
-      settling: settleState.startsWith("settling:")
-        || world.operationKind === "settlement",
+      settling: hasLiveSettlementOperation,
     },
-    operation: world.operationKind
+    operation: hasLiveWorldOperation
       ? { kind: world.operationKind }
       : null,
     taskProgress,

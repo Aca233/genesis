@@ -68,6 +68,8 @@ const worldFixture = {
   cosmology: null,
   fusionAxiom: null,
   draftDeck: null,
+  operationKind: null,
+  operationLeaseExpiresAt: null,
 };
 
 describe("GET /api/worlds/[id]/state projections", () => {
@@ -132,6 +134,9 @@ describe("GET /api/worlds/[id]/state projections", () => {
       sourceTimelineId: "timeline-old",
       resultTimelineId: "timeline-1",
       createdAt: new Date("2026-07-22T00:00:00.000Z"),
+      updatedAt: new Date("2026-07-22T00:00:00.000Z"),
+      error: null,
+      plan: null,
     });
     mocks.generationRequestFindFirst.mockResolvedValue(null);
   });
@@ -207,6 +212,7 @@ describe("GET /api/worlds/[id]/state projections", () => {
       retryable: true,
       safeError: "叙事任务中断，请从当前步骤重试",
       stageUpdatedAt: new Date("2026-07-23T00:00:00.000Z"),
+      leaseExpiresAt: null,
       outputSnapshot: { prose: "不应下发" },
       error: "database password",
     });
@@ -224,6 +230,126 @@ describe("GET /api/worlds/[id]/state projections", () => {
     });
     expect(JSON.stringify(body)).not.toContain("不应下发");
     expect(JSON.stringify(body)).not.toContain("database password");
+  });
+
+  it("把过期的 pending generation 投影为当前阶段可重试失败", async () => {
+    mocks.worldFindUnique.mockResolvedValue({
+      ...worldFixture,
+      operationKind: "chat",
+      operationLeaseExpiresAt: new Date("2000-01-01T00:00:00.000Z"),
+    });
+    mocks.generationRequestFindFirst.mockResolvedValue({
+      id: "generation-expired",
+      stage: "generating",
+      status: "pending",
+      retryable: true,
+      safeError: null,
+      stageUpdatedAt: new Date("2026-07-23T01:00:00.000Z"),
+      leaseExpiresAt: new Date("2000-01-01T00:00:00.000Z"),
+    });
+
+    const body = await (await GET(new Request("http://localhost"), context)).json();
+
+    expect(body.taskProgress).toEqual({
+      taskKind: "chat",
+      taskId: "generation-expired",
+      stage: "generating",
+      status: "failed",
+      retryable: true,
+      safeError: "叙事生成执行租约已过期，请从当前步骤重试",
+      updatedAt: "2026-07-23T01:00:00.000Z",
+    });
+    expect(body.operation).toBeNull();
+  });
+
+  it("有效的 generation 与世界操作租约仍投影为 running", async () => {
+    mocks.worldFindUnique.mockResolvedValue({
+      ...worldFixture,
+      operationKind: "chat",
+      operationLeaseExpiresAt: new Date("2999-01-01T00:00:00.000Z"),
+    });
+    mocks.generationRequestFindFirst.mockResolvedValue({
+      id: "generation-live",
+      stage: "generating",
+      status: "pending",
+      retryable: true,
+      safeError: null,
+      stageUpdatedAt: new Date("2026-07-23T01:00:00.000Z"),
+      leaseExpiresAt: new Date("2999-01-01T00:00:00.000Z"),
+    });
+
+    const body = await (await GET(new Request("http://localhost"), context)).json();
+
+    expect(body.taskProgress).toMatchObject({
+      taskKind: "chat",
+      taskId: "generation-live",
+      stage: "generating",
+      status: "running",
+    });
+    expect(body.operation).toEqual({ kind: "chat" });
+  });
+
+  it("把过期的 settlement 世界租约投影为当前阶段可重试失败", async () => {
+    mocks.worldFindUnique.mockResolvedValue({
+      ...worldFixture,
+      operationKind: "settlement",
+      operationLeaseExpiresAt: new Date("2000-01-01T00:00:00.000Z"),
+    });
+    mocks.chapterFindFirst.mockResolvedValue({
+      id: "chapter-1",
+      index: 1,
+      title: "初燃",
+      settleState: "settling:extract",
+      settleError: null,
+      settleRetryable: true,
+      settleUpdatedAt: new Date("2026-07-23T02:00:00.000Z"),
+      createdAt: new Date("2026-07-23T00:00:00.000Z"),
+      messages: [],
+    });
+
+    const body = await (await GET(new Request("http://localhost"), context)).json();
+
+    expect(body.taskProgress).toEqual({
+      taskKind: "settlement",
+      taskId: "chapter-1",
+      stage: "extract",
+      status: "failed",
+      retryable: true,
+      safeError: "世界整理执行租约已过期，请从当前步骤重试",
+      updatedAt: "2026-07-23T02:00:00.000Z",
+    });
+    expect(body.checkpoint.settling).toBe(false);
+    expect(body.operation).toBeNull();
+  });
+
+  it("有效的 settlement 世界租约仍投影为 running", async () => {
+    mocks.worldFindUnique.mockResolvedValue({
+      ...worldFixture,
+      operationKind: "settlement",
+      operationLeaseExpiresAt: new Date("2999-01-01T00:00:00.000Z"),
+    });
+    mocks.chapterFindFirst.mockResolvedValue({
+      id: "chapter-1",
+      index: 1,
+      title: "初燃",
+      settleState: "settling:chronicle",
+      settleError: null,
+      settleRetryable: true,
+      settleUpdatedAt: new Date("2026-07-23T02:00:00.000Z"),
+      createdAt: new Date("2026-07-23T00:00:00.000Z"),
+      messages: [],
+    });
+
+    const body = await (await GET(new Request("http://localhost"), context)).json();
+
+    expect(body.taskProgress).toMatchObject({
+      taskKind: "settlement",
+      taskId: "chapter-1",
+      stage: "chronicle",
+      status: "running",
+    });
+    expect(body.checkpoint.settling).toBe(true);
+    expect(body.operation).toEqual({ kind: "settlement" });
   });
 
   it("连续返回最近四个内部记录段且只允许编辑当前开放段", async () => {
