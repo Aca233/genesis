@@ -786,6 +786,168 @@ it.each([
   }));
 });
 
+it("把携带不存在 abilityId 的完整 learned 候选按新能力处理", async () => {
+  const fixture = extractionFixture();
+  fixture.owners.push({
+    id: "character-rudy",
+    type: "character",
+    name: "鲁迪",
+    aliases: [],
+    raceId: "race-native",
+  });
+  const evidence = "鲁迪成功研发出960mm穿深新式APFSDS，并将这项工程战斗技术定型为可反复装填施用的穿甲弹";
+  fixture.messages.push({
+    id: "message-rudy-dangling-id",
+    index: 47,
+    scale: "scene",
+    content: `${evidence}。`,
+  });
+
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: fixture.owners,
+    messages: fixture.messages,
+    changes: [{
+      abilityId: "ability-rudy-960-not-in-context",
+      ownerName: "鲁迪",
+      name: "960mm穿深新式APFSDS",
+      kind: "personal",
+      type: "learned",
+      effect: "以标准化超高速弹芯贯穿复合装甲",
+      trigger: "完成装填、校准弹道并主动发射",
+      cost: "消耗专用弹体与火炮寿命",
+      limitations: "必须使用匹配口径的重型火炮",
+      lockedFields: [],
+      patch: { mastery: "novice" },
+      evidenceMessageIndex: 47,
+      evidence,
+    }],
+  });
+
+  expect(result.rejected).toEqual([]);
+  expect(result.applied).toHaveLength(1);
+  expect([...fixture.abilities.values()]).toContainEqual(expect.objectContaining({
+    entityId: "character-rudy",
+    name: "960mm穿深新式APFSDS",
+    kind: "personal",
+  }));
+});
+
+it("新能力 evidence 为概括时从指定消息恢复连续正文并保存原文", async () => {
+  const fixture = extractionFixture();
+  fixture.owners.push({
+    id: "character-rudy",
+    type: "character",
+    name: "鲁迪",
+    aliases: [],
+    raceId: "race-native",
+  });
+  const verbatimEvidence = "鲁迪首次稳定施展自行命名的960mm穿深新式APFSDS，一击贯穿了试验场的复合装甲靶";
+  fixture.messages.push({
+    id: "message-rudy-paraphrased-evidence",
+    index: 48,
+    scale: "scene",
+    content: `炮组完成最后一次膛压检查。${verbatimEvidence}。观测员随即记录了完整弹道数据。`,
+  });
+
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: fixture.owners,
+    messages: fixture.messages,
+    changes: [{
+      abilityId: "hallucinated-rudy-ability-id",
+      ownerName: "鲁迪",
+      name: "960mm穿深新式APFSDS",
+      kind: "personal",
+      type: "awakened",
+      effect: "以标准化超高速弹芯贯穿复合装甲",
+      trigger: "完成装填、校准弹道并主动发射",
+      cost: "消耗专用弹体与火炮寿命",
+      limitations: "必须使用匹配口径的重型火炮",
+      lockedFields: [],
+      patch: { mastery: "novice" },
+      evidenceMessageIndex: 48,
+      evidence: "鲁迪成功完成了960mm新式穿甲弹的首次稳定试射",
+    }],
+  });
+
+  expect(result.rejected).toEqual([]);
+  expect(result.applied).toHaveLength(1);
+  const createdAbility = [...fixture.abilities.values()].find(
+    (ability) => ability.name === "960mm穿深新式APFSDS",
+  );
+  expect([...fixture.events.values()]).toContainEqual(expect.objectContaining({
+    abilityId: createdAbility?.id,
+    messageId: "message-rudy-paraphrased-evidence",
+    evidence: verbatimEvidence,
+  }));
+});
+
+it("无法恢复正文证据或 owner-kind 越权时仍拒绝带错误 abilityId 的新能力", async () => {
+  const unsupported = extractionFixture();
+  unsupported.owners.push({
+    id: "character-rudy",
+    type: "character",
+    name: "鲁迪",
+    aliases: [],
+    raceId: "race-native",
+  });
+  unsupported.messages.push({
+    id: "message-rudy-failed-research",
+    index: 49,
+    scale: "scene",
+    content: "鲁迪尝试研发960mm穿深新式APFSDS，但炮弹在出膛前解体，试验最终失败。",
+  });
+  const base = {
+    abilityId: "missing-rudy-ability",
+    ownerName: "鲁迪",
+    name: "960mm穿深新式APFSDS",
+    type: "learned" as const,
+    effect: "以标准化超高速弹芯贯穿复合装甲",
+    trigger: "完成装填、校准弹道并主动发射",
+    cost: "消耗专用弹体与火炮寿命",
+    limitations: "必须使用匹配口径的重型火炮",
+    lockedFields: [],
+    patch: { mastery: "novice" as const },
+    evidenceMessageIndex: 49,
+    evidence: "鲁迪已经成功研制并掌握了新式穿甲弹技术",
+  };
+  const unsupportedResult = await applyAbilityExtraction(unsupported.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: unsupported.owners,
+    messages: unsupported.messages,
+    changes: [{ ...base, kind: "personal" as const }],
+  });
+  expect(unsupportedResult.applied).toEqual([]);
+  expect(unsupportedResult.rejected[0]?.reason).toMatch(/连续正文摘录/);
+  expect([...unsupported.abilities.values()].some((ability) => ability.name === base.name)).toBe(false);
+
+  const wrongKind = extractionFixture();
+  wrongKind.owners.push(...unsupported.owners.filter((owner) => owner.name === "鲁迪"));
+  wrongKind.messages.push({
+    id: "message-rudy-wrong-kind",
+    index: 49,
+    scale: "scene",
+    content: "鲁迪成功研发出960mm穿深新式APFSDS，并将这项工程战斗技术正式定型。",
+  });
+  const wrongKindResult = await applyAbilityExtraction(wrongKind.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: wrongKind.owners,
+    messages: wrongKind.messages,
+    changes: [{
+      ...base,
+      kind: "divine",
+      evidence: "鲁迪成功研发出960mm穿深新式APFSDS，并将这项工程战斗技术正式定型",
+    }],
+  });
+  expect(wrongKindResult.applied).toEqual([]);
+  expect(wrongKindResult.rejected[0]?.reason).toMatch(/character|kind|personal/);
+});
+
 it("单次环境偶发效果不能被登记为鲁迪的新能力", async () => {
   const fixture = extractionFixture();
   fixture.owners.push({

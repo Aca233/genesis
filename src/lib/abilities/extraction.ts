@@ -82,6 +82,22 @@ function assertEvidence(
   }
 }
 
+function hasCompleteNewAbilityFields(
+  change: AbilityExtractionChange,
+): boolean {
+  return (
+    change.sourceAbilityId === undefined &&
+    (change.type === "learned" || change.type === "awakened") &&
+    change.name !== undefined &&
+    change.kind !== undefined &&
+    change.effect !== undefined &&
+    change.trigger !== undefined &&
+    change.cost !== undefined &&
+    change.limitations !== undefined &&
+    change.lockedFields !== undefined
+  );
+}
+
 const TYPE_PATTERNS: Record<AbilityExtractionChange["type"], readonly RegExp[]> = {
   awakened: [
     /觉醒|苏醒|初(?:次|度).{0,6}(?:发动|显现)|终于(?:能|可以)/u,
@@ -263,8 +279,8 @@ function assertRelevantEvidence(
   evidence: string,
   change: AbilityExtractionChange,
   owner: AbilityExtractionOwner,
-  ability: AbilityStoredRecord,
-  source: AbilityStoredRecord | null,
+  ability: Pick<AbilityStoredRecord, "name">,
+  source: Pick<AbilityStoredRecord, "name"> | null,
   knownEntityNames: readonly string[],
 ): void {
   const abilityNames = [...new Set([ability.name, source?.name].filter((value): value is string => Boolean(value)))];
@@ -298,6 +314,88 @@ function assertRelevantEvidence(
   );
   if (!valid) {
     throw new AbilityValidationError("正文证据必须以非否定的完整能力事件证明拥有者是行动主体，或明确证明拥有者能力受到外部事件影响，不能把命令者或他人误作行动者");
+  }
+}
+
+const NEW_ABILITY_RECOVERY_PATTERNS: Record<"learned" | "awakened", RegExp> = {
+  learned: /成功(?:研发|研制|创制|创造)|(?:研发|研制|创制|创造).{0,64}(?:正式命名|命名|定型|标准化|可反复|可复用)/u,
+  awakened: /首次稳定施展/u,
+};
+const EVIDENCE_SENTENCE_PATTERN = /[^\n。！？!?；;]+(?:[。！？!?；;]+|$)/gu;
+const TRAILING_SENTENCE_MARKS = /[。！？!?；;]+$/u;
+
+function recoverNewAbilityEvidence(
+  message: AbilityEvidenceMessage,
+  change: AbilityExtractionChange,
+  owner: AbilityExtractionOwner,
+  knownEntityNames: readonly string[],
+): string | null {
+  if (!hasCompleteNewAbilityFields(change) || change.name === undefined) return null;
+  const type = change.type;
+  if (type !== "learned" && type !== "awakened") return null;
+  const chunks = message.content.match(EVIDENCE_SENTENCE_PATTERN) ?? [message.content];
+  const ownerNames = identityNames(owner);
+
+  for (let width = 1; width <= 2; width += 1) {
+    for (let start = 0; start + width <= chunks.length; start += 1) {
+      const candidate = chunks
+        .slice(start, start + width)
+        .join("")
+        .trim()
+        .replace(TRAILING_SENTENCE_MARKS, "");
+      if (
+        normalizedEvidence(candidate).length < 12 ||
+        !ownerNames.some((name) => candidate.includes(name)) ||
+        !candidate.includes(change.name) ||
+        !NEW_ABILITY_RECOVERY_PATTERNS[type].test(candidate)
+      ) {
+        continue;
+      }
+      try {
+        assertEvidence(message, candidate);
+        assertRelevantEvidence(
+          candidate,
+          change,
+          owner,
+          { name: change.name },
+          null,
+          knownEntityNames,
+        );
+        return candidate;
+      } catch (error) {
+        if (!(error instanceof AbilityValidationError)) throw error;
+      }
+    }
+  }
+  return null;
+}
+
+function resolveExtractionEvidence(
+  message: AbilityEvidenceMessage | undefined,
+  change: AbilityExtractionChange,
+  owner: AbilityExtractionOwner,
+  allowNewAbilityRecovery: boolean,
+  knownEntityNames: readonly string[],
+): string {
+  try {
+    assertEvidence(message, change.evidence);
+    return change.evidence;
+  } catch (error) {
+    if (
+      !(error instanceof AbilityValidationError) ||
+      !allowNewAbilityRecovery ||
+      message === undefined
+    ) {
+      throw error;
+    }
+    const recovered = recoverNewAbilityEvidence(
+      message,
+      change,
+      owner,
+      knownEntityNames,
+    );
+    if (recovered === null) throw error;
+    return recovered;
   }
 }
 
@@ -385,6 +483,9 @@ function newAbilityData(
   owner: AbilityExtractionOwner,
   change: AbilityExtractionChange,
 ): LearnedAbilityCreateData {
+  if (change.type !== "learned" && change.type !== "awakened") {
+    throw new AbilityValidationError("新能力只能以 learned 或 awakened 创建");
+  }
   if (
     change.name === undefined || change.kind === undefined || change.effect === undefined ||
     change.trigger === undefined || change.cost === undefined || change.limitations === undefined ||
@@ -414,6 +515,26 @@ function newAbilityData(
     rumorText: visibility === "rumored" ? change.rumorText ?? change.evidence : null,
     bloodlineJustification: null,
     lockedFields: change.lockedFields,
+  };
+}
+
+async function normalizeMissingAbilityId(
+  tx: AbilityExtractionTx,
+  change: AbilityExtractionChange,
+): Promise<{
+  change: AbilityExtractionChange;
+  recoveredMissingId: boolean;
+}> {
+  if (change.abilityId === undefined) {
+    return { change, recoveredMissingId: false };
+  }
+  const ability = await tx.ability.findUnique({ where: { id: change.abilityId } });
+  if (ability !== null || !hasCompleteNewAbilityFields(change)) {
+    return { change, recoveredMissingId: false };
+  }
+  return {
+    change: { ...change, abilityId: undefined },
+    recoveredMissingId: true,
   };
 }
 
@@ -534,18 +655,31 @@ export async function applyAbilityExtractionInTransaction(
       const owner = owners.get(change.ownerName);
       if (owner === undefined) throw new AbilityValidationError("能力拥有者不存在");
       const message = messages.get(change.evidenceMessageIndex);
-      assertEvidence(message, change.evidence);
+      const normalized = await normalizeMissingAbilityId(tx, change);
+      const allowNewAbilityRecovery = (
+        normalized.recoveredMissingId ||
+        (normalized.change.abilityId === undefined &&
+          normalized.change.sourceAbilityId === undefined)
+      );
+      const evidence = resolveExtractionEvidence(
+        message,
+        normalized.change,
+        owner,
+        allowNewAbilityRecovery,
+        input.knownEntityNames ?? [],
+      );
+      const effectiveChange = { ...normalized.change, evidence };
 
-      const resolved = await resolveAbility(tx, change, owner, input.timelineId);
+      const resolved = await resolveAbility(tx, effectiveChange, owner, input.timelineId);
       const ability = resolved.ability;
       if (resolved.created) createdAbilityId = ability.id;
       const source: AbilityStoredRecord | null = ability.sourceAbilityId
         ? await tx.ability.findUnique({ where: { id: ability.sourceAbilityId } })
-        : change.sourceAbilityId
-          ? await tx.ability.findUnique({ where: { id: change.sourceAbilityId } })
+        : effectiveChange.sourceAbilityId
+          ? await tx.ability.findUnique({ where: { id: effectiveChange.sourceAbilityId } })
           : null;
-      assertRelevantEvidence(change.evidence, change, owner, ability, source, input.knownEntityNames ?? []);
-      const dedupeKey = [input.chapterId, ability.id, change.type, message.id].join(":");
+      assertRelevantEvidence(evidence, effectiveChange, owner, ability, source, input.knownEntityNames ?? []);
+      const dedupeKey = [input.chapterId, ability.id, effectiveChange.type, message.id].join(":");
       const existingEvent: AbilityEventRecord | null = await tx.abilityEvent.findUnique({ where: { dedupeKey } });
       if (resolved.reusedNew === true && existingEvent === null) {
         throw new AbilityValidationError("拥有者已存在同名能力，不能重复创建");
@@ -553,12 +687,12 @@ export async function applyAbilityExtractionInTransaction(
       const result = await applyAbilityChangeInTransaction(tx, {
         abilityId: ability.id,
         version: existingEvent?.before.version ?? ability.version,
-        patch: change.patch,
+        patch: effectiveChange.patch,
         event: {
-          type: change.type,
+          type: effectiveChange.type,
           chapterId: input.chapterId,
           messageId: message.id,
-          evidence: change.evidence,
+          evidence,
           scale: message.scale,
           dedupeKey,
         },
