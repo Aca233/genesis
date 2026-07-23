@@ -1,7 +1,7 @@
 # Autonomous World Activity and Durable Task Progress Design
 
-**Date:** 2026-07-23  
-**Status:** Confirmed design  
+**Date:** 2026-07-23
+**Status:** Confirmed design
 **Scope:** 世界自主发展、动态页签、重要事件追踪、真实任务进度与断点重试
 
 ## 1. 目标
