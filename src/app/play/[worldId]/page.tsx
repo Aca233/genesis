@@ -12,15 +12,18 @@ import type {
 import { streamNarration } from "@/components/play/sse-client";
 import { StoryStream } from "@/components/play/StoryStream";
 import { InputDeck } from "@/components/play/InputDeck";
-import { CreatorInputDeck } from "@/components/play/CreatorInputDeck";
 import {
   enrichRewriteResultMessages,
+  followRealityRewriteEvents,
   type RealityRewriteView,
 } from "@/components/play/creator-input-state";
 import { switchCreatorReality } from "@/components/play/reality-tree-state";
 import { RuneRail } from "@/components/play/RuneRail";
 import { PlayDrawer } from "@/components/play/PlayDrawer";
-import { SettleCeremony } from "@/components/play/SettleCeremony";
+import {
+  followWorldSettlement,
+  type WorldSettlementState,
+} from "@/components/play/world-settlement-state";
 import {
   EntityIndexProvider,
   type EntityIndexItem,
@@ -63,6 +66,9 @@ export default function PlayPage({
 
   // 岁月流转：结算演出
   const [settling, setSettling] = useState(false);
+  const [settlementState, setSettlementState] = useState<WorldSettlementState>({
+    status: "idle",
+  });
   const [rewriteBusy, setRewriteBusy] = useState(false);
   const [openingChapterId, setOpeningChapterId] = useState<string | null>(null);
   const anyBusy = busy || settling || rewriteBusy;
@@ -70,7 +76,7 @@ export default function PlayPage({
   // 正文实体微光链接索引
   const [entityIndex, setEntityIndex] = useState<EntityIndexItem[]>([]);
 
-  const chapterId = state?.currentChapter.id;
+  const chapterId = state?.currentSegment?.id ?? state?.currentChapter.id;
 
   // ── 数据同步 ──
 
@@ -142,6 +148,12 @@ export default function PlayPage({
   }, [anyBusy, reloadState, state?.timeline.id, syncEntityIndex, worldId]);
 
   useEffect(() => {
+    const openRealities = () => setDrawerTab("realities");
+    window.addEventListener("creator:open-realities", openRealities);
+    return () => window.removeEventListener("creator:open-realities", openRealities);
+  }, []);
+
+  useEffect(() => {
     // defer：避免 effect 内同步 setState（索引到达前正文只是无链接）
     const t = setTimeout(() => void syncEntityIndex(), 0);
     return () => clearTimeout(t);
@@ -204,10 +216,39 @@ export default function PlayPage({
             acc += t;
             setStreamingText(acc);
           },
-          onDone: async () => {
+          onDone: async (_messageId, _meta, followUp) => {
             // narrator 已落库 → 拉取对齐（含玩家消息与 meta）
-            await syncMessages(body.chapterId);
             setStreamingText(null);
+            if (followUp.kind === "settlement") {
+              setSettling(true);
+              setSettlementState({
+                status: "running",
+                segmentId: followUp.segmentId,
+              });
+              const settled = await followWorldSettlement(followUp.segmentId);
+              setSettlementState(settled);
+              setSettling(false);
+              if (settled.status === "idle") {
+                await reloadState();
+                await syncEntityIndex();
+              }
+              return;
+            }
+            if (followUp.kind === "rewrite") {
+              setRewriteBusy(true);
+              try {
+                const completed = await followRealityRewriteEvents(
+                  followUp.taskId,
+                  () => undefined,
+                );
+                await reloadState(completed);
+                await syncEntityIndex();
+              } finally {
+                setRewriteBusy(false);
+              }
+              return;
+            }
+            await reloadState();
           },
           onError: async (msg) => {
             // say 的玩家消息可能已落库 → 对齐
@@ -225,7 +266,7 @@ export default function PlayPage({
       }
       abortRef.current = null;
     },
-    [syncMessages],
+    [reloadState, syncEntityIndex, syncMessages],
   );
 
   /** 搁笔：中止当前生成（已写出的文字由对齐结果决定去留） */
@@ -233,10 +274,10 @@ export default function PlayPage({
     abortRef.current?.abort();
   }, []);
 
-  // 空章自动开场：以章节 ID 作为防抖键；时间线/章节变化后自然重新武装。
+  // 异常恢复：已开局现实完全无正文时，续跑同一 opening。
   useEffect(() => {
     if (!state || !chapterId || openingChapterId === chapterId) return;
-    if (state.messages.length > 0 || state.prevChapterTail.length > 0) return;
+    if (state.messages.length > 0) return;
     const t = setTimeout(() => {
       setOpeningChapterId(chapterId);
       void runChat({ chapterId, scale: "scene", mode: "opening" });
@@ -254,11 +295,6 @@ export default function PlayPage({
     [chapterId, scale, runChat],
   );
 
-  const observe = useCallback(async (content: string) => {
-    if (!chapterId || busyRef.current) throw new Error("当前无法开始新的观测");
-    await runChat({ chapterId, content, scale, mode: "say" });
-  }, [chapterId, scale, runChat]);
-
   const doContinue = useCallback(() => {
     if (!chapterId || busyRef.current) return;
     void runChat({ chapterId, scale, mode: "continue" });
@@ -270,20 +306,6 @@ export default function PlayPage({
     setGenError(null);
     void syncMessages(chapterId);
   }, [chapterId, syncMessages]);
-
-  // ── 岁月流转（章末结算） ──
-
-  /** 结算完成：全量重载 state（新章、诸神关系、位阶都可能已变），重置开场防抖 */
-  const onSettleFinished = useCallback(async () => {
-    setSettling(false);
-    try {
-      setOpeningChapterId(null); // 新章空 → 自动开场重新武装
-      await reloadState();
-      void syncEntityIndex();
-    } catch {
-      // 重载失败保留旧界面，玩家可手动刷新
-    }
-  }, [reloadState, syncEntityIndex]);
 
   /** 正文实体链接 / 众生录定位 */
   const openEntity = useCallback((id: string) => {
@@ -378,7 +400,20 @@ export default function PlayPage({
   const lastMeta: MessageMeta = lastNarrator?.meta ?? {};
   const isLatest = lastNarrator && lastNarrator.index === messages.at(-1)?.index;
   const suggestions = isLatest ? (lastMeta.suggestions ?? []) : [];
-  const chapterBreakHint = isLatest ? lastMeta.chapterBreakHint === true : false;
+  const retrySettlement = useCallback(() => {
+    if (settlementState.status !== "failed") return;
+    const segmentId = settlementState.segmentId;
+    setSettling(true);
+    setSettlementState({ status: "running", segmentId });
+    void followWorldSettlement(segmentId).then(async (result) => {
+      setSettlementState(result);
+      setSettling(false);
+      if (result.status === "idle") {
+        await reloadState();
+        await syncEntityIndex();
+      }
+    });
+  }, [reloadState, settlementState, syncEntityIndex]);
 
   // ── 渲染 ──
 
@@ -413,16 +448,13 @@ export default function PlayPage({
             className="pointer-events-auto text-sm tracking-widest text-ink-faint"
             style={{ fontFamily: "var(--font-display)" }}
           >
-            {state.world.name}
+            {state.world.name} · {state.temporal.era} · {state.temporal.time}
           </span>
         </header>
 
         {/* 书页正文（中央限宽，大屏加宽） */}
         <div className="mx-auto w-full max-w-3xl flex-1 px-6 max-sm:pb-16 xl:max-w-4xl">
           <StoryStream
-            chapterIndex={state.currentChapter.index}
-            chapterTitle={state.currentChapter.title}
-            prevTail={state.prevChapterTail}
             messages={messages}
             streamingText={streamingText}
             rerollingId={rerollingId}
@@ -436,37 +468,25 @@ export default function PlayPage({
             onSwitchVariant={switchVariant}
           />
 
-          {state.world.mode === "creator" ? (
-            <CreatorInputDeck
-              worldId={worldId}
-              scale={scale}
-              onScaleChange={setScale}
-              suggestions={suggestions}
-              chapterBreakHint={chapterBreakHint}
-              chatBusy={busy}
-              canContinue={messages.length > 0}
-              onObserve={observe}
-              onContinue={doContinue}
-              onStop={stopGen}
-              onSettle={() => setSettling(true)}
-              refreshState={reloadState}
-              refreshEntityIndex={syncEntityIndex}
-              onRewriteBusyChange={setRewriteBusy}
-            />
-          ) : (
-            <InputDeck
-              scale={scale}
-              onScaleChange={setScale}
-              suggestions={suggestions}
-              chapterBreakHint={chapterBreakHint}
-              busy={anyBusy}
-              canContinue={messages.length > 0}
-              onSend={send}
-              onContinue={doContinue}
-              onStop={stopGen}
-              onSettle={() => setSettling(true)}
-            />
-          )}
+          <InputDeck
+            mode={state.world.mode}
+            scale={scale}
+            onScaleChange={setScale}
+            suggestions={suggestions}
+            busyKind={settling
+              ? "settling"
+              : rewriteBusy
+                ? "rewriting"
+                : busy ? "narrating" : "idle"}
+            canContinue={messages.length > 0}
+            onSend={send}
+            onContinue={doContinue}
+            onStop={stopGen}
+            settlementError={settlementState.status === "failed"
+              ? settlementState.error
+              : null}
+            onRetrySettlement={retrySettlement}
+          />
         </div>
 
         {/* 右缘符文列 + 抽屉 */}
@@ -491,14 +511,6 @@ export default function PlayPage({
           }}
         />
 
-        {/* 岁月流转：章末结算演出 */}
-        {settling && chapterId && (
-          <SettleCeremony
-            chapterId={chapterId}
-            onFinished={() => void onSettleFinished()}
-            onClose={() => setSettling(false)}
-          />
-        )}
       </main>
     </EntityIndexProvider>
   );

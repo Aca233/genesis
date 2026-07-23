@@ -18,6 +18,7 @@ export type MessageMeta = {
   branchName?: string | null;
   summary?: string | null;
   sourceTimelineId?: string;
+  settlementRequired?: boolean;
 };
 
 /** 异文候选 */
@@ -38,6 +39,7 @@ export type MessageRow = {
   variants: Variant[] | null;
   meta: MessageMeta | null;
   createdAt: string;
+  editable?: boolean;
 };
 
 export type AbilityKind = "racial_innate" | "racial_tradition" | "personal" | "divine";
@@ -228,6 +230,10 @@ export type PlayState = {
   gods: GodRow[];
   avatars: CreatorAvatar[];
   currentChapter: { id: string; index: number; title: string | null };
+  currentSegment: { id: string; settleState: string };
+  temporal: { era: string; time: string };
+  checkpoint: { segmentId: string; needsSettlement: boolean; settling: boolean };
+  operation: { kind: "chat" | "settlement" | "rewrite" } | null;
   messages: MessageRow[];
   prevChapterTail: MessageRow[];
   recentRewrite: RecentRewrite | null;

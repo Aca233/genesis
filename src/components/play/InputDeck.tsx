@@ -10,34 +10,36 @@ import { useTheme } from "@/components/theme/useTheme";
  */
 
 export function InputDeck({
+  mode,
   scale,
   onScaleChange,
   suggestions,
-  chapterBreakHint,
-  busy,
+  busyKind,
   canContinue,
   onSend,
   onContinue,
   onStop,
-  onSettle,
+  settlementError,
+  onRetrySettlement,
 }: {
+  mode: "pantheon" | "creator";
   scale: Scale;
   onScaleChange: (s: Scale) => void;
   suggestions: string[];
-  chapterBreakHint: boolean;
-  busy: boolean;
+  busyKind: "idle" | "narrating" | "settling" | "rewriting";
   /** 消息流非空时才允许续笔 */
   canContinue: boolean;
   onSend: (content: string) => void;
   onContinue: () => void;
   /** 停止当前生成 */
   onStop: () => void;
-  /** 结束本章 → 岁月流转结算 */
-  onSettle: () => void;
+  settlementError?: string | null;
+  onRetrySettlement?: () => void;
 }) {
   const [text, setText] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
   const { candle, setMode } = useTheme();
+  const busy = busyKind !== "idle";
 
   const current = SCALE_STOPS.find((s) => s.key === scale) ?? SCALE_STOPS[1];
 
@@ -58,10 +60,19 @@ export function InputDeck({
 
   return (
     <div className="sticky bottom-0 z-30 mx-auto w-full max-w-3xl px-4 pb-3 xl:max-w-4xl">
-      {/* 翻章提示（淡金细线，仅样式） */}
-      {chapterBreakHint && !busy && (
-        <div className="mb-1 border-t border-gilt/40 pt-1 text-center text-xs text-gilt/70">
-          本章似已抵达段落——可提笔「结束本章」，让岁月流转。
+      {(busyKind === "settling" || busyKind === "rewriting") && (
+        <div className="mb-1 text-center text-xs text-gilt/70">
+          世界正在演化…
+        </div>
+      )}
+      {settlementError && (
+        <div className="mb-1 flex items-center justify-center gap-3 text-xs text-cinnabar">
+          <span>世界整理中断：{settlementError}</span>
+          {onRetrySettlement && (
+            <button type="button" onClick={onRetrySettlement} className="underline">
+              继续整理世界
+            </button>
+          )}
         </div>
       )}
 
@@ -115,22 +126,9 @@ export function InputDeck({
               onClick={() => !busy && onContinue()}
               disabled={busy || !canContinue}
               className="shrink-0 text-ink-soft transition hover:text-gilt disabled:opacity-40"
-              title="不发神谕，让史官顺着剧情接着写"
+              title="不输入新内容，让史官顺势接着写"
             >
-              续笔
-            </button>
-            {/* 结束本章 → 岁月流转（translucent gilt；翻章提示时呼吸微光） */}
-            <button
-              onClick={() => !busy && canContinue && onSettle()}
-              disabled={busy || !canContinue}
-              className={`shrink-0 transition disabled:opacity-40 ${
-                chapterBreakHint
-                  ? "animate-pulse text-gilt"
-                  : "text-ink-soft hover:text-gilt"
-              }`}
-              title="结束本章：史官落笔成史，诸神各行其是，岁月翻页"
-            >
-              ⌘ 结束本章
+              续写
             </button>
             {/* 烛光切换（游戏内） */}
             <button
@@ -142,7 +140,7 @@ export function InputDeck({
             </button>
           </div>
 
-          {busy ? (
+          {busyKind === "narrating" ? (
             <button
               onClick={onStop}
               className="shrink-0 rounded-md border border-cinnabar/50 bg-cinnabar/5 px-6 py-1.5 text-sm text-cinnabar transition hover:bg-cinnabar/15"
@@ -150,7 +148,7 @@ export function InputDeck({
             >
               ■ 搁笔
             </button>
-          ) : (
+          ) : busy ? null : (
             <button
               onClick={send}
               disabled={!text.trim()}

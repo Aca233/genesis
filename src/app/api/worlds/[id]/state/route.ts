@@ -15,6 +15,7 @@ import {
   projectSectionsForViewer,
   realityViewer,
 } from "@/lib/reality/visibility";
+import { resolveTemporalState } from "@/lib/chat/continuous-state";
 
 /**
  * GET /api/worlds/[id]/state —— 对局引导：一次拉取对局界面所需全量状态
@@ -40,6 +41,7 @@ export async function GET(
       id: true,
       branchName: true,
       branchSummary: true,
+      realityState: true,
       observerState: true,
     },
   });
@@ -112,6 +114,38 @@ export async function GET(
     }),
   ]);
 
+  const temporal = resolveTemporalState({
+    realityState: timeline.realityState,
+    observerState: timeline.observerState,
+    epochName: world.draftDeck && typeof world.draftDeck === "object"
+      ? (world.draftDeck as { epochConflict?: { epochName?: string } }).epochConflict?.epochName
+      : null,
+    yearLabel: world.draftDeck && typeof world.draftDeck === "object"
+      ? (world.draftDeck as { epochConflict?: { yearLabel?: string } }).epochConflict?.yearLabel
+      : null,
+    eraSystem: world.themeCard && typeof world.themeCard === "object"
+      ? (world.themeCard as { eraSystem?: string }).eraSystem
+      : null,
+  });
+  const currentMessages = currentChapter.messages.map((message) => ({
+    ...message,
+    editable: currentChapter.settleState === "open",
+  }));
+  const previousMessages = (prevChapter?.messages ?? []).reverse().map((message) => ({
+    ...message,
+    editable: false,
+  }));
+  const latestNarrator = [...currentChapter.messages]
+    .reverse()
+    .find((message) => message.role === "narrator");
+  const latestMeta = latestNarrator?.meta && typeof latestNarrator.meta === "object"
+    ? latestNarrator.meta as Record<string, unknown>
+    : {};
+  const narratorCount = currentChapter.messages.filter(
+    (message) => message.role === "narrator",
+  ).length;
+  const settleState = currentChapter.settleState ?? "open";
+
   return NextResponse.json({
     world: {
       id: world.id,
@@ -135,6 +169,7 @@ export async function GET(
       branchSummary: timeline.branchSummary,
       observerState,
     },
+    temporal,
     gods: gods.map((g) => ({
       id: g.id,
       name: g.name,
@@ -168,8 +203,22 @@ export async function GET(
       index: currentChapter.index,
       title: currentChapter.title,
     },
-    messages: currentChapter.messages,
-    prevChapterTail: (prevChapter?.messages ?? []).reverse(),
+    currentSegment: {
+      id: currentChapter.id,
+      settleState,
+    },
+    checkpoint: {
+      segmentId: currentChapter.id,
+      needsSettlement: settleState !== "settled"
+        && (latestMeta.settlementRequired === true || narratorCount >= 6),
+      settling: settleState.startsWith("settling:")
+        || world.operationKind === "settlement",
+    },
+    operation: world.operationKind
+      ? { kind: world.operationKind }
+      : null,
+    messages: [...previousMessages, ...currentMessages],
+    prevChapterTail: previousMessages,
     recentRewrite,
   });
 }

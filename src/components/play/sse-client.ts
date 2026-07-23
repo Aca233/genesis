@@ -7,15 +7,16 @@
  */
 
 import type { MessageMeta } from "./types";
+import type { ChatFollowUp } from "@/lib/chat/follow-up";
 
 export type SSEEvent =
   | { type: "text"; text: string }
-  | { type: "done"; messageId: string; meta: MessageMeta }
+  | { type: "done"; messageId: string | null; meta: MessageMeta; followUp?: ChatFollowUp }
   | { type: "error"; message: string };
 
 export type StreamHandlers = {
   onText: (text: string) => void;
-  onDone: (messageId: string, meta: MessageMeta) => void;
+  onDone: (messageId: string | null, meta: MessageMeta, followUp: ChatFollowUp) => void;
   onError: (message: string) => void;
 };
 
@@ -72,7 +73,11 @@ export async function streamNarration(
       if (event.text) handlers.onText(event.text);
     } else if (event.type === "done") {
       settled = true;
-      handlers.onDone(event.messageId, event.meta ?? {});
+      handlers.onDone(
+        event.messageId,
+        event.meta ?? {},
+        event.followUp ?? { kind: "none" },
+      );
     } else if (event.type === "error") {
       settled = true;
       handlers.onError(event.message || "生成中断");

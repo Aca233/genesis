@@ -6,24 +6,11 @@ import { MessageBlock } from "./MessageBlock";
 import { Prose } from "./Prose";
 
 /**
- * 书页正文流：前章残页 → 章头饰线 → 消息序列 → 生成中块 / 错误行。
+ * 连续书页正文流：消息序列 → 生成中块 / 错误行。
  * 自动滚底：距底 <100px 视为「在底部」，用户上滚即暂停，回底恢复。
  */
 
-/** 中文数字章号（常见范围够用，超出回退阿拉伯数字） */
-function cnNum(n: number): string {
-  const d = "零一二三四五六七八九";
-  if (n <= 0 || n > 99) return String(n);
-  if (n < 10) return d[n];
-  const tens = Math.floor(n / 10);
-  const ones = n % 10;
-  return `${tens > 1 ? d[tens] : ""}十${ones ? d[ones] : ""}`;
-}
-
 export function StoryStream({
-  chapterIndex,
-  chapterTitle,
-  prevTail,
   messages,
   streamingText,
   rerollingId,
@@ -36,9 +23,6 @@ export function StoryStream({
   onReroll,
   onSwitchVariant,
 }: {
-  chapterIndex: number;
-  chapterTitle: string | null;
-  prevTail: MessageRow[];
   messages: MessageRow[];
   /** 新消息（say/continue/opening）流式中的正文；null = 未在流式 */
   streamingText: string | null;
@@ -83,36 +67,12 @@ export function StoryStream({
 
   return (
     <div className="pb-4 pt-2">
-      {/* 前章残页（淡墨） */}
-      {prevTail.length > 0 && (
-        <section className="mb-6">
-          <p className="mb-2 text-center text-xs tracking-widest text-ink-faint/70">
-            ── 前章残页 ──
-          </p>
-          {prevTail.map((m) => (
-            <MessageBlock key={m.id} message={m} readonly />
-          ))}
-        </section>
-      )}
-
-      {/* 章头 */}
-      <header className="mb-6 text-center">
-        <h2
-          className="text-2xl text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          第{cnNum(chapterIndex)}章{chapterTitle ? ` · ${chapterTitle}` : ""}
-        </h2>
-        <p className="mt-2 select-none text-sm tracking-[0.4em] text-gilt/60">
-          ──── ◆ ────
-        </p>
-      </header>
-
       {/* 正文消息流 */}
       {messages.map((m) => (
         <MessageBlock
           key={m.id}
           message={m}
+          readonly={m.editable === false}
           busy={busy}
           streamingOverride={rerollingId === m.id ? rerollingText : null}
           onEdit={onEdit}

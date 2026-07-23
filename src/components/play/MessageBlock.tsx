@@ -51,9 +51,6 @@ export function MessageBlock({
   const isStreaming = streamingOverride != null;
   const content = isStreaming ? streamingOverride : message.content;
   const isRewriteResult = message.meta?.kind === "reality_rewrite_result";
-  const scopeLabel = message.meta?.scope === "retroactive"
-    ? "溯改既往"
-    : message.meta?.scope === "memory_only" ? "唯改记忆" : "自此而后";
   const canAct = !readonly && !busy && !editing && !isStreaming;
 
   // 编辑态 textarea 自适应高度
@@ -102,7 +99,7 @@ export function MessageBlock({
   }
 
   return (
-    <div className={`group relative ${readonly ? "opacity-45" : ""}`}>
+    <div className="group relative">
       {/* 悬停操作排（右上浮现） */}
       {canAct && (onEdit || onCut || onReroll) && (
         <div className="pointer-events-none absolute -top-3 right-0 z-10 flex items-center gap-1 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100">
@@ -194,27 +191,16 @@ export function MessageBlock({
           </div>
         </div>
       ) : isRewriteResult ? (
-        <article className="my-6 rounded-lg border border-cinnabar/50 bg-cinnabar/5 p-5 shadow-sm" aria-label="天外敕令">
-          <div className="flex items-center justify-between gap-3 border-b border-cinnabar/20 pb-3">
-            <p className="text-sm tracking-[0.28em] text-cinnabar">天外敕令</p>
-            <span className="rounded-full border border-cinnabar/30 px-2 py-0.5 text-[11px] text-cinnabar/80">{scopeLabel}</span>
-          </div>
-          {message.meta?.decree && <blockquote className="decree my-4 whitespace-pre-wrap leading-loose text-gilt">{message.meta.decree}</blockquote>}
-          {message.meta?.interpretation && <p className="mb-3 text-sm leading-relaxed text-ink-soft"><span className="text-ink-faint">敕令释义：</span>{message.meta.interpretation}</p>}
-          {message.meta?.branchName && <p className="mb-3 text-xs text-ink-faint">新现实 · {message.meta.branchName}</p>}
+        <article className="my-4">
           <Prose text={content} />
-          {message.meta?.sourceTimelineId && (
-            <button
-              type="button"
-              disabled={busy}
-              className="mt-4 text-xs text-gilt hover:underline disabled:opacity-40"
-              onClick={() => window.dispatchEvent(new CustomEvent("creator:return-reality", {
-                detail: { sourceTimelineId: message.meta?.sourceTimelineId },
-              }))}
-            >
-              {busy ? "现实操作进行中…" : "返回前现实 →"}
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={busy}
+            className="mt-2 text-xs text-gilt/75 hover:text-gilt disabled:opacity-40"
+            onClick={() => window.dispatchEvent(new CustomEvent("creator:open-realities"))}
+          >
+            ⌘ 现实已分叉
+          </button>
         </article>
       ) : isPlayer ? (
         <blockquote className="decree my-4 whitespace-pre-wrap leading-loose">
@@ -231,6 +217,9 @@ export function MessageBlock({
       {/* 朱批印记 */}
       {!editing && message.meta?.edited && (
         <div className="-mt-2 mb-2 text-right text-xs text-cinnabar/60">朱批</div>
+      )}
+      {readonly && !editing && (
+        <div className="-mt-2 mb-2 text-right text-xs text-ink-faint/60">已成史</div>
       )}
 
       {/* 裁去二次确认 */}
