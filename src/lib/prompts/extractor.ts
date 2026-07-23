@@ -21,6 +21,26 @@ const EntityTypeSchema = z.enum([
   "cult",
 ]);
 
+export const EntityRelationLabelSchema = z.enum([
+  "family",
+  "spouse",
+  "lover",
+  "friend",
+  "ally",
+  "rival",
+  "enemy",
+  "mentor",
+  "student",
+  "colleague",
+  "neutral",
+]);
+
+export const EntityRelationChangeSchema = z.object({
+  target: z.string().trim().min(1).max(200).describe("目标人物的精确正名或别名"),
+  label: EntityRelationLabelSchema,
+  note: z.string().trim().min(1).max(1000),
+}).strict();
+
 export const AbilityExtractionPatchSchema = z.object({
   mastery: AbilityMasterySchema.optional(),
   state: AbilityStateSchema.optional(),
@@ -121,6 +141,11 @@ export const ExtractionBaseSchema = z.object({
         becameChosen: z.boolean().nullish(),
         died: z.boolean().nullish(),
         scenePresent: z.boolean().describe("本章结束时是否仍在场"),
+        relationChanges: z
+          .array(EntityRelationChangeSchema)
+          .max(30)
+          .nullish()
+          .describe("仅 character 可输出；正文明确变化的方向性人物关系"),
       }),
     )
     .describe("既有实体的增量"),
@@ -219,6 +244,8 @@ ${Object.entries(SECTION_TEMPLATES)
   .join("\n")}
 - Every section carries a "title": a short Chinese heading phrased in THIS world's voice (a cultivation world might title "military" as 「道兵战力」, a gothic empire as 「军团武备」). Keep titles stable for the same entity across chapters unless the world's framing shifts.
 - Write ONLY what the narrative supports; never invent facts to fill sections.
+- ENTITY SECTIONS: emit a sectionDelta only when the labelled prose explicitly changes that section. Each delta replaces the whole section, so preserve still-valid facts from the supplied existing section and return the complete updated whole section. Never invent missing details.
+- CHARACTER RELATIONS: only a character entityUpdate may emit relationChanges. The target must be an exact known character name or alias. Each relation is directional from the updated character to the target; do not infer or emit the reverse direction. Emit only when the labelled prose explicitly changes or establishes that character relation, and never invent relationships from proximity or shared scenes.
 - CHOSEN marks: if the player god granted a mark/blessing formally binding a mortal, set isChosen/becameChosen.
 - MAJOR CHARACTERS: set newEntities.isMajorCharacter only for a new character explicitly established as plot-critical. For an existing character, emit majorCharacterPromotions with verbatim message evidence; do not promote merely for appearing.
 - NEW OWNERS: a new character may set raceName only to an exact known race name/alias or a race created in the same extraction. Put newly introduced gods in newGods (never a player god). This lets an explicitly demonstrated new personal/divine/racial ability belong to its new owner in the same chapter.

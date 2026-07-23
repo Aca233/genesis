@@ -481,6 +481,7 @@ it("rejects settlement while chat owns the world and names the active operation 
       operationLeaseExpiresAt: new Date(Date.now() + 60_000),
     },
   });
+
   const { completeStructured } = await import("@/lib/llm/structured");
   vi.mocked(completeStructured).mockClear();
   try {
@@ -492,6 +493,163 @@ it("rejects settlement while chat owns the world and names the active operation 
     expect((await prisma.chapter.findUnique({ where: { id: data.chapter.id } }))?.settleState).toBe("open");
   } finally {
     await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it("把可见未锁定栏目放入整理上下文，并持久化人物的方向性关系", async () => {
+  const data = await fixture();
+  const target = await prisma.entity.create({
+    data: {
+      timelineId: data.timeline.id,
+      type: "character",
+      name: "保罗",
+      aliases: ["父亲"],
+      emblemSeed: "paul",
+      summary: "阿岚的父亲",
+      lockedPaths: [],
+    },
+  });
+  await prisma.entitySection.createMany({
+    data: [{
+      entityId: data.character.id,
+      key: "overview",
+      content: { title: "近况", text: "仍在山门修习旧式步法。" },
+      revealed: true,
+    }, {
+      entityId: data.character.id,
+      key: "identity",
+      content: { title: "隐秘身份", text: "不可传入整理上下文。" },
+      revealed: false,
+    }, {
+      entityId: data.character.id,
+      key: "affiliation",
+      content: { title: "门派", text: "此栏已由玩家锁定。" },
+      revealed: true,
+      playerLocked: true,
+    }],
+  });
+  responses.extractHandler = (user) => {
+    expect(user).toContain("overview");
+    expect(user).toContain("近况");
+    expect(user).toContain("仍在山门修习旧式步法");
+    expect(user).not.toContain("不可传入整理上下文");
+    expect(user).not.toContain("此栏已由玩家锁定");
+    return {
+      newEntities: [],
+      newGods: [],
+      entityUpdates: [{
+        name: "阿岚",
+        sectionDeltas: [],
+        summary: null,
+        newAliases: null,
+        becameChosen: null,
+        died: null,
+        scenePresent: true,
+        relationChanges: [{
+          target: "父亲",
+          label: "family",
+          note: "本轮正文明确两人重新承认父子关系。",
+        }],
+      }],
+      godUpdates: [],
+      revealSections: [],
+      majorCharacterPromotions: [],
+      abilityChanges: [],
+    };
+  };
+  try {
+    await settle(data.chapter.id);
+    const relation = await prisma.entityRelation.findUnique({
+      where: {
+        sourceEntityId_targetEntityId: {
+          sourceEntityId: data.character.id,
+          targetEntityId: target.id,
+        },
+      },
+    });
+    expect(relation).toMatchObject({
+      timelineId: data.timeline.id,
+      sourceEntityId: data.character.id,
+      targetEntityId: target.id,
+      label: "family",
+      note: "本轮正文明确两人重新承认父子关系。",
+    });
+    expect(await prisma.entityRelation.findUnique({
+      where: {
+        sourceEntityId_targetEntityId: {
+          sourceEntityId: target.id,
+          targetEntityId: data.character.id,
+        },
+      },
+    })).toBeNull();
+  } finally {
+    responses.extractHandler = undefined;
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it("逐项忽略跨现实或非人物的人物关系目标", async () => {
+  const data = await fixture();
+  const foreignWorld = await prisma.world.create({
+    data: { name: `foreign-${crypto.randomUUID()}`, genesisInput: "test", lockedPaths: [] },
+  });
+  const foreignTimeline = await prisma.timeline.create({ data: { worldId: foreignWorld.id } });
+  await prisma.entity.create({
+    data: {
+      timelineId: foreignTimeline.id,
+      type: "character",
+      name: "异界人",
+      aliases: [],
+      emblemSeed: "foreign",
+      summary: "不属于当前现实",
+      lockedPaths: [],
+    },
+  });
+  await prisma.entity.create({
+    data: {
+      timelineId: data.timeline.id,
+      type: "place",
+      name: "山门",
+      aliases: [],
+      emblemSeed: "gate",
+      summary: "一处地点",
+      lockedPaths: [],
+    },
+  });
+  responses.extract = {
+    newEntities: [],
+    newGods: [],
+    entityUpdates: [{
+      name: "阿岚",
+      sectionDeltas: [],
+      summary: null,
+      newAliases: null,
+      becameChosen: null,
+      died: null,
+      scenePresent: true,
+      relationChanges: [{
+        target: "异界人",
+        label: "friend",
+        note: "非法跨现实目标",
+      }, {
+        target: "山门",
+        label: "ally",
+        note: "非法非人物目标",
+      }],
+    }],
+    godUpdates: [],
+    revealSections: [],
+    majorCharacterPromotions: [],
+    abilityChanges: [],
+  };
+  try {
+    await settle(data.chapter.id);
+    expect(await prisma.entityRelation.count({
+      where: { sourceEntityId: data.character.id },
+    })).toBe(0);
+  } finally {
+    await prisma.world.delete({ where: { id: data.world.id } });
+    await prisma.world.delete({ where: { id: foreignWorld.id } });
   }
 });
 

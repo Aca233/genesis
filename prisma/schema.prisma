@@ -90,6 +90,7 @@ model Timeline {
   omens       OmenQueue[]
   worldEvents     WorldEvent[]
   worldActivities WorldActivity[]
+  entityRelations EntityRelation[]
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
 
@@ -269,12 +270,33 @@ model Entity {
   abilities             Ability[]         @relation("EntityAbilities")
   memberships           EntityMembership[] @relation("MembershipCharacter")
   membershipsAsFaction  EntityMembership[] @relation("MembershipFaction")
+  outgoingRelations     EntityRelation[]   @relation("EntityRelationSource")
+  incomingRelations     EntityRelation[]   @relation("EntityRelationTarget")
   createdAt             DateTime           @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")
 
   @@index([timelineId, type])
   @@unique([timelineId, materialRef])
   @@map("entities")
+}
+
+model EntityRelation {
+  id             String   @id @default(cuid())
+  timelineId     String   @map("timeline_id")
+  timeline       Timeline @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  sourceEntityId String   @map("source_entity_id")
+  sourceEntity   Entity   @relation("EntityRelationSource", fields: [sourceEntityId], references: [id], onDelete: Cascade)
+  targetEntityId String   @map("target_entity_id")
+  targetEntity   Entity   @relation("EntityRelationTarget", fields: [targetEntityId], references: [id], onDelete: Cascade)
+  label          String
+  note           String   @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([sourceEntityId, targetEntityId])
+  @@index([timelineId])
+  @@index([targetEntityId])
+  @@map("entity_relations")
 }
 
 model RealityRewrite {

@@ -105,6 +105,17 @@ describe("creator settlement contract", () => {
     expect(prompt).not.toContain("4-8 character chapter title");
   });
 
+  it("世界整理明确抽取成功研发或首次稳定施展的可复用新能力", () => {
+    const prompt = settlementSystem("creator");
+
+    expect(prompt).toContain("成功研发");
+    expect(prompt).toContain("正式命名");
+    expect(prompt).toContain("首次稳定施展");
+    expect(prompt).toContain("法术、战技或工程战斗技术");
+    expect(prompt).toContain("单次环境偶发");
+    expect(prompt).toContain("不得登记为能力");
+  });
+
   it("creator prompt treats observations as world-external and turns as internal", () => {
     const system = settlementSystem("creator");
     const user = settlementUserPrompt({

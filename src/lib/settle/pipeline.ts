@@ -62,6 +62,9 @@ const STEP_ORDER: SettleStep[] = [
 const MODEL_LEASE_MS = 15 * 60 * 1000;
 const MODEL_WAIT_MS = 250;
 const MODEL_STATE_PREFIX = "settling:model:";
+const ENTITY_CONTEXT_MAX_SECTIONS = 8;
+const ENTITY_CONTEXT_MAX_TITLE_LENGTH = 80;
+const ENTITY_CONTEXT_MAX_SECTION_TEXT_LENGTH = 800;
 
 type SettlementModelClaim =
   | { owner: true; leaseState: string }
@@ -306,7 +309,7 @@ async function* settleChapterWithLease(
           maxAttempts: 1,
           transportMaxAttempts: 1,
           allowTransportFallback: false,
-          cache: { namespace: `settlement:v2:${mode}` },
+          cache: { namespace: `settlement:v3:${mode}` },
         });
         await assertLeaseOwned();
         await assertTimelineStillActive(world.id, timeline.id);
@@ -573,6 +576,12 @@ async function buildSettlementContext(
       select: {
         id: true, name: true, type: true, aliases: true, summary: true,
         lockedPaths: true, raceId: true, scenePresence: true,
+        sections: {
+          where: { revealed: true, playerLocked: false },
+          select: { key: true, content: true },
+          orderBy: { key: "asc" },
+          take: ENTITY_CONTEXT_MAX_SECTIONS,
+        },
       },
       orderBy: { createdAt: "asc" },
       take: EXTRACTION_MAX_ENTITIES,
@@ -620,9 +629,17 @@ async function buildSettlementContext(
     currentYearLabel: mode === "creator" && reality
       ? reality.currentEra
       : lastEntry?.yearLabel ?? "元年",
-    entities: entities.map((entity) =>
-      `${entity.name} [${entity.id}] (${entity.type}) race=${entity.raceId ? raceName.get(entity.raceId) ?? entity.raceId : "—"} aliases=[${entity.aliases.join("、")}] present=${entity.scenePresence}: ${entity.summary}`,
-    ).join("\n"),
+    entities: entities.map((entity) => {
+      const locked = new Set(entity.lockedPaths);
+      const sections = entity.sections
+        .filter((section) => !locked.has(section.key))
+        .map((section) => formatEntitySectionContext(section.key, section.content))
+        .filter((section): section is string => section !== null);
+      return [
+        `${entity.name} [${entity.id}] (${entity.type}) race=${entity.raceId ? raceName.get(entity.raceId) ?? entity.raceId : "—"} aliases=[${entity.aliases.join("、")}] present=${entity.scenePresence}: ${entity.summary}`,
+        ...(sections.length ? ["  EXISTING VISIBLE UNLOCKED SECTIONS:", ...sections] : []),
+      ].join("\n");
+    }).join("\n\n"),
     gods: gods.filter((god) => god.tier === "major" && !god.isPlayer).map((god) =>
       `${god.name} [${god.id}] rank=${god.rank}\n${JSON.stringify({
         persona: god.persona, voice: god.voice, agenda: god.agenda, relations: god.relations,
@@ -638,6 +655,17 @@ async function buildSettlementContext(
     worldActivity,
     fusionAxiom: fusionAxiom ? JSON.stringify(fusionAxiom) : undefined,
   };
+}
+
+function formatEntitySectionContext(key: string, content: Prisma.JsonValue): string | null {
+  if (!content || typeof content !== "object" || Array.isArray(content)) return null;
+  const record = content as Record<string, unknown>;
+  if (typeof record.text !== "string" || record.text.trim().length === 0) return null;
+  const title = typeof record.title === "string" && record.title.trim().length > 0
+    ? record.title.trim().slice(0, ENTITY_CONTEXT_MAX_TITLE_LENGTH)
+    : key;
+  const text = record.text.trim().slice(0, ENTITY_CONTEXT_MAX_SECTION_TEXT_LENGTH);
+  return `  - ${key} | ${title}: ${text}`;
 }
 
 async function settlementActivityContext(
@@ -1001,6 +1029,49 @@ async function applyExtraction(
           },
           update: {
             content: { title: d.title, text: d.text } as Prisma.InputJsonValue,
+          },
+        });
+      }
+    }
+
+    // 人物关系是方向性的。只接受当前现实中可唯一解析的 character 正名或别名。
+    const currentCharacters = await tx.entity.findMany({
+      where: { timelineId, type: "character" },
+      select: { id: true, name: true, aliases: true },
+    });
+    const characterIdsByName = new Map<string, Set<string>>();
+    for (const character of currentCharacters) {
+      for (const name of [character.name, ...character.aliases]) {
+        const ids = characterIdsByName.get(name) ?? new Set<string>();
+        ids.add(character.id);
+        characterIdsByName.set(name, ids);
+      }
+    }
+    for (const update of normalizedExtraction.entityUpdates) {
+      const source = byName.get(update.name);
+      if (source?.type !== "character") continue;
+      for (const relation of update.relationChanges ?? []) {
+        const targetIds = characterIdsByName.get(relation.target);
+        if (targetIds?.size !== 1) continue;
+        const targetId = [...targetIds][0]!;
+        await tx.entityRelation.upsert({
+          where: {
+            sourceEntityId_targetEntityId: {
+              sourceEntityId: source.id,
+              targetEntityId: targetId,
+            },
+          },
+          create: {
+            timelineId,
+            sourceEntityId: source.id,
+            targetEntityId: targetId,
+            label: relation.label,
+            note: relation.note,
+          },
+          update: {
+            timelineId,
+            label: relation.label,
+            note: relation.note,
           },
         });
       }
