@@ -36,6 +36,7 @@ describe("applyContinuousState", () => {
                 type: "character",
                 name: "守门人",
                 aliases: [],
+                emblemSeed: activeEntityId,
                 summary: "守在门前",
                 scenePresence: false,
                 lockedPaths: [],
@@ -51,6 +52,7 @@ describe("applyContinuousState", () => {
                 type: "character",
                 name: "旧现实守门人",
                 aliases: [],
+                emblemSeed: foreignEntityId,
                 summary: "留在旧现实",
                 scenePresence: false,
                 lockedPaths: [],
@@ -103,4 +105,3 @@ describe("applyContinuousState", () => {
     expect(entity.scenePresence).toBe(false);
   });
 });
-

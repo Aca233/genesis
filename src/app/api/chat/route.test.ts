@@ -11,10 +11,15 @@ const mocks = vi.hoisted(() => ({
   buildNarratorContext: vi.fn(),
   narratorSSE: vi.fn(),
   narratorCompletionSSE: vi.fn(),
-  finalizeNarration: vi.fn(),
+  applyStoredNarration: vi.fn(),
   prepareGenerationRequest: vi.fn(),
   readGenerationCompletion: vi.fn(),
   markGenerationFailed: vi.fn(),
+  markGenerationStage: vi.fn(),
+  storeGenerationOutput: vi.fn(),
+  createNarrationTaskSSE: vi.fn(),
+  relayNarratorResponse: vi.fn(),
+  publishNarrationTaskEvent: vi.fn(),
   claimWorldOperation: vi.fn(),
   renewWorldOperation: vi.fn(),
   releaseWorldOperation: vi.fn(),
@@ -29,7 +34,12 @@ vi.mock("@/lib/context/sse", () => ({
   narratorCompletionSSE: mocks.narratorCompletionSSE,
 }));
 vi.mock("@/lib/chat/finalize", () => ({
-  finalizeNarration: mocks.finalizeNarration,
+  applyStoredNarration: mocks.applyStoredNarration,
+}));
+vi.mock("@/lib/chat/task-runner", () => ({
+  createNarrationTaskSSE: mocks.createNarrationTaskSSE,
+  relayNarratorResponse: mocks.relayNarratorResponse,
+  publishNarrationTaskEvent: mocks.publishNarrationTaskEvent,
 }));
 vi.mock("@/lib/reality/operation-lock", () => ({
   OPERATION_LEASE_RENEW_MS: 100_000,
@@ -48,6 +58,8 @@ vi.mock("@/lib/chat/request", () => ({
   prepareGenerationRequest: mocks.prepareGenerationRequest,
   readGenerationCompletion: mocks.readGenerationCompletion,
   markGenerationFailed: mocks.markGenerationFailed,
+  markGenerationStage: mocks.markGenerationStage,
+  storeGenerationOutput: mocks.storeGenerationOutput,
   OpeningGenerationConflictError: mocks.OpeningGenerationConflictError,
   FrozenRealityError: mocks.FrozenRealityError,
 }));
@@ -69,7 +81,13 @@ describe("POST /api/chat", () => {
     mocks.narratorCompletionSSE.mockImplementation(() => new Response("sse replay", {
       headers: { "Content-Type": "text/event-stream; charset=utf-8" },
     }));
-    mocks.finalizeNarration.mockResolvedValue({
+    mocks.createNarrationTaskSSE.mockImplementation(() => new Response("task sse", {
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    }));
+    mocks.relayNarratorResponse.mockResolvedValue(undefined);
+    mocks.markGenerationStage.mockResolvedValue(undefined);
+    mocks.storeGenerationOutput.mockImplementation(async (_db, _id, _attempt, output) => output);
+    mocks.applyStoredNarration.mockResolvedValue({
       messageId: "generation-1",
       meta: {
         suggestions: [],
@@ -217,7 +235,62 @@ describe("POST /api/chat", () => {
     expect(mocks.narratorSSE).not.toHaveBeenCalled();
   });
 
-  it("将稳定 generationId 与 request.signal 传入可取消、事务化完成链路", async () => {
+  it("output_stored owner 跳过 LLM 并从私有快照继续应用", async () => {
+    const outputSnapshot = {
+      prose: "已保存的完整正文",
+      parsedMeta: {
+        suggestions: [],
+        operation: "continue",
+        immediateChanges: [],
+        significantEvent: false,
+        settlementReasons: [],
+      },
+      generatedAt: "2026-07-23T00:00:00.000Z",
+      contractVersion: 1,
+    };
+    mocks.prepareGenerationRequest.mockResolvedValue({
+      state: "owner",
+      attempt: 2,
+      resumeFrom: "output_stored",
+      outputSnapshot,
+      meta: {
+        type: "chat-generation-request",
+        chapterId: "chapter-1",
+        mode: "continue",
+        scale: "scene",
+        content: null,
+        directive: null,
+        playerMessageId: null,
+        narratorMessageId: "generation-1",
+        playerIndex: null,
+        narratorIndex: 4,
+      },
+    });
+
+    await POST(new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        chapterId: "chapter-1",
+        scale: "scene",
+        mode: "continue",
+        generationId: "generation-1",
+      }),
+    }));
+
+    expect(mocks.buildNarratorContext).not.toHaveBeenCalled();
+    expect(mocks.narratorSSE).not.toHaveBeenCalled();
+    expect(mocks.narratorCompletionSSE).toHaveBeenCalledWith(expect.objectContaining({
+      waitForCompletion: expect.any(Function),
+    }));
+    const [{ waitForCompletion }] = mocks.narratorCompletionSSE.mock.calls.at(-1)!;
+    await waitForCompletion();
+    expect(mocks.applyStoredNarration).toHaveBeenCalledWith(
+      mocks.prisma,
+      expect.objectContaining({ output: outputSnapshot, attempt: 2 }),
+    );
+  });
+
+  it("浏览器 signal 只控制任务订阅，不传给后台生成 owner", async () => {
     const abort = new AbortController();
     const request = new Request("http://localhost/api/chat", {
       method: "POST",
@@ -232,19 +305,41 @@ describe("POST /api/chat", () => {
 
     await POST(request);
 
-    expect(mocks.narratorSSE).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.narratorSSE).toHaveBeenCalledWith(expect.not.objectContaining({
       signal: request.signal,
+    }));
+    expect(mocks.createNarrationTaskSSE).toHaveBeenCalledWith(
+      "generation-1",
+      expect.any(Array),
+    );
+    expect(mocks.relayNarratorResponse).toHaveBeenCalledWith(
+      "generation-1",
+      expect.any(Response),
+    );
+    expect(mocks.narratorSSE).toHaveBeenCalledWith(expect.objectContaining({
       onDone: expect.any(Function),
       onFailure: expect.any(Function),
     }));
     const [{ onDone }] = mocks.narratorSSE.mock.calls[0];
-    await onDone({ prose: "正文", meta: { suggestions: [], chapterBreakHint: false } });
-    expect(mocks.finalizeNarration).toHaveBeenCalledWith(
+    await onDone({ prose: "正文", meta: {
+      suggestions: [],
+      operation: "continue",
+      immediateChanges: [],
+      significantEvent: false,
+      settlementReasons: [],
+    } });
+    expect(mocks.storeGenerationOutput).toHaveBeenCalledWith(
+      mocks.prisma,
+      "generation-1",
+      1,
+      expect.objectContaining({ prose: "正文", contractVersion: 1 }),
+    );
+    expect(mocks.applyStoredNarration).toHaveBeenCalledWith(
       mocks.prisma,
       expect.objectContaining({
         generationId: "generation-1",
         narratorIndex: 4,
-        prose: "正文",
+        output: expect.objectContaining({ prose: "正文" }),
       }),
     );
     const [{ onFailure }] = mocks.narratorSSE.mock.calls[0];
@@ -325,7 +420,7 @@ describe("POST /api/chat", () => {
     const [{ onDone }] = mocks.narratorSSE.mock.calls[0];
     await onDone({ prose: "正文", meta: { suggestions: [], chapterBreakHint: false } });
 
-    expect(mocks.finalizeNarration).toHaveBeenCalledWith(mocks.prisma, expect.objectContaining({
+    expect(mocks.applyStoredNarration).toHaveBeenCalledWith(mocks.prisma, expect.objectContaining({
       worldId: "world-1",
       expectedActiveTimelineId: "timeline-1",
     }));
@@ -399,7 +494,8 @@ describe("POST /api/chat", () => {
 
     expect(mocks.renewWorldOperation).toHaveBeenCalledWith(mocks.prisma, "world-1", "chat", "generation-1");
     expect(mocks.releaseWorldOperation).toHaveBeenCalledWith(mocks.prisma, "world-1", "chat", "generation-1");
-    expect(mocks.finalizeNarration.mock.invocationCallOrder[0]).toBeLessThan(mocks.releaseWorldOperation.mock.invocationCallOrder[0]);
+    expect(mocks.applyStoredNarration.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.releaseWorldOperation.mock.invocationCallOrder[0]);
   });
 
   it("releases after stream failure even when marking the generation failed throws", async () => {

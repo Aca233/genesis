@@ -5,17 +5,26 @@ import { ScaleSchema } from "@/lib/cards/schemas";
 import { buildNarratorContext } from "@/lib/context/builder";
 import { narratorCompletionSSE, narratorSSE } from "@/lib/context/sse";
 import {
-  finalizeNarration,
+  applyStoredNarration,
   type NarrationFinalizationClient,
 } from "@/lib/chat/finalize";
 import {
   prepareGenerationRequest,
   readGenerationCompletion,
   markGenerationFailed,
+  markGenerationStage,
+  storeGenerationOutput,
   OpeningGenerationConflictError,
   FrozenRealityError,
   type GenerationRequestClient,
+  type StoredNarratorOutput,
 } from "@/lib/chat/request";
+import {
+  createNarrationTaskSSE,
+  publishNarrationTaskEvent,
+  relayNarratorResponse,
+} from "@/lib/chat/task-runner";
+import { progressEvent } from "@/lib/tasks/progress-events";
 import {
   OPERATION_LEASE_RENEW_MS,
   WorldOperationConflictError,
@@ -156,6 +165,71 @@ export async function POST(request: Request) {
   }
   const narratorIndex = prepared.meta.narratorIndex;
 
+  const applyOutput = async (output: StoredNarratorOutput) => {
+    publishNarrationTaskEvent(progressEvent(
+      generationId,
+      "chat",
+      "applying",
+      "running",
+    ));
+    let completion;
+    try {
+      completion = await applyStoredNarration(
+        prisma as unknown as NarrationFinalizationClient,
+        {
+          generationId,
+          chapterId,
+          chapterIndex: chapter.index,
+          timelineId: chapter.timeline.id,
+          worldId: chapter.timeline.worldId,
+          expectedActiveTimelineId: chapter.timeline.id,
+          narratorIndex,
+          attempt: prepared.attempt,
+          requestMeta: prepared.meta,
+          output,
+          scale,
+          logInvalidReveal: ({ abilityId }) => {
+            console.warn("[chat] 跳过非法能力揭示", {
+              abilityId,
+              timelineId: chapter.timeline.id,
+              generationId,
+            });
+          },
+        },
+      );
+    } finally {
+      await releaseOperation();
+    }
+    publishNarrationTaskEvent(progressEvent(
+      generationId,
+      "chat",
+      "completed",
+      "completed",
+    ));
+    if (completion.followUp.kind === "rewrite") {
+      ensureRealityRewriteRunning(completion.followUp.taskId);
+    }
+    return {
+      messageId: completion.messageId,
+      meta: completion.meta,
+      followUp: completion.followUp,
+    };
+  };
+
+  if ("outputSnapshot" in prepared && prepared.outputSnapshot) {
+    const response = createNarrationTaskSSE(generationId, [
+      progressEvent(generationId, "chat", "output_stored", "completed"),
+    ]);
+    const output = prepared.outputSnapshot;
+    const internal = narratorCompletionSSE({
+      waitForCompletion: async () => applyOutput(output),
+      maxWaitMs: 300_000,
+      pollIntervalMs: 1,
+    });
+    void relayNarratorResponse(generationId, internal);
+    return response;
+  }
+
   // 组装上下文。say 输入在意图分类完成前只存在 durable request 中，
   // 由 builder 在末尾注入；只有普通 continue 完成后才原子落玩家消息。
   let messages;
@@ -186,10 +260,27 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  return narratorSSE({
+  await markGenerationStage(
+    prisma as unknown as GenerationRequestClient,
+    generationId,
+    prepared.attempt!,
+    "context_ready",
+  );
+  await markGenerationStage(
+    prisma as unknown as GenerationRequestClient,
+    generationId,
+    prepared.attempt!,
+    "generating",
+  );
+
+  const response = createNarrationTaskSSE(generationId, [
+    progressEvent(generationId, "chat", "reserved", "completed"),
+    progressEvent(generationId, "chat", "context_ready", "completed"),
+    progressEvent(generationId, "chat", "generating", "running"),
+  ]);
+  const internal = narratorSSE({
     messages,
     cacheNamespace: `narrative:${chapter.timeline.worldId}:v1`,
-    signal: request.signal,
     heartbeatMs: OPERATION_LEASE_RENEW_MS,
     onHeartbeat: async () => {
       const renewed = await renewWorldOperation(
@@ -212,47 +303,27 @@ export async function POST(request: Request) {
         await releaseOperation();
       }
     },
-    onDone: async ({ prose, meta, signal }) => {
-      let completion;
-      try {
-        completion = await finalizeNarration(
-          prisma as unknown as NarrationFinalizationClient,
-          {
-            generationId,
-            chapterId,
-            chapterIndex: chapter.index,
-            timelineId: chapter.timeline.id,
-            worldId: chapter.timeline.worldId,
-            expectedActiveTimelineId: chapter.timeline.id,
-            narratorIndex,
-            attempt: prepared.attempt,
-            requestMeta: prepared.meta,
-            prose,
-            meta,
-            scale,
-            signal,
-            logInvalidReveal: ({ abilityId }) => {
-              console.warn("[chat] 跳过非法能力揭示", {
-                abilityId,
-                timelineId: chapter.timeline.id,
-                generationId,
-              });
-            },
-          },
-        );
-      } finally {
-        await releaseOperation();
-      }
-      if (completion.followUp.kind === "rewrite") {
-        // The rewrite runner claims its own world lease. Start it only after
-        // the chat lease has been released above.
-        ensureRealityRewriteRunning(completion.followUp.taskId);
-      }
-      return {
-        messageId: completion.messageId,
-        meta: completion.meta,
-        followUp: completion.followUp,
-      };
+    onDone: async ({ prose, meta }) => {
+      const output = await storeGenerationOutput(
+        prisma as unknown as GenerationRequestClient,
+        generationId,
+        prepared.attempt!,
+        {
+          prose,
+          parsedMeta: meta,
+          generatedAt: new Date().toISOString(),
+          contractVersion: 1,
+        },
+      );
+      publishNarrationTaskEvent(progressEvent(
+        generationId,
+        "chat",
+        "output_stored",
+        "completed",
+      ));
+      return applyOutput(output);
     },
   });
+  void relayNarratorResponse(generationId, internal);
+  return response;
 }
