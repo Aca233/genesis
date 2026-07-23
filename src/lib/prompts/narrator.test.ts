@@ -121,10 +121,24 @@ describe("narrator quality contract", () => {
     expect(prompt).toContain("never state the outcome as already achieved");
   });
 
-  it("retains pantheon author-only narration and NPC knowledge boundaries", () => {
+  it("允许玩家明确要求本轮创造新技能，但不允许 Narrator 自行给 NPC 编造能力", () => {
     const prompt = narratorGlobalSystem("pantheon");
-    expect(prompt).toContain("Never mention, imply or suggest an ability absent from KNOWN ABILITIES. AUTHOR-ONLY entries may shape only their owner's manifested behavior");
+    expect(prompt).toContain("explicit current player request");
+    expect(prompt).toContain("successfully develops or first stably performs");
+    expect(prompt).toContain("does not let the Narrator autonomously invent");
+    expect(prompt).toContain("NPC");
     expect(prompt).toContain("Hidden chronicle entries, agendas and AUTHOR-ONLY abilities cannot leak through convenient intuition");
+  });
+
+  it("新能力在正文成立时要求 META 标记 ability_change 以触发同轮整理", () => {
+    for (const mode of ["pantheon", "creator"] as const) {
+      const prompt = narratorGlobalSystem(mode);
+      expect(prompt).toContain("settlement_reasons");
+      expect(prompt).toContain("ability_change");
+      expect(prompt).toContain("成功研发");
+      expect(prompt).toContain("首次稳定施展");
+      expect(prompt).toContain("本轮");
+    }
   });
 
   it("uses the same META for restrained autonomous world activity", () => {

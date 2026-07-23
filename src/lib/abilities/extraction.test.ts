@@ -730,6 +730,104 @@ it("无 ID 时可按 owner 类型创建证据支持的新能力，重复执行�
   }
 });
 
+it.each([
+  [
+    "learned",
+    "鲁迪创造了名为960mm穿深新式APFSDS的工程战斗技术，并将其标准化为可反复装填施用的穿甲弹",
+  ],
+  [
+    "awakened",
+    "鲁迪首次稳定施展自行命名的960mm穿深新式APFSDS，一击贯穿了试验场的复合装甲靶",
+  ],
+] as const)("接受明确研发或首次稳定施展的新式工程战斗技术作为 %s personal ability", async (type, evidence) => {
+  const fixture = extractionFixture();
+  fixture.owners.push({
+    id: "character-rudy",
+    type: "character",
+    name: "鲁迪",
+    aliases: [],
+    raceId: "race-native",
+  });
+  fixture.messages.push({
+    id: `message-rudy-${type}`,
+    index: 44,
+    scale: "scene",
+    content: `${evidence}。`,
+  });
+
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: fixture.owners,
+    messages: fixture.messages,
+    changes: [{
+      ownerName: "鲁迪",
+      name: "960mm穿深新式APFSDS",
+      kind: "personal",
+      type,
+      effect: "以标准化超高速弹芯贯穿复合装甲",
+      trigger: "完成装填、校准弹道并主动发射",
+      cost: "消耗专用弹体与火炮寿命",
+      limitations: "必须使用匹配口径的重型火炮",
+      lockedFields: [],
+      patch: { mastery: "novice" },
+      evidenceMessageIndex: 44,
+      evidence,
+    }],
+  });
+
+  expect(result.rejected).toEqual([]);
+  expect(result.applied).toHaveLength(1);
+  expect([...fixture.abilities.values()]).toContainEqual(expect.objectContaining({
+    entityId: "character-rudy",
+    name: "960mm穿深新式APFSDS",
+    kind: "personal",
+    mastery: "novice",
+  }));
+});
+
+it("单次环境偶发效果不能被登记为鲁迪的新能力", async () => {
+  const fixture = extractionFixture();
+  fixture.owners.push({
+    id: "character-rudy",
+    type: "character",
+    name: "鲁迪",
+    aliases: [],
+    raceId: "race-native",
+  });
+  const evidence = "鲁迪发射普通炮弹时恰逢地脉爆炸，冲击波偶然贯穿了试验场的复合装甲靶";
+  fixture.messages.push({
+    id: "message-rudy-accident",
+    index: 46,
+    scale: "scene",
+    content: `${evidence}。`,
+  });
+
+  const result = await applyAbilityExtraction(fixture.client, {
+    timelineId: "timeline-1",
+    chapterId: "chapter-1",
+    owners: fixture.owners,
+    messages: fixture.messages,
+    changes: [{
+      ownerName: "鲁迪",
+      name: "地脉穿甲",
+      kind: "personal",
+      type: "learned",
+      effect: "借助地脉爆炸贯穿装甲",
+      trigger: "发射炮弹",
+      cost: "消耗炮弹",
+      limitations: "需要地脉恰好爆炸",
+      lockedFields: [],
+      patch: { mastery: "novice" },
+      evidenceMessageIndex: 46,
+      evidence,
+    }],
+  });
+
+  expect(result.applied).toEqual([]);
+  expect(result.rejected[0]?.reason).toMatch(/能力事件|行动主体|正文证据/);
+});
+
 it("拒绝无 ID 新能力的 owner-kind 越权、重复名和缺失证据字段", async () => {
   const fixture = extractionFixture();
   fixture.messages.push({ id: "message-create-invalid", index: 45, scale: "scene", content: "阿岚终于学会裂石掌，一掌击碎挡路巨岩。" });

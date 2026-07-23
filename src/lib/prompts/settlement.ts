@@ -175,8 +175,11 @@ Global rules:
 - A create mutation must cite the exact related sourceActivityIds. An advance or derive mutation must cite an exact unresolved event ID.
 - Do not create unrelated news. Every worldActivity mutation must follow from the checkpoint messages, listed activities, or listed unresolved events.
 - Respect player-locked sections and ability fields.
+- For an existing entity section, emit a whole section replacement only when the labelled prose explicitly changed it. Preserve still-valid supplied facts and Never invent missing details.
+- For a character relation, use relationChanges only on a character entityUpdate and target an exact known character name or alias. Relations are directional; never infer the reverse relation. Emit only relations explicitly changed or established by the labelled prose, and Never invent a relation from proximity.
 - For new entities, only named story-relevant entities qualify. New characters may reference only an exact known/new race name.
 - New abilities require explicit learned/awakened evidence; characters may create personal, gods divine, races racial_innate/racial_tradition.
+- 若正文明确写出某角色成功研发、正式命名或首次稳定施展一种可复用的法术、战技或工程战斗技术，应作为新能力抽取；单次环境偶发、临时工具效果或未成功设想不得登记为能力。
 - Every listed non-player major god must appear once in pantheonTurns; do not add unlisted gods.
 - An omen is subtle and mortal-perceivable.
 

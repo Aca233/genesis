@@ -153,4 +153,15 @@ describe("creator settlement contract", () => {
     expect(user).toContain("event-war");
     expect(user).toContain("CHECKPOINT WORLD ACTIVITY");
   });
+
+  it("要求整理正文明确改变的人物关系和整栏内容，不凭空补全", () => {
+    const system = settlementSystem("creator");
+
+    expect(system).toContain("character relation");
+    expect(system).toContain("exact known character name or alias");
+    expect(system).toContain("directional");
+    expect(system).toContain("whole section");
+    expect(system).toContain("explicitly changed");
+    expect(system).toContain("Never invent");
+  });
 });
