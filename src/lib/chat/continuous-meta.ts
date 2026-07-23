@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  ActivityEntrySchema,
+  ImportantEventMutationSchema,
+  WorldActionSchema,
+} from "@/lib/world-activity/contracts";
 
 export const SettlementReasonSchema = z.enum([
   "major_event",
@@ -60,6 +65,9 @@ export const ContinuousNarratorMetaSchema = z.object({
   operation: z.enum(["continue", "retroactive_rewrite"]).default("continue"),
   temporalState: TemporalPatchSchema.optional(),
   immediateChanges: z.array(ImmediateChangeSchema).max(12).default([]),
+  worldActions: z.array(WorldActionSchema).max(3).default([]),
+  activityEntries: z.array(ActivityEntrySchema).max(3).default([]),
+  importantEventMutation: ImportantEventMutationSchema.optional(),
   significantEvent: z.boolean().default(false),
   settlementReasons: z.array(SettlementReasonSchema).max(9).default([]),
   revealedEventIds: z.array(z.string()).optional(),
@@ -75,8 +83,9 @@ export function emptyContinuousMeta(): ContinuousNarratorMeta {
     suggestions: [],
     operation: "continue",
     immediateChanges: [],
+    worldActions: [],
+    activityEntries: [],
     significantEvent: false,
     settlementReasons: [],
   };
 }
-

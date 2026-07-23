@@ -48,6 +48,9 @@ export function splitMetaBlock(full: string): { prose: string; meta: NarratorMet
       operation: json.operation,
       temporalState: json.temporal_state,
       immediateChanges: json.immediate_changes,
+      worldActions: json.world_actions,
+      activityEntries: json.activity_entries,
+      importantEventMutation: json.important_event_mutation ?? undefined,
       significantEvent: json.significant_event,
       settlementReasons: json.settlement_reasons,
       revealedEventIds: json.revealed_event_ids,
@@ -164,11 +167,15 @@ function outputContract(mode: WorldMode): string {
 1) Write the narrative prose in Chinese.
 2) After the prose, on a NEW line, output exactly: ${META_START}
 3) Then output ONE JSON object:
-{"suggestions":["…","…"],"operation":"continue","temporal_state":{"era":"…","time":"…"},"immediate_changes":[],"significant_event":false,"settlement_reasons":[],"revealed_event_ids":[],"ability_reveals":[]}
+{"suggestions":["…","…"],"operation":"continue","temporal_state":{"era":"…","time":"…"},"immediate_changes":[],"world_actions":[],"activity_entries":[],"important_event_mutation":null,"significant_event":false,"settlement_reasons":[],"revealed_event_ids":[],"ability_reveals":[]}
    - suggestions: 2-4 SHORT Chinese options. ${suggestions}
    - operation: ${mode === "creator" ? `"continue" or "retroactive_rewrite" under UNIFIED CREATOR INTENT.` : `always "continue"; this mode cannot rewrite established history.`}
    - temporal_state: omit unless era or time truly changed. Either field may be supplied alone. Use free-form in-world Chinese labels.
    - immediate_changes: only low-risk changes supported by supplied exact ids: set_observer_focus, set_scene_presence, set_active_avatar, or set_entity_section. Use [] when none.
+   - world_actions: 0-3 restrained autonomous actions by supplied gods or entities. Advance only actors tied to the current prose, a supplied focused event, or recently supplied conflict. actorId and targetIds must be exact supplied ids. consequence is narrative evidence only and never directly changes database state; durable changes still require immediate_changes.
+   - activity_entries: 0-3 normal, one-time records supported by this reply, its world_actions, or a supplied event. Never manufacture unrelated news merely to fill this list. importance must be "normal".
+   - important_event_mutation: null or one create/advance mutation. Advance only the exact eventId supplied in the current context; never infer an event by title. An invalid event mutation must not be split into partial effects.
+   - Render accepted world activity consequences naturally in the prose, but return world_actions, activity_entries, and important_event_mutation inside this same single META. Never request or imply a second backstage model call.
    - significant_event: true only for a change needing full world settlement.
    - settlement_reasons: zero or more of major_event, ability_change, important_death, faction_change, rank_change, identity_change, relation_restructure, era_change, multi_entity_change.
    - revealed_event_ids: ${revealedEvents}

@@ -33,5 +33,47 @@ describe("ContinuousNarratorMetaSchema", () => {
       temporalState: {},
     })).toThrow();
   });
-});
 
+  it("在同一个连续 META 中解析世界行动、动态和重要事件", () => {
+    const parsed = ContinuousNarratorMetaSchema.parse({
+      ...emptyContinuousMeta(),
+      worldActions: [{
+        actorType: "god",
+        actorId: "god-1",
+        action: "封锁北港",
+        targetIds: ["entity-1"],
+        visibility: "public",
+        consequence: "粮船滞留外海",
+      }],
+      activityEntries: [{
+        kind: "conflict",
+        text: "北港航道被封锁。",
+        subjectIds: ["god-1", "entity-1"],
+        visibility: "public",
+        importance: "normal",
+      }],
+      importantEventMutation: {
+        operation: "create",
+        tempRef: "north-harbor",
+        kind: "war",
+        title: "北港之争",
+        summary: "海神与商盟争夺航道。",
+        phase: "emerging",
+        participantIds: ["god-1", "entity-1"],
+        visibility: "public",
+        progressText: "北港航道首次被封锁。",
+      },
+    });
+
+    expect(parsed.worldActions).toHaveLength(1);
+    expect(parsed.activityEntries).toHaveLength(1);
+    expect(parsed.importantEventMutation?.operation).toBe("create");
+  });
+
+  it("emptyContinuousMeta 为世界动态提供空数组", () => {
+    expect(emptyContinuousMeta()).toMatchObject({
+      worldActions: [],
+      activityEntries: [],
+    });
+  });
+});

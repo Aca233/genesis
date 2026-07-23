@@ -5,6 +5,9 @@ const meta = JSON.stringify({
   suggestions: ["追问"],
   operation: "continue",
   immediate_changes: [],
+  world_actions: [],
+  activity_entries: [],
+  important_event_mutation: null,
   significant_event: false,
   settlement_reasons: [],
   ability_reveals: [],
@@ -31,6 +34,8 @@ describe("splitMetaBlock strict tail framing", () => {
         suggestions: [],
         operation: "continue",
         immediateChanges: [],
+        worldActions: [],
+        activityEntries: [],
         significantEvent: false,
         settlementReasons: [],
       },
@@ -120,6 +125,50 @@ describe("narrator quality contract", () => {
     const prompt = narratorGlobalSystem("pantheon");
     expect(prompt).toContain("Never mention, imply or suggest an ability absent from KNOWN ABILITIES. AUTHOR-ONLY entries may shape only their owner's manifested behavior");
     expect(prompt).toContain("Hidden chronicle entries, agendas and AUTHOR-ONLY abilities cannot leak through convenient intuition");
+  });
+
+  it("uses the same META for restrained autonomous world activity", () => {
+    const prompt = narratorGlobalSystem("pantheon");
+
+    expect(prompt).toContain("\"world_actions\":[]");
+    expect(prompt).toContain("\"activity_entries\":[]");
+    expect(prompt).toContain("\"important_event_mutation\":null");
+    expect(prompt).toContain("same single META");
+    expect(prompt).toContain("current prose, a supplied focused event, or recently supplied conflict");
+    expect(prompt).toContain("consequence is narrative evidence only");
+    expect(prompt).toContain("exact eventId supplied in the current context");
+    expect(prompt).toContain("Never manufacture unrelated news");
+  });
+
+  it("parses world activity from the one Narrator META block", () => {
+    const fullMeta = JSON.stringify({
+      suggestions: [],
+      operation: "continue",
+      immediate_changes: [],
+      world_actions: [{
+        actorType: "god",
+        actorId: "god-1",
+        action: "封锁北港",
+        targetIds: ["entity-1"],
+        visibility: "public",
+        consequence: "粮船滞留外海",
+      }],
+      activity_entries: [{
+        kind: "conflict",
+        text: "北港航道被封锁。",
+        subjectIds: ["god-1", "entity-1"],
+        visibility: "public",
+        importance: "normal",
+      }],
+      important_event_mutation: null,
+      significant_event: false,
+      settlement_reasons: [],
+    });
+
+    expect(splitMetaBlock(`正文\n<<<META\n${fullMeta}\nMETA>>>`).meta).toMatchObject({
+      worldActions: [{ actorId: "god-1" }],
+      activityEntries: [{ kind: "conflict" }],
+    });
   });
 });
 

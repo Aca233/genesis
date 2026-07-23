@@ -18,8 +18,13 @@ import {
   revealAbilityInTransaction,
   type AbilityMutationTx,
 } from "@/lib/abilities/mutations";
+import {
+  applyWorldActivityInTransaction,
+  type WorldActivityApplyTx,
+} from "@/lib/world-activity/apply";
 
-export type NarrationFinalizationTx = Omit<AbilityMutationTx, "message" | "ability"> & {
+export type NarrationFinalizationTx = Omit<AbilityMutationTx, "message" | "ability">
+  & WorldActivityApplyTx & {
   world: {
     findUnique(args: {
       where: { id: string };
@@ -56,6 +61,10 @@ export type NarrationFinalizationTx = Omit<AbilityMutationTx, "message" | "abili
       meta?: unknown;
     } | null>;
     create(args: { data: Record<string, unknown> }): Promise<{ id: string }>;
+    update(args: {
+      where: { id: string };
+      data: { meta: Prisma.InputJsonValue };
+    }): Promise<unknown>;
     count(args: {
       where: { chapterId: string; role: string };
     }): Promise<number>;
@@ -118,6 +127,7 @@ export async function finalizeNarration(
     meta: NarratorMeta;
     scale: Scale;
     signal?: AbortSignal;
+    allowedEventIds?: readonly string[];
     logInvalidReveal?: (details: { abilityId: string; generationId: string }) => void;
   },
 ): Promise<GenerationCompletion & { reused: boolean }> {
@@ -271,6 +281,27 @@ export async function finalizeNarration(
         variants: [{ content: input.prose, meta: effectiveMeta, chosen: true }] as Prisma.InputJsonValue,
         meta: {
           ...effectiveMeta,
+          settlementRequired: settlement.required,
+          settlementReasons: settlement.reasons,
+          ...(input.requestMeta ? { generationRequest: input.requestMeta } : {}),
+        } as unknown as Prisma.InputJsonValue,
+      },
+    });
+    checkCancelled();
+
+    const activityApply = await applyWorldActivityInTransaction(tx, {
+      timelineId: input.timelineId,
+      generationId: input.generationId,
+      sourceMessageId: saved.id,
+      meta: effectiveMeta,
+      allowedEventIds: input.allowedEventIds,
+    });
+    await tx.message.update({
+      where: { id: saved.id },
+      data: {
+        meta: {
+          ...effectiveMeta,
+          activityApply,
           settlementRequired: settlement.required,
           settlementReasons: settlement.reasons,
           ...(input.requestMeta ? { generationRequest: input.requestMeta } : {}),

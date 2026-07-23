@@ -40,6 +40,32 @@ function fixture() {
         return row;
       }),
       count: vi.fn().mockResolvedValue(0),
+      update: vi.fn(async ({ where, data }: {
+        where: { id: string };
+        data: Record<string, unknown>;
+      }) => {
+        const row = { ...state.messages.get(where.id), ...data };
+        state.messages.set(where.id, row);
+        return row;
+      }),
+    },
+    timeline: {
+      findUnique: vi.fn().mockResolvedValue({
+        id: "timeline-1",
+        realityState: { currentEra: "潮汐纪元" },
+        observerState: { timeLabel: "第七日" },
+        gods: [{ id: "god-1" }],
+        entities: [{ id: "entity-1" }],
+        worldEvents: [],
+      }),
+    },
+    worldActivity: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({}),
+    },
+    worldEvent: {
+      create: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
     },
     ability: { findFirst: vi.fn() },
     chronicleEntry: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
@@ -89,6 +115,8 @@ const base = {
     suggestions: [],
     operation: "continue" as const,
     immediateChanges: [],
+    worldActions: [],
+    activityEntries: [],
     significantEvent: false,
     settlementReasons: [],
     revealedEventIds: ["chronicle-1"],
@@ -218,6 +246,48 @@ describe("finalizeNarration", () => {
       }),
     });
   });
+  it("在正文事务中写入世界动态并把接受计数留在 Narrator 私有 meta", async () => {
+    const { client, tx } = fixture();
+    tx.ability.findFirst.mockResolvedValue(null);
+
+    await finalizeNarration(client as never, {
+      ...base,
+      meta: {
+        ...base.meta,
+        abilityReveals: [],
+        worldActions: [{
+          actorType: "god",
+          actorId: "god-1",
+          action: "命令守军封锁北港",
+          targetIds: ["entity-1"],
+          visibility: "public",
+          consequence: "航道受阻",
+        }],
+        activityEntries: [],
+      },
+    });
+
+    expect(tx.worldActivity.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        id: "activity:generation-1:action:0",
+        sourceMessageId: "generation-1",
+      }),
+    });
+    expect(tx.message.update).toHaveBeenCalledWith({
+      where: { id: "generation-1" },
+      data: {
+        meta: expect.objectContaining({
+          activityApply: {
+            acceptedActions: 1,
+            rejectedActions: 0,
+            acceptedActivities: 0,
+            rejectedActivities: 0,
+            eventMutationAccepted: false,
+          },
+        }),
+      },
+    });
+  });
   it("creator 追溯意图创建任务且不写源现实消息", async () => {
     const { client, tx } = fixture();
     tx.world.findUnique.mockResolvedValue({
@@ -231,6 +301,8 @@ describe("finalizeNarration", () => {
         suggestions: [],
         operation: "retroactive_rewrite",
         immediateChanges: [],
+        worldActions: [],
+        activityEntries: [],
         significantEvent: true,
         settlementReasons: ["major_event"],
       },
@@ -241,6 +313,7 @@ describe("finalizeNarration", () => {
       followUp: { kind: "rewrite", taskId: "rewrite-1" },
     });
     expect(tx.message.create).not.toHaveBeenCalled();
+    expect(tx.worldActivity.create).not.toHaveBeenCalled();
     expect(tx.realityRewrite.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         decree: "神谕",
@@ -275,6 +348,8 @@ describe("reveal merge/no-op", () => {
         suggestions: [],
         operation: "continue",
         immediateChanges: [],
+        worldActions: [],
+        activityEntries: [],
         significantEvent: false,
         settlementReasons: [],
         abilityReveals: [
@@ -299,6 +374,8 @@ describe("reveal merge/no-op", () => {
         suggestions: [],
         operation: "continue",
         immediateChanges: [],
+        worldActions: [],
+        activityEntries: [],
         significantEvent: false,
         settlementReasons: [],
         abilityReveals: [{ abilityId: "ability-1", visibility: "rumored", evidence: "旧闻" }],
