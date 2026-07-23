@@ -123,12 +123,12 @@ function lorebookBlock(
   return `LOREBOOK (authoritative over your own knowledge on any conflict):\n\n${hits.join("\n---\n")}`;
 }
 
-/** 正文窗口：从旧到新拼接；玩家消息前缀【玩家神谕】；超预算从最旧裁剪 */
+/** 正文窗口：从旧到新拼接；玩家消息带模式前缀；超预算从最旧裁剪 */
 function proseWindow(
   messages: { role: string; content: string }[],
   mode: WorldMode,
 ): string {
-  const label = mode === "creator" ? "【天外观测】" : "【玩家神谕】";
+  const label = mode === "creator" ? "【创世主意图】" : "【玩家神谕】";
   const lines = messages.map((m) =>
     m.role === "player" ? `${label}${m.content}` : m.content,
   );
@@ -237,7 +237,7 @@ async function entityCardsBlock(
           })
           .join("\n")
       : "";
-    const card = `--- ${e.name}(${e.type})${e.isChosen ? "【神选者】" : ""}${e.scenePresence ? "【在场】" : ""} ---\n${e.summary}${secs ? `\n${secs}` : ""}`;
+    const card = `--- ${e.name} [${e.id}] (${e.type})${e.isChosen ? "【神选者】" : ""}${e.scenePresence ? "【在场】" : ""} ---\n${e.summary}${secs ? `\n${secs}` : ""}`;
     if (used + card.length > BUDGET) break;
     blocks.push(card);
     used += card.length;
@@ -274,7 +274,7 @@ async function chronicleBlock(
   const merged = [...new Map([...related, ...recent].map((c) => [c.id, c])).values()];
   if (!merged.length) return null;
   return `CHRONICLE (what history records so far):\n${merged
-    .map((c) => `[${c.yearLabel || `第${c.chapterIndex}章`}] ${c.text}`)
+    .map((c) => c.yearLabel ? `[${c.yearLabel}] ${c.text}` : c.text)
     .join("\n")}`;
 }
 
@@ -362,6 +362,17 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage
   const turnSystem = narratorTurnSystem({
     mode,
     scale: opts.scale,
+    playerInput: opts.playerInput,
+    temporal: {
+      era: reality?.currentEra
+        ?? ((world.draftDeck && typeof world.draftDeck === "object"
+          ? (world.draftDeck as { epochConflict?: { epochName?: string } }).epochConflict?.epochName
+          : undefined) || "未名纪元"),
+      time: observer?.timeLabel
+        ?? ((world.draftDeck && typeof world.draftDeck === "object"
+          ? (world.draftDeck as { epochConflict?: { yearLabel?: string } }).epochConflict?.yearLabel
+          : undefined) || "此刻"),
+    },
     omens: omens.texts,
     hiddenEntries: mode === "pantheon"
       ? hiddenEntries.map((entry) => ({ id: entry.id, text: entry.text, godName: "godName" in entry ? entry.godName : "未知" }))
@@ -407,7 +418,7 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
     parts.push(`[Story so far — oldest to newest]\n\n${windowText}`);
   }
   if (opts.mode === "say") {
-    parts.push(`${mode === "creator" ? "【天外观测】" : "【玩家神谕】"}${opts.playerInput ?? ""}`);
+    parts.push(`${mode === "creator" ? "【创世主意图】" : "【玩家神谕】"}${opts.playerInput ?? ""}`);
   } else if (opts.mode === "continue") {
     parts.push(
       `(幕后导演提示，不作为剧情输入): ${opts.directive?.trim() || "继续叙事，顺势推进。"}`,

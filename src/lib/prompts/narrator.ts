@@ -1,5 +1,10 @@
 import type { Scale } from "@/lib/cards/schemas";
 import type { WorldMode } from "@/lib/world-mode";
+import {
+  ContinuousNarratorMetaSchema,
+  emptyContinuousMeta,
+  type ContinuousNarratorMeta,
+} from "@/lib/chat/continuous-meta";
 import { findMetaTailFrame } from "./meta-framing";
 
 /**
@@ -13,20 +18,7 @@ export const META_START = "<<<META";
 export const META_END = "META>>>";
 
 /** 尾部结构化块 */
-export type NarratorMeta = {
-  suggestions: string[];
-  chapterBreakHint: boolean;
-  /** 查探裁决：本轮揭示的隐藏大事记 id */
-  revealedEventIds?: string[];
-  /** 本轮由清楚见证或合理调查支持的能力可见性揭示 */
-  abilityReveals?: Array<{
-    abilityId: string;
-    visibility: "rumored" | "known";
-    evidence: string;
-  }>;
-};
-
-const EMPTY_META: NarratorMeta = { suggestions: [], chapterBreakHint: false };
+export type NarratorMeta = ContinuousNarratorMeta;
 
 /**
  * 从模型全量输出中剥离 META 块。
@@ -34,51 +26,28 @@ const EMPTY_META: NarratorMeta = { suggestions: [], chapterBreakHint: false };
  */
 export function splitMetaBlock(full: string): { prose: string; meta: NarratorMeta } {
   const framed = findMetaTailFrame(full);
-  if (!framed) return { prose: full.trim(), meta: EMPTY_META };
+  if (!framed) return { prose: full.trim(), meta: emptyContinuousMeta() };
 
   const prose = full.slice(0, framed.start).trim();
   const block = framed.body;
 
   try {
     const json = JSON.parse(block) as Record<string, unknown>;
-    const suggestions = Array.isArray(json.suggestions)
-      ? json.suggestions
-          .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
-          .slice(0, 4)
-      : [];
-    const revealedEventIds = Array.isArray(json.revealed_event_ids)
-      ? json.revealed_event_ids.filter((s): s is string => typeof s === "string")
-      : undefined;
-    const abilityReveals = Array.isArray(json.ability_reveals)
-      ? json.ability_reveals.flatMap((item) => {
-          if (!item || typeof item !== "object") return [];
-          const reveal = item as Record<string, unknown>;
-          if (
-            typeof reveal.abilityId !== "string" ||
-            (reveal.visibility !== "rumored" && reveal.visibility !== "known") ||
-            typeof reveal.evidence !== "string" ||
-            reveal.evidence.trim().length === 0
-          ) {
-            return [];
-          }
-          return [{
-            abilityId: reveal.abilityId,
-            visibility: reveal.visibility as "rumored" | "known",
-            evidence: reveal.evidence.trim(),
-          }];
-        })
-      : undefined;
-    return {
-      prose,
-      meta: {
-        suggestions,
-        chapterBreakHint: json.chapterBreakHint === true,
-        ...(revealedEventIds?.length ? { revealedEventIds } : {}),
-        ...(abilityReveals?.length ? { abilityReveals } : {}),
-      },
-    };
+    const parsed = ContinuousNarratorMetaSchema.safeParse({
+      suggestions: json.suggestions,
+      operation: json.operation,
+      temporalState: json.temporal_state,
+      immediateChanges: json.immediate_changes,
+      significantEvent: json.significant_event,
+      settlementReasons: json.settlement_reasons,
+      revealedEventIds: json.revealed_event_ids,
+      abilityReveals: json.ability_reveals,
+    });
+    return parsed.success
+      ? { prose, meta: parsed.data }
+      : { prose: full.trim(), meta: emptyContinuousMeta() };
   } catch {
-    return { prose: full.trim(), meta: EMPTY_META };
+    return { prose: full.trim(), meta: emptyContinuousMeta() };
   }
 }
 
@@ -96,12 +65,14 @@ const SCALE_RULES: Record<Scale, string> = {
 
 function agencyRules(mode: WorldMode): string {
   if (mode === "creator") {
-    return `CREATOR OBSERVATION BOUNDARY:
-- The player is the world-external Creator and omniscient observer. Their input arrives prefixed 【天外观测】. The second-person 你 addresses that world-external observer, never a person or god inside the world.
-- An ordinary OBSERVATION REQUEST controls focus, time span, and what to show, including viewpoint; it does not itself rewrite established facts, cause an in-world action, or authorize a reality change.
+    return `UNIFIED CREATOR INTENT:
+- The player is the world-external Creator and omniscient observer. Their input arrives prefixed 【创世主意图】. The second-person 你 addresses that world-external observer, never a person or god inside the world.
+- Treat every input as one unified intent. It may request observation, focus, an ordinary world action, movement into the future, a new fact established from the current moment onward, or a change to already-established history.
+- Output operation "continue" for observation, ordinary action, future advance, and facts established from now onward. Output "retroactive_rewrite" only when the intent overturns, replaces, or reconstructs already-established history.
+- Classification is silent. Never ask the player to choose an operation, rewrite scope, or confirmation.
 - Never invent a body, god-card, worship, rank, limitation, or in-world identity for the Creator. Do not stage their arrival, incarnation, voice, miracle, cult, or physical action.
-- World-internal characters do not know the Creator exists unless an established fact explicitly says so. They cannot perceive an observation request or respond to it.
-- Render the requested focus and let the world proceed from established causes. When another meaningful observation would help, end on an unfolding world-internal beat without asking an in-world character to await the Creator.`;
+- World-internal characters do not know the Creator exists unless an established fact explicitly says so. They cannot perceive the Creator's instruction or respond to it.
+- For "continue", render the requested focus and let the world proceed from established causes. For "retroactive_rewrite", write a concise preview that will not be persisted in the source reality; the rewrite system will author the canonical result in the fork.`;
   }
   return `PLAYER AGENCY BOUNDARY:
 - Treat only the player's explicitly supplied words, actions and intent as authorized. You may render how those authorized actions unfold and how the world responds.
@@ -111,14 +82,12 @@ function agencyRules(mode: WorldMode): string {
 
 function coreRules(worldName: string, mode: WorldMode): string {
   const identity = mode === "creator"
-    ? `- The player is outside this world. Their input is an observation request, not dialogue, divine action, or a new fact.`
+    ? `- The player is outside this world. Their input is a unified Creator intent, never dialogue or an in-world divine action.`
     : `- The player IS a god of this world. Their input arrives prefixed 【玩家神谕】. The second-person 你 always addresses that player god on the divine plane; never recast them as a mortal, infant, reincarnation or unrelated character.`;
   const autonomy = mode === "creator"
     ? `- The world does not orbit the observer. Mortals and gods pursue their own goals and consequences unfold from world-internal causes, whether or not the Creator watches.`
     : `- The world does not orbit the player. NPCs, peoples and gods pursue their own goals; consequences unfold whether or not the player watches. Do not make them automatically admire, agree with, obey or hate the player god.`;
-  const scaleRule = mode === "creator"
-    ? `- Follow the CURRENT SCALE strictly. If an explicitly supplied intent requires a wider span, execute only that authorized intent faithfully, then add one gentle in-fiction-compatible scale reminder before META; never force a scale change.`
-    : `- Follow the CURRENT SCALE strictly. If an explicitly supplied action requires a wider span, execute only that authorized intent faithfully, then add one gentle in-fiction-compatible scale reminder before META; never force a scale change.`;
+  const scaleRule = `- CURRENT SCALE is the default span only. Explicit time wording in the current player input overrides it for this reply only. Never mention a conflict, ask for confirmation, or instruct the player to move the dial.`;
   const abilityBoundary = mode === "creator"
     ? `- Never mention, imply or suggest an ability absent from KNOWN ABILITIES or AUTHOR-ONLY ABILITIES. AUTHOR-ONLY entries may shape manifested behavior and omniscient narration, but their mechanics cannot enter a world-internal character's knowledge before valid discovery.`
     : `- Never mention, imply or suggest an ability absent from KNOWN ABILITIES. AUTHOR-ONLY entries may shape only their owner's manifested behavior; never expose their mechanics through narration or another character before valid revelation.`;
@@ -126,7 +95,7 @@ function coreRules(worldName: string, mode: WorldMode): string {
     ? `- Narrator knowledge is not character knowledge. Hidden chronicle entries, agendas and AUTHOR-ONLY abilities may inform omniscient narration but cannot leak through convenient intuition, unexplained certainty or another character's dialogue.`
     : `- Narrator knowledge is not character knowledge. Hidden chronicle entries, agendas and AUTHOR-ONLY abilities cannot leak through convenient intuition, unexplained certainty or another character's dialogue.`;
   const preflight = mode === "creator"
-    ? `- Silently verify observation boundaries, each character's knowledge source, ability limits, causal/time continuity, voice-card distinction, current scale and output framing before answering.`
+    ? `- Silently verify Creator boundaries, operation classification, each character's knowledge source, ability limits, causal/time continuity, voice-card distinction, current scale and output framing before answering.`
     : `- Silently verify player agency, each character's knowledge source, ability limits, causal/time continuity, voice-card distinction, current scale and output framing before answering.`;
   return `You are the Chronicler — the narrative engine of the god-roleplay world "${worldName}". You render everything on stage: mortals, gods, omens, the turning of ages.
 
@@ -176,7 +145,7 @@ function section(title: string, value: unknown): string {
 
 function outputContract(mode: WorldMode): string {
   const suggestions = mode === "creator"
-    ? "Suggest only observation, focus, viewpoint, or time-advance choices at the unresolved world-internal beat; never phrase them as player-god actions, reality rewrites, or outcomes already achieved."
+    ? "Suggest observation, focus, viewpoint, ordinary world action, or time-advance choices at the unresolved world-internal beat; never expose internal operation names or state an outcome as already achieved."
     : "Suggest only actions or attitudes the player god may choose at the unresolved beat; never add unprovided abilities, decide for the player, and never state the outcome as already achieved.";
   const revealedEvents = mode === "creator"
     ? "ids of hidden chronicle entries revealed through an explicit in-world investigation adjudication; creator observations must omit or use []."
@@ -184,9 +153,14 @@ function outputContract(mode: WorldMode): string {
   return `OUTPUT CONTRACT (strict):
 1) Write the narrative prose in Chinese.
 2) After the prose, on a NEW line, output exactly: ${META_START}
-3) Then output ONE JSON object: {"suggestions": ["…", "…"], "chapterBreakHint": false, "revealed_event_ids": [], "ability_reveals": []}
+3) Then output ONE JSON object:
+{"suggestions":["…","…"],"operation":"continue","temporal_state":{"era":"…","time":"…"},"immediate_changes":[],"significant_event":false,"settlement_reasons":[],"revealed_event_ids":[],"ability_reveals":[]}
    - suggestions: 2-4 SHORT Chinese options. ${suggestions}
-   - chapterBreakHint: true ONLY when a major scene shift or large time jump makes this a natural chapter break; otherwise false.
+   - operation: ${mode === "creator" ? `"continue" or "retroactive_rewrite" under UNIFIED CREATOR INTENT.` : `always "continue"; this mode cannot rewrite established history.`}
+   - temporal_state: omit unless era or time truly changed. Either field may be supplied alone. Use free-form in-world Chinese labels.
+   - immediate_changes: only low-risk changes supported by supplied exact ids: set_observer_focus, set_scene_presence, set_active_avatar, or set_entity_section. Use [] when none.
+   - significant_event: true only for a change needing full world settlement.
+   - settlement_reasons: zero or more of major_event, ability_change, important_death, faction_change, rank_change, identity_change, relation_restructure, era_change, multi_entity_change.
    - revealed_event_ids: ${revealedEvents}
    - ability_reveals: only abilities clearly witnessed in this prose or supported by a reasonable investigation. Each item is {"abilityId":"exact supplied id","visibility":"rumored|known","evidence":"concise Chinese evidence from this reply"}. Use rumored for indirect signs and known for clear manifestation; otherwise omit or [].
 4) Close with a final line: ${META_END}
@@ -242,10 +216,21 @@ export function narratorWorldSystem(opts: NarratorWorldOptions): string {
 export function narratorTurnSystem(opts: {
   mode: WorldMode;
   scale: Scale;
+  playerInput?: string;
+  temporal?: { era: string; time: string };
   omens?: string[];
   hiddenEntries?: { id: string; text: string; godName: string }[];
 }): string {
   const blocks = [`== CURRENT SCALE ==\n${SCALE_RULES[opts.scale]}`];
+  if (opts.temporal) {
+    blocks.push(`== CURRENT WORLD TIME ==
+Era: ${opts.temporal.era}
+Time: ${opts.temporal.time}
+The dial is the default span. Any explicit time wording in the current player input overrides the dial for this reply only and must not change the dial itself. Never report or ask about a conflict.`);
+  }
+  if (opts.playerInput?.trim()) {
+    blocks.push(`== CURRENT PLAYER WORDING (for time-span adjudication) ==\n${opts.playerInput.trim()}`);
+  }
   if (opts.omens?.length) {
     blocks.push(`== PENDING OMENS (offstage divine actions' worldly echoes) ==
 Weave AT MOST 1-2 of these into your reply as passing, unexplained details. NEVER flag or explain them:
@@ -272,7 +257,7 @@ export function narratorSystem(opts: NarratorWorldOptions & {
   ].join("\n\n");
 }
 
-// ───────────────────────── 第一章开场变体 ─────────────────────────
+// ───────────────────────── 开场变体 ─────────────────────────
 
 /**
  * 开局第一章导演提示（docs/04 §7）：以创世/降临场景开场，
@@ -280,7 +265,7 @@ export function narratorSystem(opts: NarratorWorldOptions & {
  */
 export function openingDirective(mode: WorldMode): string {
   if (mode === "creator") {
-    return `(Director's note, not in-fiction input): This is the very FIRST passage of Chapter One. Open on a broad tableau of the world in its present era, then move into the most immediate world-internal conflict among its gods, peoples, factions, or characters. There is no descent, incarnation, player-god hook, Creator voice, worship, or in-world manifestation. End on an unfolding world-internal tension and offer observation/focus choices. Chinese prose; the current scale applies.`;
+    return `(Director's note, not in-fiction input): This is the first passage of this world's recorded history. Open on a broad tableau of the world in its present era, then move into the most immediate world-internal conflict among its gods, peoples, factions, or characters. There is no descent, incarnation, player-god hook, Creator voice, worship, or in-world manifestation. End on an unfolding world-internal tension and offer observation/focus choices. Chinese prose; the current scale applies.`;
   }
-  return `(Director's note, not in-fiction input): This is the very FIRST passage of Chapter One. Open with a genesis / descent set-piece: echo the player's primordial decree and the player god's starting situation, unveil the world at its present hour, and plant the opening hooks drawn from the player god's situation and the pantheon's visible tensions. End at a moment that invites the player god's first act. Do NOT act or speak for the player god. Chinese prose; the current scale applies.`;
+  return `(Director's note, not in-fiction input): This is the first passage of this world's recorded history. Open with a genesis / descent set-piece: echo the player's primordial decree and the player god's starting situation, unveil the world at its present hour, and plant the opening hooks drawn from the player god's situation and the pantheon's visible tensions. End at a moment that invites the player god's first act. Do NOT act or speak for the player god. Chinese prose; the current scale applies.`;
 }

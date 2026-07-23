@@ -3,7 +3,10 @@ import { splitMetaBlock } from "./narrator";
 
 const meta = JSON.stringify({
   suggestions: ["追问"],
-  chapterBreakHint: false,
+  operation: "continue",
+  immediate_changes: [],
+  significant_event: false,
+  settlement_reasons: [],
   ability_reveals: [],
 });
 
@@ -24,7 +27,13 @@ describe("splitMetaBlock strict tail framing", () => {
   ])("不吞掉非完整尾部块：%s", (full) => {
     expect(splitMetaBlock(full)).toEqual({
       prose: full.trim(),
-      meta: { suggestions: [], chapterBreakHint: false },
+      meta: {
+        suggestions: [],
+        operation: "continue",
+        immediateChanges: [],
+        significantEvent: false,
+        settlementReasons: [],
+      },
     });
   });
 });
@@ -115,23 +124,37 @@ describe("narrator quality contract", () => {
 });
 
 
-describe("creator observation narration contract", () => {
-  it("treats the player as a world-external observer whose ordinary requests cannot rewrite facts", () => {
+describe("creator unified narration contract", () => {
+  it("treats the player as world-external while classifying every input in one channel", () => {
     const prompt = narratorGlobalSystem("creator");
 
     expect(prompt).toContain("world-external Creator");
-    expect(prompt).toContain("OBSERVATION REQUEST");
-    expect(prompt).toContain("focus, time span, and what to show");
-    expect(prompt).toContain("does not itself rewrite established facts");
+    expect(prompt).toContain("UNIFIED CREATOR INTENT");
+    expect(prompt).toContain("retroactive_rewrite");
+    expect(prompt).toContain("already-established history");
     expect(prompt).toContain("Never invent a body, god-card, worship, rank, limitation, or in-world identity");
     expect(prompt).toContain("World-internal characters do not know the Creator exists");
     expect(prompt).not.toContain("The player IS a god of this world");
   });
 
+  it("uses explicit time wording for one reply without changing the dial", () => {
+    const prompt = narratorTurnSystem({
+      mode: "creator",
+      scale: "scene",
+      playerInput: "百年之后再看这里",
+      temporal: { era: "黑潮纪元", time: "帝历三百二十七年" },
+    });
+
+    expect(prompt).toContain("explicit time wording");
+    expect(prompt).toContain("overrides the dial for this reply only");
+    expect(prompt).toContain("must not change the dial");
+    expect(prompt).toContain("百年之后再看这里");
+  });
+
   it("offers observation choices rather than player-god actions and preserves reveal provenance", () => {
     const prompt = narratorGlobalSystem("creator");
 
-    expect(prompt).toContain("observation, focus, viewpoint, or time-advance choices");
+    expect(prompt).toContain("observation, focus, viewpoint, ordinary world action, or time-advance choices");
     expect(prompt).not.toContain("actions or attitudes the player god may choose");
     expect(prompt).toContain("ability_reveals");
     expect(prompt).toContain("clearly witnessed");
@@ -143,6 +166,7 @@ describe("creator observation narration contract", () => {
 
     expect(creator).toContain("present era");
     expect(creator).toContain("world-internal tension");
+    expect(creator).not.toContain("Chapter One");
     expect(creator).toContain("no descent");
     expect(creator).not.toContain("player god's starting situation");
     expect(pantheon).toContain("genesis / descent set-piece");

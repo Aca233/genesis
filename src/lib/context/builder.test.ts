@@ -85,7 +85,7 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     expect(mocks.prisma.chronicleEntry.findMany).not.toHaveBeenCalled();
   });
 
-  it("uses creator reality/observer state, full author-only knowledge, and observation labels", async () => {
+  it("uses creator reality/observer state, full author-only knowledge, and unified intent labels", async () => {
     const deck = completeCreatorDeck();
     const reality = {
       ...initialRealityState(deck),
@@ -147,7 +147,7 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     expect(systems).toContain("潮神已凿穿海堤");
     expect(systems).toContain("AUTHOR-ONLY");
     expect(systems).not.toContain("INVESTIGATION ADJUDICATION");
-    expect(user).toContain("【天外观测】追查潮神");
+    expect(user).toContain("【创世主意图】追查潮神");
     expect(user).not.toContain("【玩家神谕】");
     expect(mocks.buildAbilityContext).toHaveBeenCalledWith(expect.objectContaining({
       timelineId: "timeline-1", viewer: "creator_author",
