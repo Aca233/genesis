@@ -267,7 +267,19 @@ const WorldEventSchema = z
     updatedAt: z.coerce.date().optional(),
     resolvedAt: z.coerce.date().nullish(),
   })
-  .strict();
+  .strict()
+  .superRefine((event, context) => {
+    const isResolved = event.phase === "resolved";
+    const hasResolvedAt = event.resolvedAt != null;
+    if (isResolved === hasResolvedAt) return;
+    context.addIssue({
+      code: "custom",
+      path: ["resolvedAt"],
+      message: isResolved
+        ? "已解决事件必须提供 resolvedAt"
+        : "未解决事件不能提供 resolvedAt",
+    });
+  });
 
 const WorldActivitySchema = z
   .object({

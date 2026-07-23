@@ -105,6 +105,13 @@ export type SettlementActivityTx = {
       where: { id: string };
       data: Record<string, unknown>;
     }): Promise<unknown>;
+    updateMany(args: {
+      where: {
+        timelineId: string;
+        originActivityId: { in: string[] };
+      };
+      data: { originActivityId: string };
+    }): Promise<{ count: number }>;
   };
 };
 
@@ -355,6 +362,7 @@ export async function applySettlementActivity(
     .filter((row): row is SettlementActivityRow => row !== undefined);
   if (mergeRows.length > 1) {
     const canonical = mergeRows[0]!;
+    const duplicateIds = mergeRows.slice(1).map((row) => row.id);
     const linkedEventId = mergeRows
       .map((row) => linkedEvents.get(row.id) ?? row.eventId)
       .find((eventId): eventId is string => eventId !== null && eventId !== undefined);
@@ -364,9 +372,16 @@ export async function applySettlementActivity(
         data: { eventId: linkedEventId },
       });
     }
+    await tx.worldEvent.updateMany({
+      where: {
+        timelineId: input.timelineId,
+        originActivityId: { in: duplicateIds },
+      },
+      data: { originActivityId: canonical.id },
+    });
     await tx.worldActivity.deleteMany({
       where: {
-        id: { in: mergeRows.slice(1).map((row) => row.id) },
+        id: { in: duplicateIds },
         timelineId: input.timelineId,
       },
     });

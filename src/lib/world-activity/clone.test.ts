@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { remapWorldActivityGraph } from "./clone";
+import {
+  assertWorldEventParentAcyclic,
+  remapWorldActivityGraph,
+} from "./clone";
 
 describe("remapWorldActivityGraph", () => {
   it("重映射事件、父事件、动态、参与者、来源消息和关注事件", () => {
@@ -161,5 +164,12 @@ describe("remapWorldActivityGraph", () => {
       god: new Map(),
       entity: new Map(),
     }, "timeline-clone")).toThrow(/entity-missing/);
+  });
+
+  it("复制前拒绝父事件循环", () => {
+    expect(() => assertWorldEventParentAcyclic([
+      { id: "event-a", parentEventId: "event-b" },
+      { id: "event-b", parentEventId: "event-a" },
+    ])).toThrow(/父链不得形成循环/);
   });
 });

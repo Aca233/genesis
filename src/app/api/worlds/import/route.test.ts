@@ -1252,6 +1252,27 @@ describe("存档导入", () => {
   });
 
   it.each([
+    ["resolved phase without resolvedAt", "resolved", null],
+    ["unresolved phase with resolvedAt", "escalating", "2026-07-22T00:03:00.000Z"],
+  ])("version 4 拒绝 phase/resolvedAt 不一致：%s", async (
+    _label,
+    phase,
+    resolvedAt,
+  ) => {
+    const archive = versionFourArchive();
+    const event = (archive.world.timelines[0] as unknown as {
+      worldEvents: Array<Record<string, unknown>>;
+    }).worldEvents[0];
+    event.phase = phase;
+    event.resolvedAt = resolvedAt;
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ["参与者", (archive: ReturnType<typeof versionFourArchive>) => {
       (archive.world.timelines[0] as unknown as {
         worldEvents: Array<Record<string, unknown>>;

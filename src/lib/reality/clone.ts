@@ -1,5 +1,8 @@
 import { Prisma } from "@prisma/client";
-import { remapWorldActivityGraph } from "@/lib/world-activity/clone";
+import {
+  assertWorldEventParentAcyclic,
+  remapWorldActivityGraph,
+} from "@/lib/world-activity/clone";
 
 const RESERVED_GOD_RELATION_KEYS = new Set(["player"]);
 
@@ -234,6 +237,7 @@ export async function cloneTimelineGraph(
   if (source.worldId !== input.worldId) {
     throw new Error(`源时间线不属于目标世界：${input.sourceTimelineId}`);
   }
+  assertWorldEventParentAcyclic(source.worldEvents);
 
   const rewrite = await tx.realityRewrite.findUniqueOrThrow({
     where: { id: input.rewriteId },

@@ -155,6 +155,25 @@ function fixture() {
         eventRows.set(where.id, next);
         return next;
       }),
+      updateMany: vi.fn(async ({ where, data }) => {
+        const originActivityIds = new Set(where.originActivityId.in);
+        let count = 0;
+        for (const [id, row] of eventRows) {
+          if (
+            row.timelineId !== where.timelineId
+            || row.originActivityId === null
+            || !originActivityIds.has(row.originActivityId)
+          ) {
+            continue;
+          }
+          eventRows.set(id, {
+            ...row,
+            ...data,
+          } as SettlementEventRow);
+          count += 1;
+        }
+        return { count };
+      }),
     },
   };
   return {
@@ -259,6 +278,57 @@ describe("applySettlementActivity", () => {
       resolvedAt: expect.any(Date),
     });
     expect(observer().focusedEventId).toBeNull();
+  });
+
+  it("合并动态前把所有事件来源重写到保留动态", async () => {
+    const { tx, activityRows, eventRows } = fixture();
+    eventRows.set("event-from-duplicate", {
+      id: "event-from-duplicate",
+      timelineId: "timeline-1",
+      kind: "conspiracy",
+      title: "盐商暗盟",
+      summary: "暗盟源自第二条重复动态。",
+      phase: "emerging",
+      visibility: "hidden",
+      participantIds: ["entity-port"],
+      originMessageId: "message-b",
+      originActivityId: "activity-b",
+      latestMessageId: "message-b",
+      parentEventId: null,
+      resolvedAt: null,
+    });
+
+    await applySettlementActivity(tx, {
+      timelineId: "timeline-1",
+      chapterId: "chapter-origin-rewrite",
+      sourceMessageId: "message-current",
+      worldActivity: {
+        mergeActivityIds: ["activity-a", "activity-b"],
+        eventMutations: [{
+          operation: "create",
+          sourceActivityIds: ["activity-b", "activity-a"],
+          kind: "war",
+          title: "盐路之战",
+          summary: "第二条动态先被选为事件来源。",
+          phase: "escalating",
+          participantIds: ["entity-port"],
+          visibility: "public",
+        }],
+      },
+    });
+
+    expect(activityRows.has("activity-b")).toBe(false);
+    expect(eventRows.get("event-from-duplicate")?.originActivityId).toBe("activity-a");
+    expect(
+      eventRows.get("settlement:chapter-origin-rewrite:0")?.originActivityId,
+    ).toBe("activity-a");
+    expect(tx.worldEvent.updateMany).toHaveBeenCalledWith({
+      where: {
+        timelineId: "timeline-1",
+        originActivityId: { in: ["activity-b"] },
+      },
+      data: { originActivityId: "activity-a" },
+    });
   });
 
   it("派生事件保留父事件引用并使用稳定 ID", async () => {

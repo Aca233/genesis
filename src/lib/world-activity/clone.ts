@@ -49,6 +49,23 @@ type WorldActivityGraph = {
   observerState: Prisma.JsonValue | null;
 };
 
+export function assertWorldEventParentAcyclic(
+  events: readonly Pick<WorldEventCloneRow, "id" | "parentEventId">[],
+): void {
+  const parentByEventId = new Map(events.map((event) => [event.id, event.parentEventId]));
+  for (const event of events) {
+    const visited = new Set<string>([event.id]);
+    let parentEventId = event.parentEventId;
+    while (parentEventId !== null) {
+      if (visited.has(parentEventId)) {
+        throw new Error("世界事件父链不得形成循环");
+      }
+      visited.add(parentEventId);
+      parentEventId = parentByEventId.get(parentEventId) ?? null;
+    }
+  }
+}
+
 function requireMapped(
   map: ReadonlyMap<string, string>,
   sourceId: string,
