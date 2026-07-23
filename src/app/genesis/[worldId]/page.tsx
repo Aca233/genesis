@@ -88,6 +88,7 @@ export default function GenesisEditorPage({
 
   // ── 演出状态 ──
   const [ceremony, setCeremony] = useState<EmbarkState | null>(null);
+  const [openingRetry, setOpeningRetry] = useState(false);
   const embarkOnce = useRef(false);
   const embarkFlow = useRef<ReturnType<typeof createEmbarkFlow> | null>(null);
 
@@ -277,9 +278,11 @@ export default function GenesisEditorPage({
       await (embarkFlow.current.materialized
         ? embarkFlow.current.retryOpening()
         : embarkFlow.current.start());
+      setOpeningRetry(false);
       setCeremony({ phase: "done" });
     } catch (err) {
       embarkOnce.current = false;
+      setOpeningRetry(Boolean(embarkFlow.current?.materialized));
       setCeremony({ phase: "error", message: String(err) });
       setNotice({
         ok: false,
@@ -658,7 +661,7 @@ export default function GenesisEditorPage({
                 onClick={embark}
                 className="rounded-md border border-cinnabar px-3 py-1 text-cinnabar transition hover:bg-cinnabar/10"
               >
-                {embarkFlow.current?.materialized ? "重试开篇" : "重试创世"}
+                {openingRetry ? "重试开篇" : "重试创世"}
               </button>
             )}
           </div>

@@ -27,7 +27,7 @@ export function MessageBlock({
   onSwitchVariant,
 }: {
   message: MessageRow;
-  /** 前章残页等只读展示 */
+  /** 已纳入历史检查点的只读展示 */
   readonly?: boolean;
   /** 全局生成中：禁用一切操作 */
   busy?: boolean;

@@ -244,7 +244,7 @@ async function assertTargetIdle(db: SwitchClient, timelineId: string, now: Date)
     }),
   ]);
   if (liveGenerationCount > 0 || settlingChapterCount > 0) {
-    throw new RealityConflictError("目标现实仍有叙事生成或章节结算进行中");
+    throw new RealityConflictError("目标现实仍有叙事生成或世界整理进行中");
   }
 }
 

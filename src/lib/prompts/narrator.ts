@@ -33,6 +33,16 @@ export function splitMetaBlock(full: string): { prose: string; meta: NarratorMet
 
   try {
     const json = JSON.parse(block) as Record<string, unknown>;
+    const abilityReveals = Array.isArray(json.ability_reveals)
+      ? json.ability_reveals.filter((item) => {
+          if (!item || typeof item !== "object") return false;
+          const reveal = item as Record<string, unknown>;
+          return typeof reveal.abilityId === "string"
+            && (reveal.visibility === "rumored" || reveal.visibility === "known")
+            && typeof reveal.evidence === "string"
+            && reveal.evidence.trim().length > 0;
+        })
+      : undefined;
     const parsed = ContinuousNarratorMetaSchema.safeParse({
       suggestions: json.suggestions,
       operation: json.operation,
@@ -41,7 +51,7 @@ export function splitMetaBlock(full: string): { prose: string; meta: NarratorMet
       significantEvent: json.significant_event,
       settlementReasons: json.settlement_reasons,
       revealedEventIds: json.revealed_event_ids,
-      abilityReveals: json.ability_reveals,
+      abilityReveals,
     });
     return parsed.success
       ? { prose, meta: parsed.data }

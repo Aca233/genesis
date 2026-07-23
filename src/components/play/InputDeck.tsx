@@ -10,7 +10,6 @@ import { useTheme } from "@/components/theme/useTheme";
  */
 
 export function InputDeck({
-  mode,
   scale,
   onScaleChange,
   suggestions,

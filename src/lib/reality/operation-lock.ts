@@ -5,7 +5,7 @@ export type WorldOperationKind = "chat" | "settlement" | "rewrite" | "switch";
 
 const OPERATION_LABELS: Record<WorldOperationKind, string> = {
   chat: "叙事生成",
-  settlement: "章节结算",
+  settlement: "世界整理",
   rewrite: "现实改写",
   switch: "现实切换",
 };

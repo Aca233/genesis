@@ -227,8 +227,9 @@ it("renders a busy-disabled return-to-source-reality action with matching semant
 
   const ready = renderToStaticMarkup(createElement(MessageBlock, { message, busy: false }));
   const busy = renderToStaticMarkup(createElement(MessageBlock, { message, busy: true }));
-  expect(ready).toContain("返回前现实 →");
-  expect(busy).toContain("现实操作进行中…");
+  expect(ready).toContain("⌘ 现实已分叉");
+  expect(ready).not.toContain("返回前现实");
+  expect(busy).toContain("⌘ 现实已分叉");
   expect(busy).toContain("disabled");
 });
 
