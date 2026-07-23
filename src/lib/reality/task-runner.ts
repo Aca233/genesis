@@ -722,7 +722,7 @@ async function applyInSerializableTransaction(
           data: {
             timelineId: cloned.timelineId,
             index: (latestChapter?.index ?? -1) + 1,
-            title: "现实重铸",
+            title: null,
             summary: applied.summary,
             settleState: "open",
           },

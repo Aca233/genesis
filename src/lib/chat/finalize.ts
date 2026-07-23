@@ -5,6 +5,9 @@ import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
 import { applyContinuousStateInTransaction } from "./continuous-state";
 import { decideSettlement } from "./settlement-policy";
 import type { GenerationCompletion, StoredGenerationResult } from "./follow-up";
+import {
+  createRealityRewriteInTransaction,
+} from "@/lib/reality/create-task";
 import { FrozenRealityError, parseGenerationRequestMeta, type GenerationRequestMeta } from "./request";
 import {
   revealAbilityInTransaction,
@@ -62,6 +65,26 @@ export type NarrationFinalizationTx = Omit<AbilityMutationTx, "message" | "abili
       data: { revealed: true; revealedAtChapter: number };
     }): Promise<unknown>;
   };
+  realityRewrite: {
+    findUnique(args: { where: { idempotencyKey: string } }): Promise<{
+      id: string;
+      worldId: string;
+      sourceTimelineId: string;
+      sourceChapterId: string;
+      decree: string;
+      scope: string;
+      status: string;
+    } | null>;
+    create(args: { data: Record<string, unknown> }): Promise<{
+      id: string;
+      worldId: string;
+      sourceTimelineId: string;
+      sourceChapterId: string;
+      decree: string;
+      scope: string;
+      status: string;
+    }>;
+  };
 };
 
 export type NarrationFinalizationClient = {
@@ -107,6 +130,43 @@ export async function finalizeNarration(
       });
       if (owned.count !== 1) throw new Error("叙事生成 lease 已被接管");
     }
+
+    if (
+      input.meta.operation === "retroactive_rewrite"
+      && worldMode === "creator"
+    ) {
+      const decree = input.requestMeta?.content?.trim();
+      if (!decree) throw new Error("追溯改写缺少原始创世主意图");
+      const { task } = await createRealityRewriteInTransaction(tx as never, {
+        worldId: input.worldId,
+        sourceTimelineId: input.timelineId,
+        sourceChapterId: input.chapterId,
+        decree,
+        scope: "retroactive",
+        idempotencyKey: `chat:${input.generationId}`,
+      });
+      const completion: StoredGenerationResult = {
+        version: 1,
+        messageId: null,
+        meta: input.meta,
+        followUp: { kind: "rewrite", taskId: task.id },
+      };
+      await tx.generationRequest.update({
+        where: { id: input.generationId },
+        data: {
+          status: "completed",
+          error: null,
+          leaseExpiresAt: null,
+          narratorMessageId: input.generationId,
+          resultMeta: completion as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return { ...completion, reused: false };
+    }
+    const effectiveMeta = worldMode === "pantheon"
+      && input.meta.operation === "retroactive_rewrite"
+      ? { ...input.meta, operation: "continue" as const }
+      : input.meta;
     const existing = await tx.message.findUnique({
       where: { id: input.generationId },
     });
@@ -152,25 +212,25 @@ export async function finalizeNarration(
       }
     }
 
-    if (input.meta.temporalState || input.meta.immediateChanges.length > 0) {
+    if (effectiveMeta.temporalState || effectiveMeta.immediateChanges.length > 0) {
       await applyContinuousStateInTransaction(tx as never, {
         worldId: input.worldId,
         timelineId: input.timelineId,
-        temporalPatch: input.meta.temporalState,
-        changes: input.meta.immediateChanges,
+        temporalPatch: effectiveMeta.temporalState,
+        changes: effectiveMeta.immediateChanges,
       });
     }
     const narratorCountBefore = await tx.message.count({
       where: { chapterId: input.chapterId, role: "narrator" },
     });
-    const temporalChanged = input.meta.temporalState !== undefined;
+    const temporalChanged = effectiveMeta.temporalState !== undefined;
     const settlement = decideSettlement({
       scale: input.scale,
       narratorCountAfter: narratorCountBefore + 1,
       temporalChanged,
-      eraChanged: input.meta.temporalState?.era !== undefined,
-      significantEvent: input.meta.significantEvent,
-      settlementReasons: input.meta.settlementReasons,
+      eraChanged: effectiveMeta.temporalState?.era !== undefined,
+      significantEvent: effectiveMeta.significantEvent,
+      settlementReasons: effectiveMeta.settlementReasons,
     });
     const followUp = settlement.required
       ? { kind: "settlement" as const, segmentId: input.chapterId }
@@ -184,9 +244,9 @@ export async function finalizeNarration(
         role: "narrator",
         content: input.prose,
         scale: input.scale,
-        variants: [{ content: input.prose, meta: input.meta, chosen: true }] as Prisma.InputJsonValue,
+        variants: [{ content: input.prose, meta: effectiveMeta, chosen: true }] as Prisma.InputJsonValue,
         meta: {
-          ...input.meta,
+          ...effectiveMeta,
           settlementRequired: settlement.required,
           settlementReasons: settlement.reasons,
           ...(input.requestMeta ? { generationRequest: input.requestMeta } : {}),
@@ -196,7 +256,7 @@ export async function finalizeNarration(
     checkCancelled();
 
     const reveals = new Map<string, NonNullable<NarratorMeta["abilityReveals"]>[number]>();
-    for (const reveal of input.meta.abilityReveals ?? []) {
+    for (const reveal of effectiveMeta.abilityReveals ?? []) {
       const existingReveal = reveals.get(reveal.abilityId);
       if (!existingReveal || reveal.visibility === "known") {
         reveals.set(reveal.abilityId, reveal);
@@ -233,10 +293,10 @@ export async function finalizeNarration(
     }
 
     checkCancelled();
-    if (worldMode !== "creator" && input.meta.revealedEventIds?.length) {
+    if (worldMode !== "creator" && effectiveMeta.revealedEventIds?.length) {
       await tx.chronicleEntry.updateMany({
         where: {
-          id: { in: input.meta.revealedEventIds },
+          id: { in: effectiveMeta.revealedEventIds },
           timelineId: input.timelineId,
           revealed: false,
         },
@@ -248,7 +308,7 @@ export async function finalizeNarration(
     const completion: StoredGenerationResult = {
       version: 1,
       messageId: saved.id,
-      meta: input.meta,
+      meta: effectiveMeta,
       followUp,
     };
     await tx.generationRequest.update({

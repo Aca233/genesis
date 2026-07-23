@@ -41,6 +41,18 @@ function fixture() {
     },
     ability: { findFirst: vi.fn() },
     chronicleEntry: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    realityRewrite: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({
+        id: "rewrite-1",
+        worldId: "world-1",
+        sourceTimelineId: "timeline-1",
+        sourceChapterId: "chapter-1",
+        decree: "神谕",
+        scope: "retroactive",
+        status: "planning",
+      }),
+    },
   };
   const client = {
     $transaction: vi.fn(async (operation: (arg: typeof tx) => Promise<unknown>) => operation(tx)),
@@ -164,6 +176,37 @@ describe("finalizeNarration", () => {
     await finalizeNarration(client as never, base);
 
     expect(tx.chronicleEntry.updateMany).not.toHaveBeenCalled();
+  });
+  it("creator 追溯意图创建任务且不写源现实消息", async () => {
+    const { client, tx } = fixture();
+    tx.world.findUnique.mockResolvedValue({
+      activeTimelineId: "timeline-1",
+      mode: "creator",
+    });
+
+    const result = await finalizeNarration(client as never, {
+      ...base,
+      meta: {
+        suggestions: [],
+        operation: "retroactive_rewrite",
+        immediateChanges: [],
+        significantEvent: true,
+        settlementReasons: ["major_event"],
+      },
+    });
+
+    expect(result).toMatchObject({
+      messageId: null,
+      followUp: { kind: "rewrite", taskId: "rewrite-1" },
+    });
+    expect(tx.message.create).not.toHaveBeenCalled();
+    expect(tx.realityRewrite.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        decree: "神谕",
+        scope: "retroactive",
+        idempotencyKey: "chat:generation-1",
+      }),
+    });
   });
   it("rejects a late response when the world has switched realities", async () => {
     const { client, tx } = fixture();

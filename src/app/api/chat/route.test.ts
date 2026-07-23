@@ -69,7 +69,18 @@ describe("POST /api/chat", () => {
     mocks.narratorCompletionSSE.mockImplementation(() => new Response("sse replay", {
       headers: { "Content-Type": "text/event-stream; charset=utf-8" },
     }));
-    mocks.finalizeNarration.mockResolvedValue({ messageId: "generation-1", reused: false });
+    mocks.finalizeNarration.mockResolvedValue({
+      messageId: "generation-1",
+      meta: {
+        suggestions: [],
+        operation: "continue",
+        immediateChanges: [],
+        significantEvent: false,
+        settlementReasons: [],
+      },
+      followUp: { kind: "none" },
+      reused: false,
+    });
     mocks.claimWorldOperation.mockResolvedValue({ acquired: true });
     mocks.renewWorldOperation.mockResolvedValue(true);
     mocks.releaseWorldOperation.mockResolvedValue(true);

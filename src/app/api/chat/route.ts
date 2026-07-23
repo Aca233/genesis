@@ -24,6 +24,7 @@ import {
   renewWorldOperation,
   type WorldOperationClient,
 } from "@/lib/reality/operation-lock";
+import { ensureRealityRewriteRunning } from "@/lib/reality/task-runner";
 
 /**
  * POST /api/chat —— 叙事主循环（SSE 流）
@@ -212,8 +213,9 @@ export async function POST(request: Request) {
       }
     },
     onDone: async ({ prose, meta, signal }) => {
+      let completion;
       try {
-        const result = await finalizeNarration(
+        completion = await finalizeNarration(
           prisma as unknown as NarrationFinalizationClient,
           {
             generationId,
@@ -238,14 +240,19 @@ export async function POST(request: Request) {
             },
           },
         );
-        return {
-          messageId: result.messageId,
-          meta: result.meta,
-          followUp: result.followUp,
-        };
       } finally {
         await releaseOperation();
       }
+      if (completion.followUp.kind === "rewrite") {
+        // The rewrite runner claims its own world lease. Start it only after
+        // the chat lease has been released above.
+        ensureRealityRewriteRunning(completion.followUp.taskId);
+      }
+      return {
+        messageId: completion.messageId,
+        meta: completion.meta,
+        followUp: completion.followUp,
+      };
     },
   });
 }
