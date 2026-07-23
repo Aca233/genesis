@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     timeline: { findUnique: vi.fn() },
     realityRewrite: { findFirst: vi.fn() },
     generationRequest: { findFirst: vi.fn().mockResolvedValue(null) },
+    entityRelation: { findMany: vi.fn() },
     ability: { findUnique: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn(), create: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
     abilityEvent: { findUnique: vi.fn(), create: vi.fn(), findMany: vi.fn(), count: vi.fn() },
     $transaction: vi.fn(),
@@ -58,6 +59,7 @@ describe("能力 API 可见性", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.prisma.chronicleEntry.findMany.mockResolvedValue([]);
+    mocks.prisma.entityRelation.findMany.mockResolvedValue([]);
     mocks.prisma.realityRewrite.findFirst.mockResolvedValue(null);
     mocks.prisma.$transaction.mockImplementation(
       async (operation: (tx: typeof mocks.prisma) => unknown) => operation(mocks.prisma),
