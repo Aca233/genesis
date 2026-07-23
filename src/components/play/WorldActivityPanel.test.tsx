@@ -82,6 +82,8 @@ describe("WorldActivityPanelView", () => {
     expect(html).toContain("烬海 · 星火纪元 · 第七年·霜月");
     expect(html).toContain('data-entity-id="entity-1"');
     expect(html).toContain('data-event-id="event-1"');
+    expect(html).toContain('data-focus-event-id="event-1"');
+    expect(html).toContain("取消追踪");
     expect(html).toContain("世界内尚未知晓");
     expect(html).not.toContain("/api/chat");
     expect(html).not.toContain("章节");
@@ -98,6 +100,19 @@ describe("WorldActivityPanelView", () => {
     expect(html).toContain("事件详情");
     expect(html).toContain("两国在边境集结");
     expect(html).toContain('data-entity-id="entity-1"');
+  });
+
+  it("offers tracking for an unresolved event when none is focused", () => {
+    const html = renderToStaticMarkup(createElement(WorldActivityPanelView, {
+      worldName: "烬海",
+      data: { ...data, focusedEvent: null },
+      selectedEventId: null,
+      onOpenEntity: vi.fn(),
+      onSelectEvent: vi.fn(),
+      onToggleFocus: vi.fn(),
+    }));
+    expect(html).toContain("追踪事件");
+    expect(html).not.toContain("取消追踪");
   });
 
   it("renders defensive empty states", () => {

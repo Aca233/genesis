@@ -20,6 +20,12 @@ import {
 import { switchCreatorReality } from "@/components/play/reality-tree-state";
 import { RuneRail } from "@/components/play/RuneRail";
 import { PlayDrawer } from "@/components/play/PlayDrawer";
+import type { WorldActivityResponse } from "@/components/play/WorldActivityPanel";
+import {
+  advanceActivityCursor,
+  countUnreadActivities,
+  type ActivityCursor,
+} from "@/components/play/world-activity-panel-state";
 import {
   followWorldSettlement,
   type WorldSettlementState,
@@ -84,6 +90,26 @@ export default function PlayPage({
   const [entityIndex, setEntityIndex] = useState<EntityIndexItem[]>([]);
 
   const chapterId = state?.currentSegment?.id ?? state?.currentChapter.id;
+  const activityCursorKey = state
+    ? `genesis:activity-cursor:${worldId}:${state.timeline.id}`
+    : null;
+
+  const readActivityCursor = useCallback((): ActivityCursor | null => {
+    if (!activityCursorKey) return null;
+    try {
+      const value = window.localStorage.getItem(activityCursorKey);
+      return value ? JSON.parse(value) as ActivityCursor : null;
+    } catch {
+      return null;
+    }
+  }, [activityCursorKey]);
+
+  const markActivitiesRead = useCallback((data: WorldActivityResponse) => {
+    if (!activityCursorKey) return;
+    const cursor = advanceActivityCursor(data.recentActivities, readActivityCursor());
+    if (cursor) window.localStorage.setItem(activityCursorKey, JSON.stringify(cursor));
+    setUnreadActivityCount(0);
+  }, [activityCursorKey, readActivityCursor]);
 
   // ── 数据同步 ──
 
@@ -168,6 +194,36 @@ export default function PlayPage({
     const t = setTimeout(() => void syncEntityIndex(), 0);
     return () => clearTimeout(t);
   }, [syncEntityIndex]);
+
+  useEffect(() => {
+    if (!state) return;
+    const controller = new AbortController();
+    void fetch(`/api/worlds/${worldId}/activities`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return await response.json() as WorldActivityResponse;
+      })
+      .then((data) => {
+        if (!data || controller.signal.aborted) return;
+        if (drawerTab === "activity") {
+          markActivitiesRead(data);
+          return;
+        }
+        setUnreadActivityCount(countUnreadActivities(
+          data.recentActivities,
+          readActivityCursor(),
+        ));
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [
+    drawerTab,
+    markActivitiesRead,
+    messages.length,
+    readActivityCursor,
+    state,
+    worldId,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -579,7 +635,6 @@ export default function PlayPage({
           unreadActivityCount={unreadActivityCount}
           onOpen={(tab) => {
             setDrawerTab(tab);
-            if (tab === "activity") setUnreadActivityCount(0);
           }}
         />
         <PlayDrawer
@@ -592,7 +647,7 @@ export default function PlayPage({
           busyKinds={{ chat: busy, settlement: settling, rewrite: rewriteBusy }}
           initialEntityId={drawerEntityId}
           onOpenEntity={openEntity}
-          onActivitiesLoaded={() => setUnreadActivityCount(0)}
+          onActivitiesLoaded={markActivitiesRead}
           onStateChanged={() => reloadState()}
           onTimelineChanged={async () => {
             await reloadState();
