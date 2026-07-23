@@ -28,8 +28,22 @@ function focusedEventIdFromPersistence(value: unknown): string | null {
   return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
 }
 
+type ActivityCursor = {
+  createdAt: Date;
+  id: string;
+};
+
+function parseCursor(value: string): ActivityCursor | null {
+  const separator = value.lastIndexOf("|");
+  if (separator <= 0 || separator === value.length - 1) return null;
+  const createdAt = new Date(value.slice(0, separator));
+  const id = value.slice(separator + 1);
+  if (Number.isNaN(createdAt.getTime()) || id.length === 0) return null;
+  return { createdAt, id };
+}
+
 function pagination(request: Request):
-  | { limit: number; before: Date | null }
+  | { limit: number; before: ActivityCursor | null }
   | { error: string } {
   const params = new URL(request.url).searchParams;
   const rawLimit = params.get("limit");
@@ -39,8 +53,8 @@ function pagination(request: Request):
   }
   const rawBefore = params.get("before");
   if (rawBefore === null) return { limit, before: null };
-  const before = new Date(rawBefore);
-  if (Number.isNaN(before.getTime())) return { error: "before 必须是 ISO 时间" };
+  const before = parseCursor(rawBefore);
+  if (before === null) return { error: "before 必须包含 ISO 时间和动态 ID" };
   return { limit, before };
 }
 
@@ -90,8 +104,21 @@ export async function GET(
     db.worldActivity.findMany({
       where: {
         timelineId: timeline.id,
-        ...(page.before ? { createdAt: { lt: page.before } } : {}),
+        ...(page.before
+          ? {
+              OR: [
+                { createdAt: { lt: page.before.createdAt } },
+                {
+                  createdAt: page.before.createdAt,
+                  id: { lt: page.before.id },
+                },
+              ],
+            }
+          : {}),
         ...visibilityWhere,
+      },
+      include: {
+        event: { select: { visibility: true } },
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: page.limit + 1,
@@ -107,7 +134,10 @@ export async function GET(
   const recentActivities = projected.activities.slice(0, page.limit);
   const hasNextPage = projected.activities.length > page.limit;
   const nextCursor = hasNextPage
-    ? recentActivities.at(-1)?.createdAt ?? null
+    ? (() => {
+        const last = recentActivities.at(-1);
+        return last ? `${last.createdAt}|${last.id}` : null;
+      })()
     : null;
   const importantEvents = [...projected.events].sort((left, right) => {
     if (left.id === focusedEventId) return -1;

@@ -2,6 +2,12 @@ import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { ObserverStateSchema } from "@/lib/reality/schemas";
+import {
+  canViewWorldKnowledge,
+  realityViewer,
+} from "@/lib/reality/visibility";
+import { WorldModeSchema } from "@/lib/world-mode";
+import { ActivityVisibilitySchema } from "@/lib/world-activity/contracts";
 
 type Context = { params: Promise<{ id: string; eventId: string }> };
 type Transaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
@@ -22,7 +28,7 @@ function json(value: unknown): Prisma.InputJsonValue {
 async function activeTimeline(tx: Transaction, worldId: string) {
   const world = await tx.world.findUnique({
     where: { id: worldId },
-    select: { id: true, activeTimelineId: true },
+    select: { id: true, mode: true, activeTimelineId: true },
   });
   if (world === null) throw new FocusRequestError("世界不存在", 404);
   if (world.activeTimelineId === null) {
@@ -37,6 +43,7 @@ async function activeTimeline(tx: Transaction, worldId: string) {
   return {
     timeline,
     observerState: ObserverStateSchema.parse(timeline.observerState),
+    mode: WorldModeSchema.parse(world.mode),
   };
 }
 
@@ -47,20 +54,33 @@ async function handle(
   try {
     const { id: worldId, eventId } = await params;
     const focusedEventId = await prisma.$transaction(async (tx) => {
-      const { timeline, observerState } = await activeTimeline(tx, worldId);
+      const { timeline, observerState, mode } = await activeTimeline(tx, worldId);
 
       if (method === "PUT") {
         const event = await tx.worldEvent.findUnique({
           where: { id: eventId },
-          select: { id: true, timelineId: true, phase: true, resolvedAt: true },
+          select: {
+            id: true,
+            timelineId: true,
+            phase: true,
+            resolvedAt: true,
+            visibility: true,
+          },
         });
         if (
           event === null
           || event.timelineId !== timeline.id
           || event.phase === "resolved"
           || event.resolvedAt !== null
+          || !canViewWorldKnowledge(
+            realityViewer(mode, observerState),
+            ActivityVisibilitySchema.parse(event.visibility),
+          )
         ) {
-          throw new FocusRequestError("只能关注活动现实中尚未解决的事件", 409);
+          throw new FocusRequestError(
+            "只能关注当前视角可见且尚未解决的活动现实事件",
+            409,
+          );
         }
         if (observerState.focusedEventId === event.id) return event.id;
         await tx.timeline.update({

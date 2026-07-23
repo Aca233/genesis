@@ -97,25 +97,37 @@ describe("GET /api/worlds/[id]/activities", () => {
     }));
   });
 
-  it("applies an ISO before cursor and returns the final visible cursor", async () => {
+  it("applies a compound createdAt and id cursor without skipping timestamp ties", async () => {
     mocks.activityFindMany.mockResolvedValue([
       activity({ id: "activity-2", createdAt: new Date("2026-07-22T03:00:00.000Z") }),
-      activity({ id: "activity-1", createdAt: new Date("2026-07-22T02:00:00.000Z") }),
+      activity({ id: "activity-1", createdAt: new Date("2026-07-22T03:00:00.000Z") }),
     ]);
+    const cursor = encodeURIComponent("2026-07-23T00:00:00.000Z|activity-3");
     const response = await GET(
-      request("?limit=1&before=2026-07-23T00%3A00%3A00.000Z"),
+      request(`?limit=1&before=${cursor}`),
       context,
     );
     const json = await response.json();
     expect(mocks.activityFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        createdAt: { lt: new Date("2026-07-23T00:00:00.000Z") },
+        OR: [
+          { createdAt: { lt: new Date("2026-07-23T00:00:00.000Z") } },
+          {
+            createdAt: new Date("2026-07-23T00:00:00.000Z"),
+            id: { lt: "activity-3" },
+          },
+        ],
       }),
     }));
-    expect(json.nextCursor).toBe("2026-07-22T03:00:00.000Z");
+    expect(json.nextCursor).toBe("2026-07-22T03:00:00.000Z|activity-2");
   });
 
-  it.each(["?limit=0", "?limit=51", "?before=not-a-date"])(
+  it.each([
+    "?limit=0",
+    "?limit=51",
+    "?before=not-a-cursor",
+    "?before=2026-07-23T00%3A00%3A00.000Z%7C",
+  ])(
     "rejects malformed pagination %s",
     async (query) => {
       expect((await GET(request(query), context)).status).toBe(400);
@@ -157,5 +169,31 @@ describe("GET /api/worlds/[id]/activities", () => {
         knowledgeLabel: "世界内尚未知晓",
       }),
     ]));
+  });
+
+  it("removes a hidden linked event id from otherwise visible activity", async () => {
+    mocks.eventFindMany.mockResolvedValue([]);
+    mocks.activityFindMany.mockResolvedValue([
+      activity({
+        id: "activity-public-hidden-event",
+        eventId: "event-hidden",
+        event: { visibility: "hidden" },
+      }),
+    ]);
+
+    const response = await GET(request(), context);
+    const json = await response.json();
+
+    expect(json.recentActivities).toEqual([
+      expect.objectContaining({
+        id: "activity-public-hidden-event",
+        eventId: null,
+      }),
+    ]);
+    expect(mocks.activityFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      include: {
+        event: { select: { visibility: true } },
+      },
+    }));
   });
 });

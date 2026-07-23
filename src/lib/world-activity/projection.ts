@@ -24,6 +24,7 @@ export type WorldEventProjectionRow = {
 export type WorldActivityProjectionRow = {
   id: string;
   eventId: string | null;
+  event?: { visibility: WorldKnowledgeVisibility } | null;
   recordType: string;
   kind: string;
   text: string;
@@ -48,7 +49,7 @@ export type ProjectedWorldEvent = Omit<
 
 export type ProjectedWorldActivity = Omit<
   WorldActivityProjectionRow,
-  "createdAt"
+  "createdAt" | "event"
 > & {
   createdAt: string;
   knowledgeLabel?: WorldKnowledgeLabel;
@@ -93,11 +94,22 @@ function projectEvent(
 function projectActivity(
   row: WorldActivityProjectionRow,
   viewer: RealityViewer,
+  eventVisibilityById: ReadonlyMap<string, WorldKnowledgeVisibility>,
 ): ProjectedWorldActivity | null {
   if (!canViewWorldKnowledge(viewer, row.visibility)) return null;
   const knowledgeLabel = knowledgeLabelForViewer(viewer, row.visibility);
+  const linkedEventVisibility = row.event?.visibility
+    ?? (row.eventId ? eventVisibilityById.get(row.eventId) : undefined);
+  const eventId = row.eventId !== null
+    && linkedEventVisibility !== undefined
+    && canViewWorldKnowledge(viewer, linkedEventVisibility)
+    ? row.eventId
+    : null;
+  const publicRow = { ...row };
+  delete publicRow.event;
   return {
-    ...row,
+    ...publicRow,
+    eventId,
     targetIds: [...row.targetIds],
     subjectIds: [...row.subjectIds],
     createdAt: iso(row.createdAt),
@@ -113,12 +125,15 @@ export function projectWorldActivity(
   input: WorldActivityProjectionInput,
   viewer: RealityViewer,
 ): ProjectedWorldActivityFeed {
+  const eventVisibilityById = new Map(
+    input.events.map((event) => [event.id, event.visibility]),
+  );
   const events = input.events.flatMap((row) => {
     const projected = projectEvent(row, viewer);
     return projected ? [projected] : [];
   });
   const activities = input.activities.flatMap((row) => {
-    const projected = projectActivity(row, viewer);
+    const projected = projectActivity(row, viewer, eventVisibilityById);
     return projected ? [projected] : [];
   });
   return {

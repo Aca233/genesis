@@ -112,4 +112,24 @@ describe("projectWorldActivity", () => {
     );
     expect(projected.focusedEvent).toBeNull();
   });
+
+  it("redacts a hidden linked event id from visible activity under fog", () => {
+    const linkedActivity = {
+      ...input.activities[0],
+      id: "activity-public-hidden-event",
+      eventId: "event-hidden",
+    };
+
+    const limited = projectWorldActivity(
+      { ...input, activities: [linkedActivity] },
+      "creator_limited",
+    );
+    const omniscient = projectWorldActivity(
+      { ...input, activities: [linkedActivity] },
+      "creator_omniscient",
+    );
+
+    expect(limited.activities[0]?.eventId).toBeNull();
+    expect(omniscient.activities[0]?.eventId).toBe("event-hidden");
+  });
 });

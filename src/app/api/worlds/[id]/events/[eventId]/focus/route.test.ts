@@ -36,6 +36,7 @@ describe("PUT/DELETE /api/worlds/[id]/events/[eventId]/focus", () => {
     vi.clearAllMocks();
     mocks.tx.world.findUnique.mockResolvedValue({
       id: "world-1",
+      mode: "pantheon",
       activeTimelineId: "timeline-active",
     });
     mocks.tx.timeline.findUnique.mockResolvedValue({
@@ -48,6 +49,7 @@ describe("PUT/DELETE /api/worlds/[id]/events/[eventId]/focus", () => {
       timelineId: "timeline-active",
       phase: "developing",
       resolvedAt: null,
+      visibility: "public",
     });
   });
 
@@ -80,6 +82,7 @@ describe("PUT/DELETE /api/worlds/[id]/events/[eventId]/focus", () => {
       timelineId: "timeline-active",
       phase: "escalating",
       resolvedAt: null,
+      visibility: "public",
     });
 
     const response = await PUT(
@@ -101,12 +104,14 @@ describe("PUT/DELETE /api/worlds/[id]/events/[eventId]/focus", () => {
       timelineId: "timeline-frozen",
       phase: "developing",
       resolvedAt: null,
+      visibility: "public",
     }],
     ["event-resolved", {
       id: "event-resolved",
       timelineId: "timeline-active",
       phase: "resolved",
       resolvedAt: new Date("2026-07-22T00:00:00.000Z"),
+      visibility: "public",
     }],
   ])("rejects cross-reality or resolved event %s", async (eventId, event) => {
     mocks.tx.worldEvent.findUnique.mockResolvedValue(event);
@@ -136,6 +141,7 @@ describe("PUT/DELETE /api/worlds/[id]/events/[eventId]/focus", () => {
     vi.clearAllMocks();
     mocks.tx.world.findUnique.mockResolvedValue({
       id: "world-1",
+      mode: "pantheon",
       activeTimelineId: "timeline-active",
     });
     mocks.tx.timeline.findUnique.mockResolvedValue({
@@ -165,5 +171,73 @@ describe("PUT/DELETE /api/worlds/[id]/events/[eventId]/focus", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ focusedEventId: "event-b" });
     expect(mocks.tx.timeline.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["pantheon", "omniscient"],
+    ["creator", "limited"],
+  ] as const)(
+    "rejects hidden focus for %s worlds with a %s observer",
+    async (mode, viewpoint) => {
+      mocks.tx.world.findUnique.mockResolvedValue({
+        id: "world-1",
+        mode,
+        activeTimelineId: "timeline-active",
+      });
+      mocks.tx.timeline.findUnique.mockResolvedValue({
+        id: "timeline-active",
+        observerState: {
+          ...observerState(),
+          viewpoint,
+        },
+      });
+      mocks.tx.worldEvent.findUnique.mockResolvedValue({
+        id: "event-hidden",
+        timelineId: "timeline-active",
+        phase: "developing",
+        resolvedAt: null,
+        visibility: "hidden",
+      });
+
+      const response = await PUT(
+        new Request(
+          "http://localhost/api/worlds/world-1/events/event-hidden/focus",
+          { method: "PUT" },
+        ),
+        context("event-hidden"),
+      );
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: "只能关注当前视角可见且尚未解决的活动现实事件",
+      });
+      expect(mocks.tx.timeline.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it("allows an omniscient creator to focus a hidden event", async () => {
+    mocks.tx.world.findUnique.mockResolvedValue({
+      id: "world-1",
+      mode: "creator",
+      activeTimelineId: "timeline-active",
+    });
+    mocks.tx.worldEvent.findUnique.mockResolvedValue({
+      id: "event-hidden",
+      timelineId: "timeline-active",
+      phase: "developing",
+      resolvedAt: null,
+      visibility: "hidden",
+    });
+
+    const response = await PUT(
+      new Request(
+        "http://localhost/api/worlds/world-1/events/event-hidden/focus",
+        { method: "PUT" },
+      ),
+      context("event-hidden"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ focusedEventId: "event-hidden" });
   });
 });
