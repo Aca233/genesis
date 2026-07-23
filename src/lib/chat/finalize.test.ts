@@ -6,7 +6,8 @@ vi.mock("@/lib/abilities/mutations", async (importOriginal) => {
   return { ...actual, revealAbilityInTransaction: mocks.reveal };
 });
 
-import { finalizeNarration } from "./finalize";
+import { applyStoredNarration, finalizeNarration } from "./finalize";
+import { emptyContinuousMeta } from "./continuous-meta";
 
 function fixture() {
   const state = { messages: new Map<string, Record<string, unknown>>() };
@@ -21,6 +22,7 @@ function fixture() {
         content: "神谕",
         directive: null,
         status: "pending",
+        stage: "output_stored",
         playerMessageId: "genplayer:generation-1",
         narratorMessageId: "generation-1",
         playerIndex: 3,
@@ -111,8 +113,17 @@ describe("finalizeNarration", () => {
 
     expect(client.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.generationRequest.updateMany).toHaveBeenCalledWith({
-      where: { id: "generation-1", status: "pending", attempt: 1 },
-      data: { leaseExpiresAt: expect.any(Date) },
+      where: {
+        id: "generation-1",
+        status: "pending",
+        attempt: 1,
+        stage: { in: ["output_stored", "applying"] },
+      },
+      data: {
+        stage: "applying",
+        stageUpdatedAt: expect.any(Date),
+        leaseExpiresAt: expect.any(Date),
+      },
     });
     expect(tx.message.create).toHaveBeenCalledTimes(2);
     expect(mocks.reveal).toHaveBeenCalledWith(tx, expect.objectContaining({
@@ -125,6 +136,8 @@ describe("finalizeNarration", () => {
       where: { id: "generation-1" },
       data: expect.objectContaining({
         status: "completed",
+        stage: "completed",
+        stageUpdatedAt: expect.any(Date),
         error: null,
         leaseExpiresAt: null,
         narratorMessageId: "generation-1",
@@ -176,6 +189,34 @@ describe("finalizeNarration", () => {
     await finalizeNarration(client as never, base);
 
     expect(tx.chronicleEntry.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("从私有输出快照应用正文而不是接受另一份临时输出", async () => {
+    const { client, tx } = fixture();
+    tx.ability.findFirst.mockResolvedValue(null);
+    const output = {
+      prose: "快照中的唯一正文",
+      parsedMeta: emptyContinuousMeta(),
+      generatedAt: "2026-07-23T00:00:00.000Z",
+      contractVersion: 1 as const,
+    };
+
+    await applyStoredNarration(client as never, {
+      ...base,
+      output,
+    });
+
+    expect(tx.message.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        id: "generation-1",
+        content: "快照中的唯一正文",
+        variants: [{
+          content: "快照中的唯一正文",
+          meta: emptyContinuousMeta(),
+          chosen: true,
+        }],
+      }),
+    });
   });
   it("creator 追溯意图创建任务且不写源现实消息", async () => {
     const { client, tx } = fixture();

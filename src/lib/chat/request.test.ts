@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { markGenerationFailed, prepareGenerationRequest } from "./request";
+import {
+  markGenerationFailed,
+  markGenerationStage,
+  prepareGenerationRequest,
+  storeGenerationOutput,
+} from "./request";
+import { emptyContinuousMeta } from "./continuous-meta";
 
 it("GenerationRequest 和内部检查点持久化真实任务阶段", () => {
   const schema = readFileSync("prisma/schema.prisma", "utf8");
@@ -29,11 +35,12 @@ function fixture() {
         return row;
       }),
       updateMany: vi.fn(async ({ where, data }: {
-        where: { id: string; status?: string; attempt?: number };
+        where: { id: string; status?: string; attempt?: number; stage?: string };
         data: Record<string, unknown>;
       }) => {
         const row = requests.get(where.id);
         if (!row || (where.status && row.status !== where.status) ||
+            (where.stage && row.stage !== where.stage) ||
             (where.attempt !== undefined && row.attempt !== where.attempt)) return { count: 0 };
         Object.assign(row, data);
         return { count: 1 };
@@ -91,6 +98,7 @@ describe("prepareGenerationRequest", () => {
           chapterId: "chapter-1",
           mode,
           status: "pending",
+          stage: "reserved",
           attempt: 1,
           leaseExpiresAt: expect.any(Date),
         }),
@@ -173,6 +181,76 @@ describe("prepareGenerationRequest", () => {
     await expect(
       prepareGenerationRequest(client as never, { ...input, content: "另一神谕" }),
     ).rejects.toThrow(/参数不一致|占用/);
+  });
+
+  it("output_stored 重试复用保存输出而不回到生成阶段", async () => {
+    const { client, requests } = fixture();
+    await prepareGenerationRequest(client as never, input);
+    const row = requests.get(input.generationId)!;
+    Object.assign(row, {
+      status: "failed",
+      stage: "output_stored",
+      leaseExpiresAt: null,
+      outputSnapshot: {
+        prose: "潮声已抵达王城。",
+        parsedMeta: emptyContinuousMeta(),
+        generatedAt: "2026-07-23T00:00:00.000Z",
+        contractVersion: 1,
+      },
+    });
+
+    const result = await prepareGenerationRequest(client as never, input);
+
+    expect(result).toMatchObject({
+      state: "owner",
+      attempt: 2,
+      resumeFrom: "output_stored",
+      outputSnapshot: { prose: "潮声已抵达王城。" },
+    });
+  });
+
+  it("保存完整输出使用阶段和 attempt CAS 且不写公开消息", async () => {
+    const { client, tx } = fixture();
+    await prepareGenerationRequest(client as never, input);
+    await markGenerationStage(client as never, input.generationId, 1, "generating");
+
+    const output = await storeGenerationOutput(client as never, input.generationId, 1, {
+      prose: "潮声已抵达王城。",
+      parsedMeta: emptyContinuousMeta(),
+      generatedAt: "2026-07-23T00:00:00.000Z",
+      contractVersion: 1,
+    });
+
+    expect(output.prose).toBe("潮声已抵达王城。");
+    expect(tx.generationRequest.updateMany).toHaveBeenLastCalledWith({
+      where: { id: input.generationId, attempt: 1, status: "pending", stage: "generating" },
+      data: expect.objectContaining({
+        stage: "output_stored",
+        outputSnapshot: output,
+        error: null,
+        safeError: null,
+      }),
+    });
+    expect(tx.message.create).not.toHaveBeenCalled();
+  });
+
+  it("任务阶段只能向前推进且旧 owner 不能推进新 attempt", async () => {
+    const { client, requests } = fixture();
+    await prepareGenerationRequest(client as never, input);
+    await markGenerationStage(client as never, input.generationId, 1, "context_ready");
+    await expect(markGenerationStage(
+      client as never,
+      input.generationId,
+      1,
+      "reserved",
+    )).rejects.toThrow("任务阶段不可倒退");
+    requests.get(input.generationId)!.attempt = 2;
+    await expect(markGenerationStage(
+      client as never,
+      input.generationId,
+      1,
+      "generating",
+    )).rejects.toThrow("叙事任务阶段已被接管");
   });
 
   it("completed reservation 只在 narrator 与请求绑定一致时返回可重放结果", async () => {

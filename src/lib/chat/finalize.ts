@@ -8,7 +8,12 @@ import type { GenerationCompletion, StoredGenerationResult } from "./follow-up";
 import {
   createRealityRewriteInTransaction,
 } from "@/lib/reality/create-task";
-import { FrozenRealityError, parseGenerationRequestMeta, type GenerationRequestMeta } from "./request";
+import {
+  FrozenRealityError,
+  parseGenerationRequestMeta,
+  type GenerationRequestMeta,
+  type StoredNarratorOutput,
+} from "./request";
 import {
   revealAbilityInTransaction,
   type AbilityMutationTx,
@@ -27,12 +32,18 @@ export type NarrationFinalizationTx = Omit<AbilityMutationTx, "message" | "abili
       where: { id: string };
       data: {
         status: string; narratorMessageId: string; resultMeta: Prisma.InputJsonValue;
-        error: null; leaseExpiresAt: null;
+        stage: string; stageUpdatedAt: Date; error: null; safeError: null;
+        retryable: boolean; leaseExpiresAt: null;
       };
     }): Promise<unknown>;
     updateMany(args: {
-      where: { id: string; status: string; attempt: number };
-      data: { leaseExpiresAt: Date };
+      where: {
+        id: string;
+        status: string;
+        attempt: number;
+        stage: { in: string[] };
+      };
+      data: { stage: string; stageUpdatedAt: Date; leaseExpiresAt: Date };
     }): Promise<{ count: number }>;
   };
   message: {
@@ -125,8 +136,17 @@ export async function finalizeNarration(
     const worldMode = WorldModeSchema.parse(world.mode);
     if (input.attempt !== undefined) {
       const owned = await tx.generationRequest.updateMany({
-        where: { id: input.generationId, status: "pending", attempt: input.attempt },
-        data: { leaseExpiresAt: new Date(Date.now() + 5 * 60 * 1000) },
+        where: {
+          id: input.generationId,
+          status: "pending",
+          attempt: input.attempt,
+          stage: { in: ["output_stored", "applying"] },
+        },
+        data: {
+          stage: "applying",
+          stageUpdatedAt: new Date(),
+          leaseExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        },
       });
       if (owned.count !== 1) throw new Error("叙事生成 lease 已被接管");
     }
@@ -155,7 +175,11 @@ export async function finalizeNarration(
         where: { id: input.generationId },
         data: {
           status: "completed",
+          stage: "completed",
+          stageUpdatedAt: new Date(),
           error: null,
+          safeError: null,
+          retryable: true,
           leaseExpiresAt: null,
           narratorMessageId: input.generationId,
           resultMeta: completion as unknown as Prisma.InputJsonValue,
@@ -315,7 +339,11 @@ export async function finalizeNarration(
       where: { id: input.generationId },
       data: {
         status: "completed",
+        stage: "completed",
+        stageUpdatedAt: new Date(),
         error: null,
+        safeError: null,
+        retryable: true,
         leaseExpiresAt: null,
         narratorMessageId: saved.id,
         resultMeta: completion as unknown as Prisma.InputJsonValue,
@@ -324,5 +352,19 @@ export async function finalizeNarration(
     checkCancelled();
 
     return { ...completion, reused: false };
+  });
+}
+
+export async function applyStoredNarration(
+  client: NarrationFinalizationClient,
+  input: Omit<Parameters<typeof finalizeNarration>[1], "prose" | "meta"> & {
+    output: StoredNarratorOutput;
+  },
+) {
+  const { output, ...rest } = input;
+  return finalizeNarration(client, {
+    ...rest,
+    prose: output.prose,
+    meta: output.parsedMeta,
   });
 }

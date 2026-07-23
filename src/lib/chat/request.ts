@@ -1,4 +1,9 @@
 import type { Scale } from "@/lib/cards/schemas";
+import { z } from "zod";
+import {
+  advanceTaskStage,
+  type ChatTaskStage,
+} from "@/lib/tasks/progress";
 import {
   ContinuousNarratorMetaSchema,
   emptyContinuousMeta,
@@ -24,11 +29,19 @@ export type GenerationRequestMeta = {
   content: string | null; directive: string | null; playerMessageId: string | null;
   narratorMessageId: string; playerIndex: number | null; narratorIndex: number;
 };
+export const StoredNarratorOutputSchema = z.object({
+  prose: z.string().trim().min(1),
+  parsedMeta: ContinuousNarratorMetaSchema,
+  generatedAt: z.iso.datetime(),
+  contractVersion: z.literal(1),
+}).strict();
+export type StoredNarratorOutput = z.infer<typeof StoredNarratorOutputSchema>;
 type RequestRow = {
   id: string; chapterId: string; mode: string; scale: string; content: string | null;
   directive: string | null; status: string; error: string | null; attempt: number;
   leaseExpiresAt: Date | null; playerMessageId: string | null; narratorMessageId: string;
   playerIndex: number | null; narratorIndex: number; resultMeta: unknown;
+  stage: string; outputSnapshot: unknown; retryable: boolean; safeError: string | null;
 };
 type RequestMessage = {
   id: string; chapterId: string; index: number; role: string;
@@ -108,6 +121,8 @@ export type PrepareGenerationInput = {
 export type PreparedGeneration = {
   meta: GenerationRequestMeta; state: "owner" | "pending" | "completed";
   attempt?: number; completion?: GenerationCompletion;
+  resumeFrom?: ChatTaskStage;
+  outputSnapshot?: StoredNarratorOutput;
 };
 
 async function completedResult(tx: GenerationRequestTx, row: RequestRow, input: PrepareGenerationInput) {
@@ -136,13 +151,35 @@ async function inspectOrTakeover(tx: GenerationRequestTx, row: RequestRow, input
   if (row.status === "completed") return completedResult(tx, row, input);
   const expired = !row.leaseExpiresAt || row.leaseExpiresAt.getTime() <= Date.now();
   if (row.status !== "failed" && !expired) return { meta, state: "pending" as const };
+  const stage = row.stage as ChatTaskStage;
+  advanceTaskStage("chat", "reserved", stage);
+  const stored = row.outputSnapshot === null || row.outputSnapshot === undefined
+    ? undefined
+    : StoredNarratorOutputSchema.parse(row.outputSnapshot);
+  if ((stage === "output_stored" || stage === "applying") && !stored) {
+    throw new Error("叙事输出断点缺少私有快照");
+  }
   const attempt = row.attempt + 1;
   const claimed = await tx.generationRequest.updateMany({
     where: { id: row.id, status: row.status, attempt: row.attempt },
-    data: { status: "pending", error: null, attempt, leaseExpiresAt: new Date(Date.now() + LEASE_MS) },
+    data: {
+      status: "pending",
+      error: null,
+      safeError: null,
+      retryable: true,
+      attempt,
+      leaseExpiresAt: new Date(Date.now() + LEASE_MS),
+      stageUpdatedAt: new Date(),
+    },
   });
   return claimed.count === 1
-    ? { meta, state: "owner" as const, attempt }
+    ? {
+        meta,
+        state: "owner" as const,
+        attempt,
+        resumeFrom: stage,
+        ...(stored ? { outputSnapshot: stored } : {}),
+      }
     : { meta, state: "pending" as const };
 }
 async function reserveInTx(tx: GenerationRequestTx, input: PrepareGenerationInput) {
@@ -154,10 +191,12 @@ async function reserveInTx(tx: GenerationRequestTx, input: PrepareGenerationInpu
     playerIndex: playerMessageId ? input.playerIndex : null, narratorIndex: input.narratorIndex };
   await tx.generationRequest.create({ data: { id: input.generationId, chapterId: input.chapterId,
     mode: input.mode, scale: input.scale, content: meta.content, directive: meta.directive,
-    status: "pending", error: null, attempt: 1, leaseExpiresAt: new Date(Date.now() + LEASE_MS),
+    status: "pending", stage: "reserved", error: null, safeError: null, retryable: true,
+    attempt: 1, leaseExpiresAt: new Date(Date.now() + LEASE_MS),
+    stageUpdatedAt: new Date(),
     playerMessageId, narratorMessageId: input.generationId, playerIndex: meta.playerIndex,
     narratorIndex: input.narratorIndex } });
-  return { meta, state: "owner" as const, attempt: 1 };
+  return { meta, state: "owner" as const, attempt: 1, resumeFrom: "reserved" as const };
 }
 
 export async function prepareGenerationRequest(client: GenerationRequestClient, input: PrepareGenerationInput) {
@@ -213,6 +252,69 @@ export async function markGenerationFailed(
   const message = error instanceof Error ? error.message : String(error);
   await client.$transaction((tx) => tx.generationRequest.updateMany({
     where: { id: generationId, status: "pending", attempt },
-    data: { status: "failed", error: message.slice(0, 2000), leaseExpiresAt: null },
+    data: {
+      status: "failed",
+      error: message.slice(0, 2000),
+      safeError: "叙事任务中断，请从当前步骤重试",
+      retryable: true,
+      leaseExpiresAt: null,
+      stageUpdatedAt: new Date(),
+    },
   }));
+}
+
+export async function markGenerationStage(
+  client: GenerationRequestClient,
+  generationId: string,
+  attempt: number,
+  nextStage: ChatTaskStage,
+) {
+  return client.$transaction(async (tx) => {
+    const row = await tx.generationRequest.findUnique({ where: { id: generationId } });
+    if (!row || row.status !== "pending" || row.attempt !== attempt) {
+      throw new Error("叙事任务阶段已被接管");
+    }
+    const current = row.stage as ChatTaskStage;
+    advanceTaskStage("chat", current, nextStage);
+    const updated = await tx.generationRequest.updateMany({
+      where: { id: generationId, status: "pending", attempt, stage: current },
+      data: {
+        stage: nextStage,
+        stageUpdatedAt: new Date(),
+        error: null,
+        safeError: null,
+      },
+    });
+    if (updated.count !== 1) throw new Error("叙事任务阶段已被接管");
+    return nextStage;
+  });
+}
+
+export async function storeGenerationOutput(
+  client: GenerationRequestClient,
+  generationId: string,
+  attempt: number,
+  output: StoredNarratorOutput,
+) {
+  const parsed = StoredNarratorOutputSchema.parse(output);
+  return client.$transaction(async (tx) => {
+    const saved = await tx.generationRequest.updateMany({
+      where: {
+        id: generationId,
+        attempt,
+        status: "pending",
+        stage: "generating",
+      },
+      data: {
+        outputSnapshot: parsed,
+        stage: "output_stored",
+        stageUpdatedAt: new Date(),
+        error: null,
+        safeError: null,
+        retryable: true,
+      },
+    });
+    if (saved.count !== 1) throw new Error("叙事输出保存断点已被接管");
+    return parsed;
+  });
 }

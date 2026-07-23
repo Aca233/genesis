@@ -30,6 +30,10 @@ export const taskStages = {
   ],
 } as const satisfies Record<TaskKind, readonly { id: string; label: string }[]>;
 
+export type ChatTaskStage = (typeof taskStages.chat)[number]["id"];
+export type SettlementTaskStage = (typeof taskStages.settlement)[number]["id"];
+export type RewriteTaskStage = (typeof taskStages.rewrite)[number]["id"];
+
 export type DurableTaskProgress = {
   taskKind: TaskKind;
   taskId: string;
