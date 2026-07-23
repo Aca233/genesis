@@ -1,20 +1,22 @@
 # 04 · Prompt 体系
 
-## 0. Creator Prompt 与改写契约增补
+## 0. 连续 Narrator 与追溯改写契约
 
-### 观测 Narrator
+### 统一 Creator Narrator
 
-Creator 是世界外观察者；第二人称指观察者而非神或人物。普通输入标记为 `【天外观测】`，只控制焦点/跨度/镜头，不授权改写事实。Narrator 不虚构 Creator 的身体、神位、信仰、能力限制或世界内身份。作者侧可见完整议程、隐藏编年史和能力，但 NPC 认知仍受亲历与已知事实限制。Creator 开场展示当前纪元世界张力，不写降临场景。
+Creator 是世界外观察者；第二人称指观察者而非神或人物。所有输入统一标记为 `【创世主意图】`，不区分观测与改写通道。Narrator 识别观察、行动、确立未来事实或推翻既成历史：前三者输出 `operation: continue`，只有最后一种输出 `operation: retroactive_rewrite`。Narrator 不虚构 Creator 的身体、神位、信仰、能力限制或世界内身份。作者侧可见完整议程、隐藏编年史和能力，但 NPC 认知仍受亲历与已知事实限制。
+
+时之仪提供默认跨度；当前输入中的明确时间文字覆盖本轮且不得修改表盘。每轮尾部元数据同时携带 `temporal_state`、安全 `immediate_changes`、`significant_event` 与 `settlement_reasons`。
 
 ### Rewrite Planner
 
-敕令永远可达成：无资源、力量、成功率、道德或设定否决。冲突时提升敕令为最高事实，同时采用最小充分改动。Planner 只能输出 `RewritePlanSchema` 白名单：现实卡、神、实体、能力、编年史/记忆、议程、征兆和观察状态；既有记录只能使用提供的 ID，新记录使用唯一 temp ref。混合子命令 scope 归一化为 `retroactive > memory_only > prospective`。
+追溯敕令永远可达成：无资源、力量、成功率、道德或设定否决。冲突时提升敕令为最高事实，同时采用最小充分改动。Planner 只能输出 `RewritePlanSchema` 白名单：现实卡、神、实体、能力、编年史/记忆、议程、征兆和观察状态；既有记录只能使用提供的 ID，新记录使用唯一 temp ref。聊天入口固定创建 `retroactive` 任务，不让玩家选择 scope。
 
 追溯改写不得重写旧消息文本，只将其标记为旧现实证据并建立新历史摘要。结果 Narrator 接收源/新现实摘要与已应用后果，陈述现在为何为真，不质疑、削弱或要求玩家再次证明敕令。
 
 ### Settlement
 
-Creator 没有 playerGod 或 `stanceToPlayer`。关系输入允许模型使用当前时间线神名/别名，但应用前必须唯一解析为真实 God ID；无法解析、重名、实体目标或跨现实引用均拒绝。结算长任务持续续租世界操作权。
+Creator 没有 playerGod 或 `stanceToPlayer`。关系输入允许模型使用当前时间线神名/别名，但应用前必须唯一解析为真实 God ID；无法解析、重名、实体目标或跨现实引用均拒绝。提示词称其为 `world settlement` 与 `checkpoint window`，不生成玩家可见章节标题；长任务持续续租世界操作权。
 
 
 约定（遵循全局规则）：**所有 Prompt 模板以英文撰写**（模型遵循度更好），并硬性要求**中文输出**。所有结构化输出定义 Zod schema，校验失败携错误重问（×2）。模板存于 Prompt Registry，带版本号。
@@ -78,7 +80,7 @@ Output: strict JSON per schema. ALL user-facing text in Chinese.
 Role: You are the Chronicler — the narrative engine of this god-RP world.
 Core rules:
  - The player IS a god. Yield agency: never act or speak for the player god.
- - Follow the CURRENT SCALE strictly:
+ - Follow the EFFECTIVE SCALE strictly:
    scene = moment-to-moment prose; era = decades montage in annalistic prose
    interleaved with close-ups; epoch = centuries, historian's register.
  - VOICE cards are law: each god speaks unmistakably in their own voice.
@@ -99,14 +101,17 @@ Core rules:
  - Honor fusion axiom on any cross-IP rules question.
  - Dark themes permitted per the world's tone; follow the style card.
  - Output Chinese narrative prose. End with the structured block.
-Structured tail block: { "suggestions": [2-4 short action options],
-  "chapterBreakHint": bool, "revealed_event_ids": [...],
+Structured tail block: { "suggestions": [0-4 short action options],
+  "operation": "continue"|"retroactive_rewrite",
+  "temporal_state"?: {era?, time?}, "immediate_changes": [...],
+  "significant_event": bool, "settlement_reasons": [...],
+  "revealed_event_ids": [...],
   "ability_reveals": [{abilityId, visibility: "rumored"|"known", evidence}] }
 ```
 
 ## 3. 诸神回合（Pantheon Turn）
 
-**任务**：章末每主神一次。幕后槽，结构化。
+**任务**：世界整理时处理主神后台行动。幕后槽，结构化。
 
 ```
 Role: You are {god_name}, playing YOURSELF — not a narrator.
@@ -131,7 +136,7 @@ Chinese for all user-facing strings.
 
 ## 4. 状态抽取（Extractor）
 
-**任务**：章末，正文→实体增量。幕后槽，结构化；长章分片处理后合并。
+**任务**：世界整理时，检查点正文→实体增量。幕后槽，结构化；长窗口分片处理后合并。
 
 ```
 Task: extract entity deltas from this chapter's narrative.
@@ -158,9 +163,9 @@ Output: strict JSON deltas, including abilityChanges[]. Chinese text fields.
 ## 5. 编年史压缩（Chronicler-Scribe）
 
 ```
-Task: compress this chapter into 2-3 chronicle entries in a historian's
+Task: compress this checkpoint window into 2-3 chronicle entries in a historian's
 register (史官笔法), each tagged with the world's era-year label and
-involved entity/god ids; plus a chapter epilogue paragraph (章末小结).
+involved entity/god ids; plus an epilogue paragraph.
 Do NOT include hidden god actions (they are recorded separately).
 Chinese output.
 ```
@@ -173,22 +178,22 @@ Chinese output.
 
 | 时刻 | 注入变化 |
 |---|---|
-| **开局第一章** | Narrator 附「以创世/降临场景开场，呼应原初神谕，铺开局钩子」 |
+| **开局正文** | 创世物化后立即生成；诸神模式写降临/处境，Creator 写当前纪元世界张力 |
 | **化身入世** | 附「玩家现为凡人化身 {描述}：收窄全知视角，神力受限按宇宙论裁决」 |
 | **余烬视角** | 附「玩家神仅余 {媒介}：叙事以微弱、贴地、近乎绝望的口吻；行动裁决从严」 |
 | **陨灭终章** | 单独调用：「以史诗终章收束此时间线：玩家神之死的余响、诸神格局、世界百年后记」 |
-| **翻章建议** | 非独立调用——`chapterBreakHint` 字段只显示建议；不自动翻章，仍由玩家点击「结束本章」后集中结算 |
+| **自动整理** | 非独立 Narrator 调用；服务端根据重大变化、时间推进或六轮兜底发出 durable settlement follow-up |
 
 ## 8. Token 预算与降级
 
 - 上下文预算按叙事槽 `maxTokens` 反推（默认按 32k 上下文规划，注入区约 8-12k）。
 - 裁剪顺序（先砍后保）：旧正文窗口 → 编年史 → 世界书低优先条目 → 非在场实体卡；**永不裁**：系统模板、风格卡、宇宙论、融合公理、在场实体、待织入征兆。
-- 章末能力抽取按消息窗口分片；每条变化最终使用证据消息自己的 `scale`，整章主尺度只作辅助背景。非法能力项逐条拒绝，不阻断同章其他合法结算；事件 `dedupeKey` 保证断点续跑幂等。
-- 幕后任务失败降级：诸神回合某神失败 → 该神本章记「静观」（不阻塞结算）；抽取失败 → 该章保留断点，重新点击结算可续跑。
+- 世界整理能力抽取按消息窗口分片；每条变化最终使用证据消息自己的 `scale`，窗口主尺度只作辅助背景。非法能力项逐条拒绝，不阻断其他合法项；事件 `dedupeKey` 保证断点续跑幂等。
+- 幕后任务失败降级：诸神回合某神失败 → 该神记「静观」（不阻塞整理）；抽取失败 → 保留断点，刷新自动恢复或手动继续整理。
 
 ## 9. 旧世界渐进建档
 
-旧世界不要求模型补造完整能力谱，也不自动生成 6–12 位主要人物。上下文中能力集合为空时照常叙事；后续仅对正文明确展示、且可提供消息级连续证据的能力变化建立结构化记录。禁止为了“补齐卡片”推断未在正文发生的觉醒、学习或神权。章节交互不变：同章可以继续多轮对话，只有玩家手动「结束本章」才触发抽取。
+旧世界不要求模型补造完整能力谱，也不自动生成 6–12 位主要人物。上下文中能力集合为空时照常叙事；后续仅对正文明确展示、且可提供消息级连续证据的能力变化建立结构化记录。禁止为了“补齐卡片”推断未在正文发生的觉醒、学习或神权。旧存档继续使用内部 `Chapter` 记录，但玩家界面统一为连续世界流程。
 
 ## 创世素材约束块
 
@@ -215,7 +220,7 @@ global（跨世界固定） → world（同世界稳定） → dynamic（本轮�
 
 - **正文 Narrator**：固定核心规则与输出契约为 global；世界名、风格、主题、宇宙论、融合公理、玩家神和主神卡为 world；当前时之仪尺度、征兆、查探结果、实体/能力、世界书命中、编年史、正文窗口和本轮神谕为 dynamic。
 - **创世**：`GENESIS_SYSTEM` 为 global；原初神谕、素材选择及修复内容为 dynamic，namespace 为 `genesis:v1`。
-- **章末结算**：固定 Settlement Schema/System 为 global；本章上下文为 dynamic，namespace 为 `settlement:v1`，仍只进行一次模型调用。
+- **世界整理**：固定 Settlement Schema/System 为 global；当前检查点上下文为 dynamic，namespace 为 `settlement:v1`，仍只进行一次模型调用。
 - **卡片重掷与引用修复**：固定创世 System 为 global；当前卡组、重掷说明和引用错误为 dynamic，任务与 namespace 均使用 `reroll` / `reroll:v1`。
 
 OpenAI-compatible 使用哈希 `prompt_cache_key`；Anthropic 在 global/world 末尾最多放置两个 `cache_control: ephemeral`；Gemini 不创建显式 `cachedContents`，仅依赖隐式缓存并读取 `cachedContentTokenCount`。缓存的是输入前缀，不是模型答案。
