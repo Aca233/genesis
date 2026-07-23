@@ -25,6 +25,11 @@ import {
   type WorldSettlementState,
 } from "@/components/play/world-settlement-state";
 import {
+  reduceTaskProgress,
+  type TaskProgressView,
+} from "@/components/play/task-progress-state";
+import type { DurableTaskProgress } from "@/lib/tasks/progress";
+import {
   EntityIndexProvider,
   type EntityIndexItem,
 } from "@/components/play/entity-index";
@@ -51,6 +56,7 @@ export default function PlayPage({
   const [rerollingId, setRerollingId] = useState<string | null>(null);
   const [rerollingText, setRerollingText] = useState("");
   const [genError, setGenError] = useState<string | null>(null);
+  const [taskProgress, setTaskProgress] = useState<TaskProgressView | null>(null);
   const busy = streamingText !== null || rerollingId !== null;
   const busyRef = useRef(false);
   useEffect(() => {
@@ -255,6 +261,7 @@ export default function PlayPage({
           onDone: async (_messageId, _meta, followUp) => {
             // narrator 已落库 → 拉取对齐（含玩家消息与 meta）
             setStreamingText(null);
+            setTaskProgress(null);
             if (followUp.kind === "settlement") {
               setSettling(true);
               setSettlementState({
@@ -291,8 +298,31 @@ export default function PlayPage({
           onError: async (msg) => {
             // say 的玩家消息可能已落库 → 对齐
             await syncMessages(body.chapterId);
-            setStreamingText(null);
             setGenError(msg);
+          },
+          onProgress: (event) => {
+            const durable: DurableTaskProgress = {
+              taskKind: event.taskKind,
+              taskId: event.taskId,
+              stage: event.stage,
+              status: event.status === "completed" && event.stage === "completed"
+                ? "completed"
+                : "running",
+              retryable: true,
+              updatedAt: event.occurredAt,
+            };
+            setTaskProgress((current) => reduceTaskProgress(current, durable));
+          },
+          onFailed: (event) => {
+            setTaskProgress((current) => reduceTaskProgress(current, {
+              taskKind: "chat",
+              taskId: event.taskId,
+              stage: event.stage,
+              status: "failed",
+              retryable: event.retryable,
+              safeError: event.message,
+              updatedAt: new Date().toISOString(),
+            }));
           },
         },
         ac.signal,
@@ -529,6 +559,9 @@ export default function PlayPage({
               ? settlementState.error
               : null}
             onRetrySettlement={retrySettlement}
+            taskProgress={taskProgress}
+            onRetryTask={retry}
+            onRefreshWorld={() => { void reloadState(); }}
           />
         </div>
 

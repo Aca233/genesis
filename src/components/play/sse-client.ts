@@ -8,8 +8,10 @@
 
 import type { MessageMeta } from "./types";
 import type { ChatFollowUp } from "@/lib/chat/follow-up";
+import type { TaskProgressEvent } from "@/lib/tasks/progress-events";
 
 export type SSEEvent =
+  | TaskProgressEvent
   | { type: "text"; text: string }
   | { type: "done"; messageId: string | null; meta: MessageMeta; followUp?: ChatFollowUp }
   | { type: "error"; message: string };
@@ -18,6 +20,8 @@ export type StreamHandlers = {
   onText: (text: string) => void;
   onDone: (messageId: string | null, meta: MessageMeta, followUp: ChatFollowUp) => void;
   onError: (message: string) => void;
+  onProgress?: (event: Extract<TaskProgressEvent, { type: "progress" }>) => void;
+  onFailed?: (event: Extract<TaskProgressEvent, { type: "failed" }>) => void;
 };
 
 /**
@@ -70,12 +74,19 @@ export async function streamNarration(
       return; // 半包/坏行容忍
     }
     if (event.type === "text") {
-      if (event.text) handlers.onText(event.text);
+      const text = "content" in event ? event.content : event.text;
+      if (text) handlers.onText(text);
+    } else if (event.type === "progress") {
+      handlers.onProgress?.(event);
+    } else if (event.type === "failed") {
+      settled = true;
+      handlers.onFailed?.(event);
+      handlers.onError(event.message || "生成中断");
     } else if (event.type === "done") {
       settled = true;
       handlers.onDone(
-        event.messageId,
-        event.meta ?? {},
+        "messageId" in event ? event.messageId : null,
+        "meta" in event ? event.meta ?? {} : {},
         event.followUp ?? { kind: "none" },
       );
     } else if (event.type === "error") {

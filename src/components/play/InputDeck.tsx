@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Scale } from "@/lib/cards/schemas";
 import { ScaleDial, SCALE_STOPS } from "./ScaleDial";
 import { useTheme } from "@/components/theme/useTheme";
+import type { TaskProgressView } from "./task-progress-state";
+import { TaskProgressBar } from "./TaskProgressBar";
 
 /**
  * 输入区：时之仪（尺度表盘）+ AI 建议 + 多行输入 + 发送/续笔/停止 + 烛光切换。
@@ -20,6 +22,9 @@ export function InputDeck({
   onStop,
   settlementError,
   onRetrySettlement,
+  taskProgress,
+  onRetryTask,
+  onRefreshWorld,
 }: {
   mode: "pantheon" | "creator";
   scale: Scale;
@@ -34,6 +39,9 @@ export function InputDeck({
   onStop: () => void;
   settlementError?: string | null;
   onRetrySettlement?: () => void;
+  taskProgress?: TaskProgressView | null;
+  onRetryTask?: () => void;
+  onRefreshWorld?: () => void;
 }) {
   const [text, setText] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -59,6 +67,11 @@ export function InputDeck({
 
   return (
     <div className="sticky bottom-0 z-30 mx-auto w-full max-w-3xl px-4 pb-3 xl:max-w-4xl">
+      <TaskProgressBar
+        progress={taskProgress ?? null}
+        onRetry={onRetryTask}
+        onRefresh={onRefreshWorld}
+      />
       {(busyKind === "settling" || busyKind === "rewriting") && (
         <div className="mb-1 text-center text-xs text-gilt/70">
           世界正在演化…
