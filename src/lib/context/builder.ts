@@ -5,6 +5,7 @@ import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
 import { ObserverStateSchema, RealityStateSchema } from "@/lib/reality/schemas";
 import { narratorGlobalSystem, narratorTurnSystem, narratorWorldSystem, openingDirective } from "@/lib/prompts/narrator";
 import { buildAbilityContext } from "@/lib/abilities/context";
+import { buildWorldActivityContext } from "@/lib/world-activity/context";
 
 /**
  * Context Builder v1（docs/04 §2 组装顺序的 M1 裁剪版）：
@@ -205,12 +206,12 @@ async function hiddenEntriesForProbe(
 async function entityCardsBlock(
   timelineId: string,
   searchText: string,
-): Promise<string | null> {
+): Promise<{ block: string | null; subjectIds: string[] }> {
   const entities = await prisma.entity.findMany({
     where: { timelineId },
     include: { sections: true },
   });
-  if (!entities.length) return null;
+  if (!entities.length) return { block: null, subjectIds: [] };
 
   const present = entities.filter((e) => e.scenePresence);
   const mentioned = entities.filter(
@@ -242,8 +243,12 @@ async function entityCardsBlock(
     blocks.push(card);
     used += card.length;
   }
-  if (!blocks.length) return null;
-  return `CODEX CARDS (established facts — stay consistent; chosen ones' fates matter):\n\n${blocks.join("\n\n")}`;
+  return {
+    block: blocks.length
+      ? `CODEX CARDS (established facts — stay consistent; chosen ones' fates matter):\n\n${blocks.join("\n\n")}`
+      : null,
+    subjectIds: [...new Set([...present, ...mentioned].map((entity) => entity.id))],
+  };
 }
 
 /** 相关编年史注入：命中实体的近期已揭示条目 */
@@ -410,6 +415,18 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
       searchText,
     }),
   ]);
+  const worldActivityContext = await buildWorldActivityContext({
+    timelineId: chapter.timelineId,
+    mode,
+    viewpoint: observer?.viewpoint ?? (mode === "creator" ? "omniscient" : "limited"),
+    focusedEventId: observer?.focusedEventId ?? null,
+    currentSubjectIds: entityCards.subjectIds,
+  });
+  const worldActivityBlock = worldActivityContext.events.length
+    || worldActivityContext.activities.length
+    || worldActivityContext.focusedEventId
+    ? `CURRENT WORLD ACTIVITY\n${JSON.stringify(worldActivityContext)}`
+    : null;
 
   // ── 正文窗口 + 本轮输入，拼成单条 user（防中转站丢多轮） ──
   const windowText = proseWindow(windowMessages, mode);
@@ -435,7 +452,8 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
   if (realityBlock) messages.push({ role: "system", content: realityBlock, cacheScope: "dynamic" });
   if (observerBlock) messages.push({ role: "system", content: observerBlock, cacheScope: "dynamic" });
   if (creatorHiddenChronicle) messages.push({ role: "system", content: creatorHiddenChronicle, cacheScope: "dynamic" });
-  if (entityCards) messages.push({ role: "system", content: entityCards, cacheScope: "dynamic" });
+  if (entityCards.block) messages.push({ role: "system", content: entityCards.block, cacheScope: "dynamic" });
+  if (worldActivityBlock) messages.push({ role: "system", content: worldActivityBlock, cacheScope: "dynamic" });
   messages.push({ role: "system", content: abilityContext, cacheScope: "dynamic" });
   if (lore) messages.push({ role: "system", content: lore, cacheScope: "dynamic" });
   if (chronicle) messages.push({ role: "system", content: chronicle, cacheScope: "dynamic" });

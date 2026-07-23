@@ -37,10 +37,11 @@ export const ObserverStateSchema = z.object({
   timeLabel: z.string(),
   viewpoint: z.enum(["omniscient", "limited"]),
   activeAvatarId: z.string().nullable(),
+  focusedEventId: z.string().min(1).nullable().default(null),
 }).strict();
 
 export type RealityState = z.infer<typeof RealityStateSchema>;
-export type ObserverState = z.infer<typeof ObserverStateSchema>;
+export type ObserverState = z.input<typeof ObserverStateSchema>;
 
 export function initialRealityState(deck: WorldDeck): RealityState {
   return RealityStateSchema.parse({
@@ -60,6 +61,7 @@ export function initialObserverState(deck: WorldDeck): ObserverState {
     timeLabel: deck.epochConflict.yearLabel,
     viewpoint: "omniscient",
     activeAvatarId: null,
+    focusedEventId: null,
   });
 }
 

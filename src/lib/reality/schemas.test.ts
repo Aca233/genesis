@@ -40,6 +40,7 @@ describe("initial reality and observer state", () => {
         timeLabel: deck.epochConflict.yearLabel,
         viewpoint: "omniscient",
         activeAvatarId: null,
+        focusedEventId: null,
       });
       expect(JSON.parse(JSON.stringify({ reality, observer }))).toEqual({ reality, observer });
     },
@@ -96,6 +97,16 @@ describe("initial reality and observer state", () => {
       viewpoint: "omniscient",
       activeAvatarId: null,
     }).success).toBe(false);
+  });
+
+  it("defaults a missing focused event in legacy observer state to null", () => {
+    expect(ObserverStateSchema.parse({
+      focusType: "world",
+      focusId: null,
+      timeLabel: "裂光元年",
+      viewpoint: "omniscient",
+      activeAvatarId: null,
+    }).focusedEventId).toBeNull();
   });
 });
 

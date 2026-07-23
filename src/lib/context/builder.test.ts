@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
     omenQueue: { findMany: vi.fn(), updateMany: vi.fn() },
     chronicleEntry: { findMany: vi.fn() },
     entity: { findMany: vi.fn() },
+    worldEvent: { findMany: vi.fn() },
+    worldActivity: { findMany: vi.fn() },
   },
   buildAbilityContext: vi.fn(),
 }));
@@ -45,6 +47,8 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     mocks.prisma.omenQueue.findMany.mockResolvedValue([]);
     mocks.prisma.chronicleEntry.findMany.mockResolvedValue([]);
     mocks.prisma.entity.findMany.mockResolvedValue([]);
+    mocks.prisma.worldEvent.findMany.mockResolvedValue([]);
+    mocks.prisma.worldActivity.findMany.mockResolvedValue([]);
     mocks.buildAbilityContext.mockResolvedValue(
       "== KNOWN ABILITIES ==\n—\n\n== AUTHOR-ONLY HIDDEN ABILITIES ==\n- [hidden] 秘能",
     );
@@ -188,5 +192,78 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     expect(opening).toContain("present era");
     expect(opening).toContain("world-internal tension");
     expect(opening).not.toContain("player god's starting situation");
+  });
+
+  it("injects focused and scene-related world activity without forcing a scene switch", async () => {
+    const deck = completeCreatorDeck();
+    vi.clearAllMocks();
+    mocks.prisma.world.findUnique.mockResolvedValue({
+      name: "潮汐界", mode: "creator", activeTimelineId: "timeline-1",
+      styleCard: deck.style, themeCard: deck.theme, cosmology: deck.cosmology,
+      fusionAxiom: deck.fusionAxiom, lorebookEntries: [],
+    });
+    mockChapter({
+      timeline: {
+        id: "timeline-1",
+        realityState: initialRealityState(deck),
+        observerState: {
+          ...initialObserverState(deck),
+          focusedEventId: "event-focus",
+        },
+      },
+      messages: [{ role: "narrator", content: "林霁站在潮神庙前。" }],
+    });
+    mocks.prisma.god.findMany.mockResolvedValue([]);
+    mocks.prisma.omenQueue.findMany.mockResolvedValue([]);
+    mocks.prisma.chronicleEntry.findMany.mockResolvedValue([]);
+    mocks.prisma.entity.findMany
+      .mockResolvedValueOnce([{
+        id: "entity-scene", name: "林霁", aliases: [], type: "character",
+        scenePresence: true, heat: "active", isChosen: false, summary: "潮港信使",
+        sections: [],
+      }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mocks.prisma.worldEvent.findMany.mockResolvedValue([{
+      id: "event-focus",
+      title: "潮港阴谋",
+      summary: "议会仍在密谋。",
+      phase: "developing",
+      visibility: "hidden",
+      participantIds: ["entity-scene"],
+      updatedAt: new Date("2026-07-23T10:00:00.000Z"),
+      resolvedAt: null,
+    }]);
+    mocks.prisma.worldActivity.findMany.mockResolvedValue([{
+      id: "activity-hidden",
+      eventId: "event-focus",
+      recordType: "event_progress",
+      kind: "conspiracy",
+      text: "密使已抵达潮港。",
+      visibility: "hidden",
+      actorId: null,
+      targetIds: [],
+      subjectIds: ["entity-scene"],
+      eraLabel: "潮汐纪",
+      timeLabel: "暮刻",
+      createdAt: new Date("2026-07-23T10:30:00.000Z"),
+    }]);
+    mocks.buildAbilityContext.mockResolvedValue("—");
+
+    const messages = await buildNarratorContext({
+      worldId: "world-1",
+      chapterId: "chapter-1",
+      playerInput: "观察神庙",
+      scale: "scene",
+      mode: "say",
+    });
+    const activityBlock = messages.find((message) =>
+      message.role === "system" && message.content.startsWith("CURRENT WORLD ACTIVITY")
+    )?.content;
+
+    expect(activityBlock).toContain("event-focus");
+    expect(activityBlock).toContain("entity-scene");
+    expect(activityBlock).toContain("世界内尚未知晓");
+    expect(activityBlock).toContain("关注只提高后续叙事权重，不要求切换当前场景");
   });
 });
