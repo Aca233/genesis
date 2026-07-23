@@ -281,7 +281,7 @@ async function* settleChapterWithLease(
   // wait for the winner's persisted response instead of issuing their own request.
   let settlement = readPendingSettlement(chapter.snapshot, mode);
   if (!settlement) {
-    const claim = await claimSettlementModel(chapterId, timeline.id, mode);
+    const claim = await claimSettlementModel(chapterId, timeline.id, worldId, token, mode);
     if (claim.owner) {
       yield { step: "pantheon", detail: "诸神与史官正在共同结算" };
       try {
@@ -310,20 +310,24 @@ async function* settleChapterWithLease(
           ? await relationTargetResolver(timeline.id)
           : undefined;
         validateSettlementRelationTargets(mode, settlement, creatorRelationTargets);
-        const stored = await prisma.chapter.updateMany({
-          where: { id: chapterId, timelineId: timeline.id, settleState: claim.leaseState },
-          data: {
-            snapshot: { pendingSettlement: settlement } as unknown as Prisma.InputJsonValue,
-            settleState: "settling:pantheon",
-          },
+        await withSettlementLeaseFence(worldId, token, async (tx) => {
+          await assertTimelineStillActiveInTransaction(tx, worldId, timeline.id);
+          const stored = await tx.chapter.updateMany({
+            where: { id: chapterId, timelineId: timeline.id, settleState: claim.leaseState },
+            data: {
+              snapshot: { pendingSettlement: settlement } as unknown as Prisma.InputJsonValue,
+              settleState: "settling:pantheon",
+            },
+          });
+          if (stored.count !== 1) throw new Error("章节结算占用已失效");
         });
-        if (stored.count !== 1) throw new Error("章节结算占用已失效");
       } catch (error) {
         try {
-          await assertLeaseOwned();
-          await prisma.chapter.updateMany({
-            where: { id: chapterId, settleState: claim.leaseState },
-            data: { settleState: "open" },
+          await withSettlementLeaseFence(worldId, token, async (tx) => {
+            await tx.chapter.updateMany({
+              where: { id: chapterId, settleState: claim.leaseState },
+              data: { settleState: "open" },
+            });
           });
         } catch {
           // Lease loss forbids any further settlement mutation, including recovery writes.
@@ -476,37 +480,58 @@ async function assertTimelineStillActive(worldId: string, timelineId: string): P
   assertActiveReality(world?.activeTimelineId ?? null, timelineId);
 }
 
+async function assertTimelineStillActiveInTransaction(
+  tx: SettlementTransaction,
+  worldId: string,
+  timelineId: string,
+): Promise<void> {
+  const world = await tx.world.findUnique({
+    where: { id: worldId },
+    select: { activeTimelineId: true },
+  });
+  assertActiveReality(world?.activeTimelineId ?? null, timelineId);
+}
+
 function modelLeaseExpiry(state: string): number | null {
   if (!state.startsWith(MODEL_STATE_PREFIX)) return null;
   const expiry = Number(state.slice(MODEL_STATE_PREFIX.length).split(":", 1)[0]);
   return Number.isFinite(expiry) ? expiry : 0;
 }
 
-async function claimSettlementModel(chapterId: string, timelineId: string, mode: WorldMode): Promise<SettlementModelClaim> {
+async function claimSettlementModel(
+  chapterId: string,
+  timelineId: string,
+  worldId: string,
+  token: string,
+  mode: WorldMode,
+): Promise<SettlementModelClaim> {
   while (true) {
-    const current = await prisma.chapter.findUniqueOrThrow({
-      where: { id: chapterId },
-      select: { snapshot: true, settleState: true },
-    });
-    await assertTimelineStillActive((await prisma.timeline.findUniqueOrThrow({ where: { id: timelineId }, select: { worldId: true } })).worldId, timelineId);
-    const pending = readPendingSettlement(current.snapshot, mode);
-    if (pending) return { owner: false, settlement: pending };
-    if (current.settleState === "settled") {
-      throw new Error("章节已经完成结算，但缺少可恢复的结算响应");
-    }
+    const attempt = await withSettlementLeaseFence(worldId, token, async (tx) => {
+      await assertTimelineStillActiveInTransaction(tx, worldId, timelineId);
+      const current = await tx.chapter.findUniqueOrThrow({
+        where: { id: chapterId },
+        select: { snapshot: true, settleState: true },
+      });
+      const pending = readPendingSettlement(current.snapshot, mode);
+      if (pending) return { kind: "claim", claim: { owner: false, settlement: pending } } as const;
+      if (current.settleState === "settled") {
+        throw new Error("章节已经完成结算，但缺少可恢复的结算响应");
+      }
 
-    const leaseExpiry = modelLeaseExpiry(current.settleState);
-    if (leaseExpiry !== null && leaseExpiry > Date.now()) {
-      await new Promise((resolve) => setTimeout(resolve, MODEL_WAIT_MS));
-      continue;
-    }
+      const leaseExpiry = modelLeaseExpiry(current.settleState);
+      if (leaseExpiry !== null && leaseExpiry > Date.now()) return { kind: "wait" } as const;
 
-    const leaseState = `${MODEL_STATE_PREFIX}${Date.now() + MODEL_LEASE_MS}:${crypto.randomUUID()}`;
-    const claimed = await prisma.chapter.updateMany({
-      where: { id: chapterId, settleState: current.settleState },
-      data: { settleState: leaseState },
+      const leaseState = `${MODEL_STATE_PREFIX}${Date.now() + MODEL_LEASE_MS}:${crypto.randomUUID()}`;
+      const claimed = await tx.chapter.updateMany({
+        where: { id: chapterId, timelineId, settleState: current.settleState },
+        data: { settleState: leaseState },
+      });
+      return claimed.count === 1
+        ? { kind: "claim", claim: { owner: true, leaseState } } as const
+        : { kind: "retry" } as const;
     });
-    if (claimed.count === 1) return { owner: true, leaseState };
+    if (attempt.kind === "claim") return attempt.claim;
+    if (attempt.kind === "wait") await new Promise((resolve) => setTimeout(resolve, MODEL_WAIT_MS));
   }
 }
 

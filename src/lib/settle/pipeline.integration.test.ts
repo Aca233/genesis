@@ -603,6 +603,128 @@ it("renews a long settlement lease so another operation remains blocked past the
   }
 });
 
+it("rolls back the model claim when the settlement lease changes at the claim write boundary", async () => {
+  const data = await fixture();
+  const token = crypto.randomUUID();
+  const suffix = crypto.randomUUID().replaceAll("-", "");
+  const functionName = `settle_model_claim_fence_${suffix}`;
+  const triggerName = `settle_model_claim_fence_trigger_${suffix}`;
+  const { claimWorldOperation } = await import("@/lib/reality/operation-lock");
+  await expect(claimWorldOperation(prisma, data.world.id, "settlement", token)).resolves.toEqual({ acquired: true });
+  await prisma.$executeRawUnsafe(`
+    CREATE FUNCTION "${functionName}"() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.id = '${data.chapter.id}' AND NEW.settle_state LIKE 'settling:model:%' THEN
+        UPDATE worlds SET operation_token = 'replacement-owner' WHERE id = '${data.world.id}';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER "${triggerName}" BEFORE UPDATE ON chapters
+    FOR EACH ROW EXECUTE FUNCTION "${functionName}"();
+  `);
+  try {
+    await expect((async () => {
+      for await (const _progress of settleChapter(data.chapter.id, {
+        worldId: data.world.id,
+        token,
+        claimed: true,
+        heartbeatMs: 60_000,
+      })) void _progress;
+    })()).rejects.toThrow("世界操作租约已失效");
+    expect(await prisma.chapter.findUniqueOrThrow({ where: { id: data.chapter.id } })).toMatchObject({
+      settleState: "open",
+      snapshot: null,
+    });
+  } finally {
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON chapters; DROP FUNCTION IF EXISTS "${functionName}"();`);
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it("rolls back the pending model result when the settlement lease changes at the result write boundary", async () => {
+  const data = await fixture();
+  const token = crypto.randomUUID();
+  const suffix = crypto.randomUUID().replaceAll("-", "");
+  const functionName = `settle_model_result_fence_${suffix}`;
+  const triggerName = `settle_model_result_fence_trigger_${suffix}`;
+  const { claimWorldOperation } = await import("@/lib/reality/operation-lock");
+  await expect(claimWorldOperation(prisma, data.world.id, "settlement", token)).resolves.toEqual({ acquired: true });
+  await prisma.$executeRawUnsafe(`
+    CREATE FUNCTION "${functionName}"() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.id = '${data.chapter.id}'
+        AND NEW.settle_state = 'settling:pantheon'
+        AND NEW.snapshot IS NOT NULL THEN
+        UPDATE worlds SET operation_token = 'replacement-owner' WHERE id = '${data.world.id}';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER "${triggerName}" BEFORE UPDATE ON chapters
+    FOR EACH ROW EXECUTE FUNCTION "${functionName}"();
+  `);
+  try {
+    await expect((async () => {
+      for await (const _progress of settleChapter(data.chapter.id, {
+        worldId: data.world.id,
+        token,
+        claimed: true,
+        heartbeatMs: 60_000,
+      })) void _progress;
+    })()).rejects.toThrow("世界操作租约已失效");
+    expect(await prisma.chapter.findUniqueOrThrow({ where: { id: data.chapter.id } })).toMatchObject({
+      settleState: "open",
+      snapshot: null,
+    });
+  } finally {
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON chapters; DROP FUNCTION IF EXISTS "${functionName}"();`);
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
+it("does not commit model-claim recovery when recovery loses the settlement lease", async () => {
+  const data = await fixture();
+  const token = crypto.randomUUID();
+  const suffix = crypto.randomUUID().replaceAll("-", "");
+  const functionName = `settle_model_recovery_fence_${suffix}`;
+  const triggerName = `settle_model_recovery_fence_trigger_${suffix}`;
+  const { claimWorldOperation } = await import("@/lib/reality/operation-lock");
+  const { completeStructured } = await import("@/lib/llm/structured");
+  await expect(claimWorldOperation(prisma, data.world.id, "settlement", token)).resolves.toEqual({ acquired: true });
+  vi.mocked(completeStructured).mockImplementationOnce(async () => { throw new Error("model unavailable"); });
+  await prisma.$executeRawUnsafe(`
+    CREATE FUNCTION "${functionName}"() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.id = '${data.chapter.id}'
+        AND OLD.settle_state LIKE 'settling:model:%'
+        AND NEW.settle_state = 'open' THEN
+        UPDATE worlds SET operation_token = 'replacement-owner' WHERE id = '${data.world.id}';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER "${triggerName}" BEFORE UPDATE ON chapters
+    FOR EACH ROW EXECUTE FUNCTION "${functionName}"();
+  `);
+  try {
+    await expect((async () => {
+      for await (const _progress of settleChapter(data.chapter.id, {
+        worldId: data.world.id,
+        token,
+        claimed: true,
+        heartbeatMs: 60_000,
+      })) void _progress;
+    })()).rejects.toThrow("model unavailable");
+    const chapter = await prisma.chapter.findUniqueOrThrow({ where: { id: data.chapter.id } });
+    expect(chapter.settleState).toMatch(/^settling:model:/);
+    expect(chapter.snapshot).toBeNull();
+  } finally {
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON chapters; DROP FUNCTION IF EXISTS "${functionName}"();`);
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
+
 it("stops after settlement lease renewal is lost and performs no post-model writes", async () => {
   const data = await fixture();
   const token = crypto.randomUUID();
