@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import {
+  assertMessageEditable,
+  MessageCheckpointError,
+} from "@/lib/chat/message-edit-policy";
 
 /**
  * 消息四件套之「朱批」与「裁去」（docs/01 §3.2）
@@ -28,9 +32,30 @@ export async function PATCH(
   }
   const { content } = parsed.data;
 
-  const message = await prisma.message.findUnique({ where: { id } });
+  const message = await prisma.message.findUnique({
+    where: { id },
+    include: {
+      chapter: {
+        include: {
+          timeline: { include: { world: true } },
+        },
+      },
+    },
+  });
   if (!message) {
     return NextResponse.json({ error: "消息不存在" }, { status: 404 });
+  }
+  try {
+    assertMessageEditable({
+      settleState: message.chapter.settleState,
+      timelineId: message.chapter.timelineId,
+      activeTimelineId: message.chapter.timeline.world.activeTimelineId,
+    });
+  } catch (error) {
+    if (error instanceof MessageCheckpointError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    throw error;
   }
 
   // meta.edited = true（保留其余 meta 字段）
@@ -67,9 +92,30 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const message = await prisma.message.findUnique({ where: { id } });
+  const message = await prisma.message.findUnique({
+    where: { id },
+    include: {
+      chapter: {
+        include: {
+          timeline: { include: { world: true } },
+        },
+      },
+    },
+  });
   if (!message) {
     return NextResponse.json({ error: "消息不存在" }, { status: 404 });
+  }
+  try {
+    assertMessageEditable({
+      settleState: message.chapter.settleState,
+      timelineId: message.chapter.timelineId,
+      activeTimelineId: message.chapter.timeline.world.activeTimelineId,
+    });
+  } catch (error) {
+    if (error instanceof MessageCheckpointError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    throw error;
   }
 
   // 事务：删除该消息及同章 index >= 它的全部（含自身）
