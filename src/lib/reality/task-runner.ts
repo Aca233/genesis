@@ -24,6 +24,7 @@ import {
   type RewritePlan,
   type RewriteScope,
 } from "./schemas";
+import type { DurableTaskProgress } from "@/lib/tasks/progress";
 
 const USER_ID = "local";
 export const REWRITE_LEASE_MS = 5 * 60 * 1000;
@@ -137,6 +138,36 @@ export function rewriteStages(
     return ["branching", "applying"];
   }
   return [task.status];
+}
+
+export function rewriteDurableProgress(
+  task: Pick<
+    PublicRewrite,
+    "id" | "status" | "plan" | "resultTimelineId" | "error" | "updatedAt"
+  >,
+): DurableTaskProgress {
+  const plan = parseStoredPlan(task.plan);
+  let stage: string;
+  if (task.status === "planning") stage = plan ? "planned" : "intent_ready";
+  else if (task.status === "applying") {
+    stage = task.resultTimelineId === null ? "branching" : "applying";
+  } else if (task.status === "narrating") stage = "narrating";
+  else if (task.status === "completed") stage = "completed";
+  else stage = task.resultTimelineId === null ? "branching" : "narrating";
+
+  return {
+    taskKind: "rewrite",
+    taskId: task.id,
+    stage,
+    status: task.status === "completed"
+      ? "completed"
+      : task.status === "failed"
+        ? "failed"
+        : "running",
+    retryable: task.status === "failed",
+    ...(task.error ? { safeError: sanitizeRewriteError(task.error) } : {}),
+    updatedAt: task.updatedAt.toISOString(),
+  };
 }
 
 type RewriteDb = PrismaClient;

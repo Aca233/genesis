@@ -6,6 +6,7 @@ import {
   claimRealityRewriteTask,
   createRealityRewrite,
   remapRewritePlanForClone,
+  rewriteDurableProgress,
   retryRealityRewrite,
   rewriteStage,
   rewriteStages,
@@ -85,6 +86,25 @@ describe("reality rewrite public state", () => {
     expect(rewriteStages({ status: "planning", resultTimelineId: null })).toEqual(["planning"]);
     expect(rewriteStages({ status: "narrating", resultTimelineId: "child" })).toEqual(["narrating"]);
     expect(rewriteStages({ status: "completed", resultTimelineId: "child" })).toEqual(["completed"]);
+  });
+
+  it.each([
+    ["planning", null, null, "intent_ready"],
+    ["planning", plan(), null, "planned"],
+    ["applying", plan(), null, "branching"],
+    ["applying", plan(), "child", "applying"],
+    ["narrating", plan(), "child", "narrating"],
+    ["completed", plan(), "child", "completed"],
+  ])("将 %s 持久状态映射到统一进度 %s", (status, storedPlan, resultTimelineId, stage) => {
+    expect(rewriteDurableProgress(task({
+      status,
+      plan: storedPlan as unknown as Prisma.JsonValue,
+      resultTimelineId,
+    }))).toMatchObject({
+      taskKind: "rewrite",
+      taskId: "rewrite-1",
+      stage,
+    });
   });
 });
 

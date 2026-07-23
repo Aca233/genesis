@@ -1,9 +1,10 @@
 import { prisma } from "@/lib/db";
 import {
   ensureRealityRewriteRunning,
-  rewriteStages,
+  rewriteDurableProgress,
   toRealityRewriteDto,
 } from "@/lib/reality/task-runner";
+import { encodeTaskEvent } from "@/lib/tasks/progress-events";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -39,11 +40,31 @@ export async function GET(
             break;
           }
           const dto = toRealityRewriteDto(task);
-          const stages = rewriteStages(dto);
-          const version = `${dto.updatedAt}:${dto.status}:${stages.join(",")}:${dto.resultTimelineId ?? ""}`;
+          const progress = rewriteDurableProgress(task);
+          const version = `${dto.updatedAt}:${dto.status}:${progress.stage}:${dto.resultTimelineId ?? ""}`;
           if (version !== lastVersion) {
-            for (const stage of stages) {
-              controller.enqueue(encodeEvent(stage, { stage, task: dto }));
+            controller.enqueue(encodeTaskEvent(progress.status === "failed"
+              ? {
+                  type: "failed",
+                  taskId: id,
+                  stage: progress.stage,
+                  message: progress.safeError ?? "现实改写中断",
+                  retryable: progress.retryable,
+                }
+              : {
+                  type: "progress",
+                  taskId: id,
+                  taskKind: "rewrite",
+                  stage: progress.stage,
+                  status: progress.status === "completed" ? "completed" : "running",
+                  occurredAt: progress.updatedAt,
+                }));
+            if (progress.status === "completed") {
+              controller.enqueue(encodeTaskEvent({
+                type: "done",
+                taskId: id,
+                followUp: { kind: "none" },
+              }));
             }
             lastVersion = version;
           } else if (tick % 5 === 0) {
