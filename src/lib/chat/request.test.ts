@@ -1,5 +1,17 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { markGenerationFailed, prepareGenerationRequest } from "./request";
+
+it("GenerationRequest 和内部检查点持久化真实任务阶段", () => {
+  const schema = readFileSync("prisma/schema.prisma", "utf8");
+  expect(schema).toContain("stage             String   @default(\"reserved\")");
+  expect(schema).toContain("outputSnapshot    Json?    @map(\"output_snapshot\")");
+  expect(schema).toContain("retryable         Boolean  @default(true)");
+  expect(schema).toContain("safeError         String?  @map(\"safe_error\")");
+  expect(schema).toContain("stageUpdatedAt    DateTime @default(now()) @map(\"stage_updated_at\")");
+  expect(schema).toMatch(/settleError\s+String\?\s+@map\("settle_error"\)/);
+  expect(schema).toMatch(/settleRetryable\s+Boolean\s+@default\(true\)\s+@map\("settle_retryable"\)/);
+});
 
 function fixture() {
   const messages = new Map<string, Record<string, unknown>>();

@@ -96,14 +96,17 @@ model Timeline {
 }
 
 model Chapter {
-  id          String    @id @default(cuid())
-  timelineId  String    @map("timeline_id")
-  timeline    Timeline  @relation(fields: [timelineId], references: [id], onDelete: Cascade)
-  index       Int
-  title       String?
-  summary     String? // 章末史官小结
-  settleState String    @default("open") @map("settle_state") // open | settling:<step> | settled
-  snapshot    Json? // 章快照（M3 分叉用）
+  id              String    @id @default(cuid())
+  timelineId      String    @map("timeline_id")
+  timeline        Timeline  @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  index           Int
+  title           String?
+  summary         String? // 章末史官小结
+  settleState     String    @default("open") @map("settle_state") // open | settling:<step> | settled
+  settleError     String?   @map("settle_error")
+  settleRetryable Boolean   @default(true) @map("settle_retryable")
+  settleUpdatedAt DateTime  @default(now()) @map("settle_updated_at")
+  snapshot        Json? // 章快照（M3 分叉用）
   messages      Message[]
   abilityEvents AbilityEvent[]
   generationRequests GenerationRequest[]
@@ -122,6 +125,11 @@ model GenerationRequest {
   content           String?
   directive         String?
   status            String   @default("pending")
+  stage             String   @default("reserved")
+  outputSnapshot    Json?    @map("output_snapshot")
+  retryable         Boolean  @default(true)
+  safeError         String?  @map("safe_error")
+  stageUpdatedAt    DateTime @default(now()) @map("stage_updated_at")
   error             String?
   attempt           Int      @default(1)
   leaseExpiresAt    DateTime? @map("lease_expires_at")
@@ -134,6 +142,7 @@ model GenerationRequest {
   updatedAt         DateTime @updatedAt @map("updated_at")
 
   @@index([chapterId, status])
+  @@index([chapterId, stage])
   @@map("generation_requests")
 }
 
