@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { projectVersionTwoWorld } from "@/lib/archive/v2";
 
 /**
- * GET /api/worlds/[id]/export —— 导出 owner-private version 3 存档。
+ * GET /api/worlds/[id]/export —— 导出 owner-private version 4 存档。
  *
  * Runtime leases, idempotency credentials and provider-facing error details are
  * intentionally outside the archive. Hidden world facts remain present because
@@ -83,6 +83,71 @@ function projectVersionThreeWorld(value: unknown) {
   };
 }
 
+const WORLD_EVENT_KEYS = [
+  "id",
+  "timelineId",
+  "kind",
+  "title",
+  "summary",
+  "phase",
+  "visibility",
+  "participantIds",
+  "originMessageId",
+  "originActivityId",
+  "latestMessageId",
+  "parentEventId",
+  "createdAt",
+  "updatedAt",
+  "resolvedAt",
+] as const;
+
+const WORLD_ACTIVITY_KEYS = [
+  "id",
+  "timelineId",
+  "eventId",
+  "recordType",
+  "kind",
+  "text",
+  "visibility",
+  "actorId",
+  "targetIds",
+  "subjectIds",
+  "sourceMessageId",
+  "eraLabel",
+  "timeLabel",
+  "createdAt",
+] as const;
+
+function projectFields(value: unknown, keys: readonly string[]) {
+  const source = record(value);
+  return Object.fromEntries(keys.map((key) => [key, source[key]]));
+}
+
+function projectVersionFourWorld(value: unknown) {
+  const sourceWorld = record(value);
+  const versionThree = projectVersionThreeWorld(value);
+  const sourceTimelines = Array.isArray(sourceWorld.timelines) ? sourceWorld.timelines : [];
+  const sourceTimelineById = new Map(sourceTimelines.map((timelineValue) => {
+    const timeline = record(timelineValue);
+    return [timeline.id, timeline] as const;
+  }));
+
+  return {
+    ...versionThree,
+    timelines: versionThree.timelines.map((timelineValue) => {
+      const timeline = record(timelineValue);
+      const source = sourceTimelineById.get(timeline.id) ?? {};
+      return {
+        ...timeline,
+        worldEvents: (Array.isArray(source.worldEvents) ? source.worldEvents : [])
+          .map((event) => projectFields(event, WORLD_EVENT_KEYS)),
+        worldActivities: (Array.isArray(source.worldActivities) ? source.worldActivities : [])
+          .map((activity) => projectFields(activity, WORLD_ACTIVITY_KEYS)),
+      };
+    }),
+  };
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -110,6 +175,8 @@ export async function GET(
           },
           chronicles: { orderBy: { createdAt: "asc" } },
           omens: { orderBy: { createdAt: "asc" } },
+          worldEvents: { orderBy: { createdAt: "asc" } },
+          worldActivities: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
         },
       },
       rewrites: { orderBy: { createdAt: "asc" } },
@@ -122,9 +189,9 @@ export async function GET(
   }
 
   const payload = {
-    version: 3,
+    version: 4,
     exportedAt: new Date().toISOString(),
-    world: projectVersionThreeWorld(world),
+    world: projectVersionFourWorld(world),
   };
 
   const encodedName = encodeURIComponent(`genesis-${world.name}.json`);

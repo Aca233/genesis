@@ -18,7 +18,7 @@ import {
 import { buildRealityTree } from "@/lib/reality/tree";
 
 /**
- * POST /api/worlds/import —— 导入 version 1、2 或 3 存档。
+ * POST /api/worlds/import —— 导入 version 1、2、3 或 4 存档。
  * 所有记录在单个事务中用新 ID 重建，任何失败都会回滚整个新世界。
  */
 
@@ -242,6 +242,52 @@ const OmenSchema = z
   })
   .strict();
 
+const WorldEventSchema = z
+  .object({
+    id: IdSchema,
+    timelineId: OptionalIdSchema,
+    kind: z.enum([
+      "war",
+      "conspiracy",
+      "disaster",
+      "religious_conflict",
+      "faction_shift",
+      "world_crisis",
+    ]),
+    title: ShortStringSchema.min(1),
+    summary: TextSchema,
+    phase: z.enum(["emerging", "developing", "escalating", "resolved"]),
+    visibility: z.enum(["public", "player_known", "hidden"]),
+    participantIds: z.array(IdSchema).max(MAX_COLLECTION_ITEMS).default([]),
+    originMessageId: IdSchema,
+    originActivityId: NullableIdSchema,
+    latestMessageId: IdSchema,
+    parentEventId: NullableIdSchema,
+    createdAt: z.coerce.date().optional(),
+    updatedAt: z.coerce.date().optional(),
+    resolvedAt: z.coerce.date().nullish(),
+  })
+  .strict();
+
+const WorldActivitySchema = z
+  .object({
+    id: IdSchema,
+    timelineId: OptionalIdSchema,
+    eventId: NullableIdSchema,
+    recordType: z.enum(["action", "activity", "event_progress"]),
+    kind: ShortStringSchema.min(1),
+    text: TextSchema,
+    visibility: z.enum(["public", "player_known", "hidden"]),
+    actorId: NullableIdSchema,
+    targetIds: z.array(IdSchema).max(MAX_COLLECTION_ITEMS).default([]),
+    subjectIds: z.array(IdSchema).max(MAX_COLLECTION_ITEMS).default([]),
+    sourceMessageId: IdSchema,
+    eraLabel: ShortStringSchema,
+    timeLabel: ShortStringSchema,
+    createdAt: z.coerce.date().optional(),
+  })
+  .strict();
+
 const TimelineSchema = z
   .object({
     id: IdSchema,
@@ -261,6 +307,8 @@ const TimelineSchema = z
     memberships: z.array(MembershipSchema).max(MAX_COLLECTION_ITEMS).default([]),
     chronicles: z.array(ChronicleSchema).max(MAX_COLLECTION_ITEMS).default([]),
     omens: z.array(OmenSchema).max(MAX_COLLECTION_ITEMS).default([]),
+    worldEvents: z.array(WorldEventSchema).max(MAX_COLLECTION_ITEMS).default([]),
+    worldActivities: z.array(WorldActivitySchema).max(MAX_COLLECTION_ITEMS).default([]),
     createdAt: z.coerce.date().optional(),
     updatedAt: z.coerce.date().optional(),
   })
@@ -322,7 +370,7 @@ const WorldSchema = z
 
 const ImportSchema = z
   .object({
-    version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    version: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     exportedAt: z.string().datetime().max(64).optional(),
     world: WorldSchema,
   })
@@ -396,6 +444,8 @@ type ImportedMessage = z.infer<typeof MessageSchema>;
 type ImportedEntity = z.infer<typeof EntitySchema>;
 type ImportedGod = z.infer<typeof GodSchema>;
 type ImportedAbility = z.infer<typeof AbilitySchema>;
+type ImportedWorldEvent = z.infer<typeof WorldEventSchema>;
+type ImportedWorldActivity = z.infer<typeof WorldActivitySchema>;
 
 interface TimelineReferenceIndexes {
   chapters: Map<string, ImportedChapter>;
@@ -403,6 +453,8 @@ interface TimelineReferenceIndexes {
   entities: Map<string, ImportedEntity>;
   gods: Map<string, ImportedGod>;
   abilities: Map<string, ImportedAbility>;
+  worldEvents: Map<string, ImportedWorldEvent>;
+  worldActivities: Map<string, ImportedWorldActivity>;
 }
 
 interface GlobalReferenceIndexes {
@@ -415,6 +467,8 @@ interface GlobalReferenceIndexes {
   entities: Map<string, { timelineId: string; value: ImportedEntity }>;
   gods: Map<string, { timelineId: string; value: ImportedGod }>;
   abilities: Map<string, { timelineId: string; value: ImportedAbility }>;
+  worldEvents: Map<string, { timelineId: string; value: ImportedWorldEvent }>;
+  worldActivities: Map<string, { timelineId: string; value: ImportedWorldActivity }>;
 }
 
 function buildReferenceIndexes(world: ImportedWorld): GlobalReferenceIndexes {
@@ -425,6 +479,8 @@ function buildReferenceIndexes(world: ImportedWorld): GlobalReferenceIndexes {
     entities: new Map(),
     gods: new Map(),
     abilities: new Map(),
+    worldEvents: new Map(),
+    worldActivities: new Map(),
   };
 
   for (const timeline of world.timelines) {
@@ -434,6 +490,8 @@ function buildReferenceIndexes(world: ImportedWorld): GlobalReferenceIndexes {
       entities: new Map(),
       gods: new Map(),
       abilities: new Map(),
+      worldEvents: new Map(),
+      worldActivities: new Map(),
     };
     indexes.timelines.set(timeline.id, local);
 
@@ -460,6 +518,14 @@ function buildReferenceIndexes(world: ImportedWorld): GlobalReferenceIndexes {
     for (const ability of timeline.abilities) {
       local.abilities.set(ability.id, ability);
       indexes.abilities.set(ability.id, { timelineId: timeline.id, value: ability });
+    }
+    for (const event of timeline.worldEvents) {
+      local.worldEvents.set(event.id, event);
+      indexes.worldEvents.set(event.id, { timelineId: timeline.id, value: event });
+    }
+    for (const activity of timeline.worldActivities) {
+      local.worldActivities.set(activity.id, activity);
+      indexes.worldActivities.set(activity.id, { timelineId: timeline.id, value: activity });
     }
   }
   return indexes;
@@ -562,6 +628,81 @@ async function validateTimelineReferences(
   for (const omen of timeline.omens) {
     assertDeclaredOwner(omen.timelineId, timeline.id, "征兆");
     requireTimelineRecord(indexes.gods, omen.godId, timeline.id, "征兆神明");
+  }
+  for (const event of timeline.worldEvents) {
+    assertDeclaredOwner(event.timelineId, timeline.id, "世界事件");
+    for (const participantId of event.participantIds) {
+      const participant =
+        indexes.entities.get(participantId) ?? indexes.gods.get(participantId);
+      if (participant === undefined) {
+        throw new Error(`世界事件参与者引用不存在：${participantId}`);
+      }
+      if (participant.timelineId !== timeline.id) {
+        throw new Error("世界事件参与者必须属于当前时间线");
+      }
+    }
+    requireTimelineRecord(
+      indexes.messageToChapter,
+      event.originMessageId,
+      timeline.id,
+      "世界事件起源消息",
+    );
+    requireTimelineRecord(
+      indexes.messageToChapter,
+      event.latestMessageId,
+      timeline.id,
+      "世界事件最新消息",
+    );
+    if (event.originActivityId != null) {
+      requireTimelineRecord(
+        indexes.worldActivities,
+        event.originActivityId,
+        timeline.id,
+        "世界事件起源动态",
+      );
+    }
+    if (event.parentEventId != null) {
+      requireTimelineRecord(
+        indexes.worldEvents,
+        event.parentEventId,
+        timeline.id,
+        "世界事件父事件",
+      );
+      if (event.parentEventId === event.id) throw new Error("世界事件不得以自身为父事件");
+    }
+  }
+  for (const event of timeline.worldEvents) {
+    const visited = new Set<string>([event.id]);
+    let parentEventId = event.parentEventId;
+    while (parentEventId != null) {
+      if (visited.has(parentEventId)) throw new Error("世界事件父链不得形成循环");
+      visited.add(parentEventId);
+      parentEventId = local.worldEvents.get(parentEventId)?.parentEventId ?? null;
+    }
+  }
+  for (const activity of timeline.worldActivities) {
+    assertDeclaredOwner(activity.timelineId, timeline.id, "世界动态");
+    if (activity.eventId != null) {
+      requireTimelineRecord(indexes.worldEvents, activity.eventId, timeline.id, "世界动态事件");
+    }
+    const memberIds = [
+      ...(activity.actorId == null ? [] : [activity.actorId]),
+      ...activity.targetIds,
+      ...activity.subjectIds,
+    ];
+    for (const memberId of memberIds) {
+      const member = indexes.entities.get(memberId) ?? indexes.gods.get(memberId);
+      if (member === undefined) throw new Error(`世界动态对象引用不存在：${memberId}`);
+      if (member.timelineId !== timeline.id) {
+        throw new Error("世界动态对象必须属于当前时间线");
+      }
+    }
+    requireTimelineRecord(
+      indexes.messageToChapter,
+      activity.sourceMessageId,
+      timeline.id,
+      "世界动态来源消息",
+    );
   }
 
   const ownershipTx = {
@@ -671,7 +812,18 @@ function defaultObserverState(): Prisma.InputJsonValue {
     timeLabel: "",
     viewpoint: "omniscient",
     activeAvatarId: null,
+    focusedEventId: null,
   } as Prisma.InputJsonObject;
+}
+
+function normalizedObserverState(value: unknown): unknown {
+  const observer = typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    ...observer,
+    focusedEventId: observer.focusedEventId ?? null,
+  };
 }
 
 function validateVersionThreeArchive(world: ImportedWorld) {
@@ -736,6 +888,14 @@ function validateVersionThreeArchive(world: ImportedWorld) {
         || avatar.heat !== "active"
       ) {
         throw new Error("活动化身必须是当前现实中的活跃创世主人物");
+      }
+    }
+    if (state.focusedEventId !== null) {
+      const focusedEvent = timeline.worldEvents.find(
+        (event) => event.id === state.focusedEventId && event.resolvedAt == null,
+      );
+      if (focusedEvent === undefined) {
+        throw new Error("关注事件必须是当前现实中未解决的世界事件");
       }
     }
 
@@ -822,9 +982,9 @@ export async function POST(request: Request) {
     typeof raw === "object" && raw !== null
       ? (raw as { version?: unknown }).version
       : undefined;
-  if (rawVersion !== 1 && rawVersion !== 2 && rawVersion !== 3) {
+  if (rawVersion !== 1 && rawVersion !== 2 && rawVersion !== 3 && rawVersion !== 4) {
     return NextResponse.json(
-      { error: "存档版本不受支持：仅接受 version 1、version 2 或 version 3" },
+      { error: "存档版本不受支持：仅接受 version 1、version 2、version 3 或 version 4" },
       { status: 400 },
     );
   }
@@ -838,7 +998,19 @@ export async function POST(request: Request) {
   }
   const archiveVersion = parsed.data.version;
   const w = parsed.data.world;
-  const importedMode = archiveVersion === 3 ? w.mode : "pantheon";
+  if (archiveVersion < 4) {
+    for (const timeline of w.timelines) {
+      timeline.worldEvents = [];
+      timeline.worldActivities = [];
+      timeline.observerState = {
+        ...(typeof timeline.observerState === "object" && timeline.observerState !== null
+          ? timeline.observerState as Record<string, unknown>
+          : {}),
+        focusedEventId: null,
+      };
+    }
+  }
+  const importedMode = archiveVersion >= 3 ? w.mode : "pantheon";
 
   const newWorldId = crypto.randomUUID();
   const archiveIds = new Map<string, string>();
@@ -855,6 +1027,8 @@ export async function POST(request: Request) {
   const omenMap = new Map<string, string>();
   const rewriteMap = new Map<string, string>();
   const lorebookMap = new Map<string, string>();
+  const worldEventMap = new Map<string, string>();
+  const worldActivityMap = new Map<string, string>();
 
   try {
     if (w.id !== undefined) {
@@ -891,13 +1065,19 @@ export async function POST(request: Request) {
       for (const omen of tl.omens) {
         if (omen.id !== undefined) addMapping(omenMap, archiveIds, omen.id, "征兆");
       }
+      for (const event of tl.worldEvents) {
+        addMapping(worldEventMap, archiveIds, event.id, "世界事件");
+      }
+      for (const activity of tl.worldActivities) {
+        addMapping(worldActivityMap, archiveIds, activity.id, "世界动态");
+      }
     }
     for (const rewrite of w.rewrites) addMapping(rewriteMap, archiveIds, rewrite.id, "现实改写");
     for (const lorebook of w.lorebookEntries) {
       if (lorebook.id !== undefined) addMapping(lorebookMap, archiveIds, lorebook.id, "世界书条目");
     }
 
-    if (archiveVersion === 3) validateVersionThreeArchive(w);
+    if (archiveVersion >= 3) validateVersionThreeArchive(w);
 
     const referenceIndexes = buildReferenceIndexes(w);
     for (const timeline of w.timelines) {
@@ -916,6 +1096,8 @@ export async function POST(request: Request) {
     const chronicleRows: Prisma.ChronicleEntryCreateManyInput[] = [];
     const omenRows: Prisma.OmenQueueCreateManyInput[] = [];
     const rewriteRows: Prisma.RealityRewriteCreateManyInput[] = [];
+    const worldEventRows: Prisma.WorldEventCreateManyInput[] = [];
+    const worldActivityRows: Prisma.WorldActivityCreateManyInput[] = [];
     const allIdMap = new Map<string, string>([
       ...timelineMap,
       ...chapterMap,
@@ -930,15 +1112,17 @@ export async function POST(request: Request) {
       ...omenMap,
       ...rewriteMap,
       ...lorebookMap,
+      ...worldEventMap,
+      ...worldActivityMap,
     ]);
 
     for (const tl of w.timelines) {
       const newTlId = remapRequired(timelineMap, tl.id, "时间线");
-      const realityState = archiveVersion === 3
+      const realityState = archiveVersion >= 3
         ? remapArchivedJson(tl.realityState, allIdMap)
         : derivedRealityState(w);
-      const observerState = archiveVersion === 3
-        ? remapArchivedJson(tl.observerState, allIdMap)
+      const observerState = archiveVersion >= 3
+        ? remapArchivedJson(normalizedObserverState(tl.observerState), allIdMap)
         : defaultObserverState();
       timelineRows.push({
         id: newTlId,
@@ -947,7 +1131,7 @@ export async function POST(request: Request) {
           ? remapRequired(timelineMap, tl.parentId, "父时间线")
           : null,
         forkChapter: tl.forkChapter ?? null,
-        branchName: archiveVersion === 3
+        branchName: archiveVersion >= 3
           ? tl.branchName
           : tl.parentId === null
             ? "原初现实"
@@ -955,7 +1139,7 @@ export async function POST(request: Request) {
         branchSummary: tl.branchSummary ?? null,
         realityState,
         observerState,
-        forkRewriteId: archiveVersion === 3 && tl.forkRewriteId != null
+        forkRewriteId: archiveVersion >= 3 && tl.forkRewriteId != null
           ? remapRequired(rewriteMap, tl.forkRewriteId, "分叉改写")
           : null,
         createdAt: tl.createdAt,
@@ -1002,7 +1186,7 @@ export async function POST(request: Request) {
           starred: entity.starred,
           isChosen: entity.isChosen,
           isMajorCharacter: entity.isMajorCharacter,
-          isCreatorAvatar: archiveVersion === 3 ? entity.isCreatorAvatar : false,
+          isCreatorAvatar: archiveVersion >= 3 ? entity.isCreatorAvatar : false,
           raceId: entity.raceId != null
             ? remapRequired(entityMap, entity.raceId, "人物种族")
             : null,
@@ -1165,6 +1349,71 @@ export async function POST(request: Request) {
           createdAt: omen.createdAt,
         });
       }
+
+      for (const event of tl.worldEvents) {
+        worldEventRows.push({
+          id: remapRequired(worldEventMap, event.id, "世界事件"),
+          timelineId: newTlId,
+          kind: event.kind,
+          title: event.title,
+          summary: event.summary,
+          phase: event.phase,
+          visibility: event.visibility,
+          participantIds: event.participantIds.map((id) =>
+            remapRequired(allIdMap, id, "世界事件参与者"),
+          ),
+          originMessageId: remapRequired(
+            messageMap,
+            event.originMessageId,
+            "世界事件起源消息",
+          ),
+          originActivityId: event.originActivityId != null
+            ? remapRequired(worldActivityMap, event.originActivityId, "世界事件起源动态")
+            : null,
+          latestMessageId: remapRequired(
+            messageMap,
+            event.latestMessageId,
+            "世界事件最新消息",
+          ),
+          parentEventId: event.parentEventId != null
+            ? remapRequired(worldEventMap, event.parentEventId, "世界事件父事件")
+            : null,
+          createdAt: event.createdAt,
+          updatedAt: event.updatedAt,
+          resolvedAt: event.resolvedAt ?? null,
+        });
+      }
+
+      for (const activity of tl.worldActivities) {
+        worldActivityRows.push({
+          id: remapRequired(worldActivityMap, activity.id, "世界动态"),
+          timelineId: newTlId,
+          eventId: activity.eventId != null
+            ? remapRequired(worldEventMap, activity.eventId, "世界动态事件")
+            : null,
+          recordType: activity.recordType,
+          kind: activity.kind,
+          text: activity.text,
+          visibility: activity.visibility,
+          actorId: activity.actorId != null
+            ? remapRequired(allIdMap, activity.actorId, "世界动态行动者")
+            : null,
+          targetIds: activity.targetIds.map((id) =>
+            remapRequired(allIdMap, id, "世界动态目标"),
+          ),
+          subjectIds: activity.subjectIds.map((id) =>
+            remapRequired(allIdMap, id, "世界动态主体"),
+          ),
+          sourceMessageId: remapRequired(
+            messageMap,
+            activity.sourceMessageId,
+            "世界动态来源消息",
+          ),
+          eraLabel: activity.eraLabel,
+          timeLabel: activity.timeLabel,
+          createdAt: activity.createdAt,
+        });
+      }
     }
 
     for (const rewrite of w.rewrites) {
@@ -1242,6 +1491,27 @@ export async function POST(request: Request) {
       await tx.chronicleEntry.createMany({ data: chronicleRows });
       await tx.omenQueue.createMany({ data: omenRows });
       await tx.realityRewrite.createMany({ data: rewriteRows });
+      const deferredEventRows = worldEventRows.map((row) => ({
+        ...row,
+        parentEventId: null,
+        originActivityId: null,
+      }));
+      await tx.worldEvent.createMany({ data: deferredEventRows });
+      await tx.worldActivity.createMany({ data: worldActivityRows });
+      for (const row of worldEventRows) {
+        if (
+          row.parentEventId !== null
+          || row.originActivityId !== null
+        ) {
+          await tx.worldEvent.update({
+            where: { id: row.id },
+            data: {
+              parentEventId: row.parentEventId ?? null,
+              originActivityId: row.originActivityId ?? null,
+            },
+          });
+        }
+      }
       for (const row of timelineRows) {
         if (row.forkRewriteId !== null && row.forkRewriteId !== undefined) {
           await tx.timeline.update({

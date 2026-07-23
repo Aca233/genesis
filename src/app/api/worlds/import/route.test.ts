@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => {
       chronicleEntry: model(),
       omenQueue: model(),
       realityRewrite: model(),
+      worldEvent: model(),
+      worldActivity: model(),
       $transaction: vi.fn(),
     },
   };
@@ -528,6 +530,89 @@ function versionThreeArchive() {
   };
 }
 
+function versionFourArchive() {
+  const archive = versionThreeArchive() as ReturnType<typeof versionThreeArchive> & {
+    version: 4;
+  };
+  archive.version = 4;
+  const root = archive.world.timelines[0] as typeof archive.world.timelines[0] & {
+    worldEvents: Array<Record<string, unknown>>;
+    worldActivities: Array<Record<string, unknown>>;
+  };
+  root.observerState = {
+    ...root.observerState,
+    focusedEventId: "world-event-child",
+  };
+  root.worldEvents = [{
+    id: "world-event-parent",
+    timelineId: "timeline-root",
+    kind: "conspiracy",
+    title: "无声议会",
+    summary: "密议初现。",
+    phase: "developing",
+    visibility: "hidden",
+    participantIds: ["god-root", "entity-root"],
+    originMessageId: "message-root",
+    originActivityId: "world-activity-origin",
+    latestMessageId: "message-root",
+    parentEventId: null,
+    createdAt: "2026-07-22T00:00:00.000Z",
+    updatedAt: "2026-07-22T00:00:00.000Z",
+    resolvedAt: null,
+  }, {
+    id: "world-event-child",
+    timelineId: "timeline-root",
+    kind: "faction_shift",
+    title: "黑蜡盟约",
+    summary: "盟约正在扩张。",
+    phase: "escalating",
+    visibility: "player_known",
+    participantIds: ["entity-root"],
+    originMessageId: "message-root",
+    originActivityId: "world-activity-progress",
+    latestMessageId: "message-root",
+    parentEventId: "world-event-parent",
+    createdAt: "2026-07-22T00:01:00.000Z",
+    updatedAt: "2026-07-22T00:02:00.000Z",
+    resolvedAt: null,
+  }];
+  root.worldActivities = [{
+    id: "world-activity-origin",
+    timelineId: "timeline-root",
+    eventId: "world-event-parent",
+    recordType: "activity",
+    kind: "meeting",
+    text: "议会在暗处召开。",
+    visibility: "hidden",
+    actorId: "god-root",
+    targetIds: ["entity-root"],
+    subjectIds: ["god-root", "entity-root"],
+    sourceMessageId: "message-root",
+    eraLabel: "初始纪元",
+    timeLabel: "第一日",
+    createdAt: "2026-07-22T00:00:00.000Z",
+  }, {
+    id: "world-activity-progress",
+    timelineId: "timeline-root",
+    eventId: "world-event-child",
+    recordType: "event_progress",
+    kind: "faction_shift",
+    text: "黑蜡盟约扩张。",
+    visibility: "player_known",
+    actorId: null,
+    targetIds: [],
+    subjectIds: ["entity-root"],
+    sourceMessageId: "message-root",
+    eraLabel: "初始纪元",
+    timeLabel: "第二日",
+    createdAt: "2026-07-22T00:02:00.000Z",
+  }];
+  for (const timeline of archive.world.timelines.slice(1)) {
+    Object.assign(timeline, { worldEvents: [], worldActivities: [] });
+  }
+  return archive;
+}
+
 function installSuccessfulTransaction() {
   mocks.prisma.$transaction.mockImplementation(async (run) => run(mocks.prisma));
   for (const value of Object.values(mocks.prisma)) {
@@ -629,6 +714,17 @@ describe("存档导入", () => {
     expect(mocks.prisma.world.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ mode: "pantheon" }),
     }));
+  });
+
+  it("version 2 自动补空世界动态图和 focusedEventId", async () => {
+    const response = await importWorld(request(versionTwoArchive()));
+
+    expect(response.status).toBe(200);
+    expect(lastCreateManyData(mocks.prisma.worldEvent)).toEqual([]);
+    expect(lastCreateManyData(mocks.prisma.worldActivity)).toEqual([]);
+    expect(lastCreateManyData(mocks.prisma.timeline)[0].observerState).toMatchObject({
+      focusedEventId: null,
+    });
   });
 
   it("保留 embark 的 relations.player 并重映射真实神明 ID 关系键", async () => {
@@ -1078,6 +1174,120 @@ describe("存档导入", () => {
     });
   });
 
+  it("version 3 自动补空世界动态图和 focusedEventId", async () => {
+    const archive = versionThreeArchive();
+    for (const timeline of archive.world.timelines) {
+      delete (timeline.observerState as Record<string, unknown>).focusedEventId;
+    }
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(200);
+    expect(lastCreateManyData(mocks.prisma.worldEvent)).toEqual([]);
+    expect(lastCreateManyData(mocks.prisma.worldActivity)).toEqual([]);
+    for (const timeline of lastCreateManyData(mocks.prisma.timeline)) {
+      expect(timeline.observerState).toMatchObject({ focusedEventId: null });
+    }
+  });
+
+  it("version 4 为事件链、动态和全部内部引用生成新 ID", async () => {
+    const response = await importWorld(request(versionFourArchive()));
+
+    expect(response.status).toBe(200);
+    const timeline = lastCreateManyData(mocks.prisma.timeline).find(
+      (row) => row.branchName === "原初现实",
+    )!;
+    const messages = lastCreateManyData(mocks.prisma.message);
+    const message = messages.find((row) => row.chapterId !== undefined)!;
+    const god = lastCreateManyData(mocks.prisma.god).find((row) => row.name === "根源神")!;
+    const entity = lastCreateManyData(mocks.prisma.entity).find(
+      (row) => row.name === "根源见证者",
+    )!;
+    const events = lastCreateManyData(mocks.prisma.worldEvent);
+    const activities = lastCreateManyData(mocks.prisma.worldActivity);
+    const parent = events.find((row) => row.title === "无声议会")!;
+    const child = events.find((row) => row.title === "黑蜡盟约")!;
+    const origin = activities.find((row) => row.text === "议会在暗处召开。")!;
+    const progress = activities.find((row) => row.text === "黑蜡盟约扩张。")!;
+
+    expect(parent).toMatchObject({
+      timelineId: timeline.id,
+      participantIds: [god.id, entity.id],
+      originMessageId: message.id,
+      latestMessageId: message.id,
+      parentEventId: null,
+      visibility: "hidden",
+    });
+    expect(child).toMatchObject({
+      timelineId: timeline.id,
+      participantIds: [entity.id],
+    });
+    expect(mocks.prisma.worldEvent.update).toHaveBeenCalledWith({
+      where: { id: parent.id },
+      data: { parentEventId: null, originActivityId: origin.id },
+    });
+    expect(mocks.prisma.worldEvent.update).toHaveBeenCalledWith({
+      where: { id: child.id },
+      data: { parentEventId: parent.id, originActivityId: progress.id },
+    });
+    expect(origin).toMatchObject({
+      timelineId: timeline.id,
+      eventId: parent.id,
+      actorId: god.id,
+      targetIds: [entity.id],
+      subjectIds: [god.id, entity.id],
+      sourceMessageId: message.id,
+      visibility: "hidden",
+    });
+    expect(progress).toMatchObject({
+      timelineId: timeline.id,
+      eventId: child.id,
+      subjectIds: [entity.id],
+      sourceMessageId: message.id,
+    });
+    expect(timeline.observerState).toMatchObject({ focusedEventId: child.id });
+    expect(JSON.stringify({ timeline, events, activities })).not.toMatch(
+      /world-event-(?:parent|child)|world-activity-(?:origin|progress)/,
+    );
+  });
+
+  it.each([
+    ["参与者", (archive: ReturnType<typeof versionFourArchive>) => {
+      (archive.world.timelines[0] as unknown as {
+        worldEvents: Array<Record<string, unknown>>;
+      }).worldEvents[0].participantIds = ["avatar-b"];
+    }],
+    ["父事件", (archive: ReturnType<typeof versionFourArchive>) => {
+      (archive.world.timelines[0] as unknown as {
+        worldEvents: Array<Record<string, unknown>>;
+      }).worldEvents[1].parentEventId = "missing-event";
+    }],
+    ["循环父事件", (archive: ReturnType<typeof versionFourArchive>) => {
+      const events = (archive.world.timelines[0] as unknown as {
+        worldEvents: Array<Record<string, unknown>>;
+      }).worldEvents;
+      events[0].parentEventId = "world-event-child";
+    }],
+    ["事件动态", (archive: ReturnType<typeof versionFourArchive>) => {
+      (archive.world.timelines[0] as unknown as {
+        worldActivities: Array<Record<string, unknown>>;
+      }).worldActivities[0].eventId = "missing-event";
+    }],
+    ["来源消息", (archive: ReturnType<typeof versionFourArchive>) => {
+      (archive.world.timelines[0] as unknown as {
+        worldActivities: Array<Record<string, unknown>>;
+      }).worldActivities[0].sourceMessageId = "missing-message";
+    }],
+  ])("version 4 拒绝跨现实或悬空的%s引用", async (_label, mutate) => {
+    const archive = versionFourArchive();
+    mutate(archive);
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["cycle", (archive: ReturnType<typeof versionThreeArchive>) => {
       archive.world.timelines[0].parentId = "timeline-a";
@@ -1165,7 +1375,7 @@ describe("存档导入", () => {
     archive.unexpected = true;
 
     const malformed = await importWorld(request(archive));
-    const unsupported = await importWorld(request({ ...legacyArchive(), version: 4 }));
+    const unsupported = await importWorld(request({ ...legacyArchive(), version: 5 }));
 
     expect(malformed.status).toBe(400);
     expect(unsupported.status).toBe(400);
@@ -1178,7 +1388,7 @@ describe("存档导出", () => {
     vi.clearAllMocks();
   });
 
-  it("导出 version 3 的完整私有数据、现实树与改写，但排除租约和 provider error", async () => {
+  it("导出 version 4 的完整私有数据、现实树与改写，但排除租约和 provider error", async () => {
     const hiddenAbility = {
       id: "hidden-ability",
       visibility: "hidden",
@@ -1250,7 +1460,7 @@ describe("存档导出", () => {
     });
     const payload = await response.json();
 
-    expect(payload.version).toBe(3);
+    expect(payload.version).toBe(4);
     expect(payload.world.mode).toBe("creator");
     expect(JSON.stringify(payload)).not.toContain("secret-operation-token");
     expect(payload.world).not.toHaveProperty("operationKind");
