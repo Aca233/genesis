@@ -668,6 +668,9 @@ export async function applyAbilityExtractionInTransaction(
         allowNewAbilityRecovery,
         input.knownEntityNames ?? [],
       );
+      if (message === undefined) {
+        throw new AbilityValidationError("证据消息 index 不属于本章正文");
+      }
       const effectiveChange = { ...normalized.change, evidence };
 
       const resolved = await resolveAbility(tx, effectiveChange, owner, input.timelineId);
