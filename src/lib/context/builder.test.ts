@@ -265,5 +265,6 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     expect(activityBlock).toContain("entity-scene");
     expect(activityBlock).toContain("世界内尚未知晓");
     expect(activityBlock).toContain("关注只提高后续叙事权重，不要求切换当前场景");
+    expect(messages.allowedEventIds).toEqual(["event-focus"]);
   });
 });

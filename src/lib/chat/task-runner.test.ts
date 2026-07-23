@@ -3,6 +3,7 @@ import {
   createNarrationTaskSSE,
   ensureNarrationTaskRunning,
   narrationTaskRunning,
+  publishNarrationTaskEvent,
   relayNarratorResponse,
   subscribeNarrationTask,
 } from "./task-runner";
@@ -89,5 +90,45 @@ describe("narration task runner", () => {
     release();
     await relay;
     expect(narrationTaskRunning("gen-3")).toBe(false);
+  });
+
+  it("重连订阅持续等待 durable 完成且不会因短暂 pending 报失败", async () => {
+    const completion = {
+      messageId: "message-reconnected",
+      meta: {},
+      followUp: { kind: "none" as const },
+    };
+    const waitForCompletion = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(completion);
+    const response = createNarrationTaskSSE("gen-reconnect", [], {
+      waitForCompletion,
+      pollIntervalMs: 1,
+    });
+    const reader = response.body!.getReader();
+
+    const result = await Promise.race([
+      reader.read(),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 50)),
+    ]);
+
+    if (result === "timeout") {
+      publishNarrationTaskEvent({
+        type: "failed",
+        taskId: "gen-reconnect",
+        stage: "generating",
+        message: "test cleanup",
+        retryable: true,
+      });
+      await reader.cancel();
+    }
+    expect(result).not.toBe("timeout");
+    if (result !== "timeout") {
+      const text = new TextDecoder().decode(result.value);
+      expect(text).toContain("\"type\":\"done\"");
+      expect(text).not.toContain("\"type\":\"failed\"");
+    }
+    expect(waitForCompletion).toHaveBeenCalledTimes(3);
   });
 });

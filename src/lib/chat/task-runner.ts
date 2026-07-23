@@ -1,5 +1,6 @@
 import type { TaskProgressEvent } from "@/lib/tasks/progress-events";
 import { encodeTaskEvent } from "@/lib/tasks/progress-events";
+import type { GenerationCompletion } from "./follow-up";
 
 type NarrationTaskListener = (event: TaskProgressEvent) => void;
 export type NarrationTaskRun = (
@@ -133,21 +134,66 @@ export function relayNarratorResponse(taskId: string, response: Response): Promi
 export function createNarrationTaskSSE(
   taskId: string,
   initialEvents: readonly TaskProgressEvent[] = [],
+  durable?: {
+    waitForCompletion: () => Promise<GenerationCompletion | null>;
+    signal?: AbortSignal;
+    pollIntervalMs?: number;
+  },
 ): Response {
   let unsubscribe: () => void = () => undefined;
+  let closed = false;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       for (const event of initialEvents) controller.enqueue(encodeTaskEvent(event));
       unsubscribe = subscribeNarrationTask(taskId, (event) => {
+        if (closed) return;
         try {
           controller.enqueue(encodeTaskEvent(event));
-          if (event.type === "done" || event.type === "failed") controller.close();
+          if (event.type === "done" || event.type === "failed") {
+            closed = true;
+            unsubscribe();
+            controller.close();
+          }
         } catch {
+          closed = true;
           unsubscribe();
         }
       });
+      if (durable) {
+        void (async () => {
+          while (!closed && !durable.signal?.aborted) {
+            let completion: GenerationCompletion | null = null;
+            try {
+              completion = await durable.waitForCompletion();
+            } catch {
+              // A transient durable-read failure must not turn a live owner into
+              // a false terminal failure. Keep the subscription and try again.
+            }
+            if (completion) {
+              if (closed || durable.signal?.aborted) return;
+              closed = true;
+              unsubscribe();
+              controller.enqueue(encodeTaskEvent({
+                type: "done",
+                taskId,
+                followUp: completion.followUp,
+              }));
+              controller.close();
+              return;
+            }
+            await new Promise((resolve) =>
+              setTimeout(resolve, durable.pollIntervalMs ?? 100));
+          }
+          if (!closed && durable.signal?.aborted) {
+            closed = true;
+            unsubscribe();
+            controller.close();
+          }
+        })();
+      }
     },
     cancel() {
+      closed = true;
       unsubscribe();
     },
   });

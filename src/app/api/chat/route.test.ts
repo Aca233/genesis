@@ -227,12 +227,63 @@ describe("POST /api/chat", () => {
 
     await POST(request);
 
-    expect(mocks.narratorCompletionSSE).toHaveBeenCalledWith(expect.objectContaining({
-      waitForCompletion: expect.any(Function),
-      signal: request.signal,
-    }));
+    expect(mocks.createNarrationTaskSSE).toHaveBeenCalledWith(
+      "generation-1",
+      expect.any(Array),
+      expect.objectContaining({
+        waitForCompletion: expect.any(Function),
+        signal: request.signal,
+      }),
+    );
+    expect(mocks.narratorCompletionSSE).not.toHaveBeenCalled();
     expect(mocks.buildNarratorContext).not.toHaveBeenCalled();
     expect(mocks.narratorSSE).not.toHaveBeenCalled();
+  });
+
+  it("把 Narrator 上下文允许推进的事件 ID 传给同轮 finalize", async () => {
+    const context = Object.assign(
+      [{ role: "user", content: "继续" }],
+      { allowedEventIds: ["event-existing"] },
+    );
+    mocks.buildNarratorContext.mockResolvedValue(context);
+
+    await POST(new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        chapterId: "chapter-1",
+        scale: "scene",
+        mode: "continue",
+        generationId: "generation-1",
+      }),
+    }));
+
+    const [{ onDone }] = mocks.narratorSSE.mock.calls.at(-1)!;
+    await onDone({
+      prose: "旧日战争继续升级。",
+      meta: {
+        suggestions: [],
+        operation: "continue",
+        immediateChanges: [],
+        significantEvent: true,
+        settlementReasons: [],
+        importantEventMutation: {
+          operation: "advance",
+          eventId: "event-existing",
+          phase: "escalating",
+          summary: "战线越过旧边界。",
+          progressText: "双方在边境增兵。",
+          participantIds: [],
+          visibility: "public",
+        },
+      },
+    });
+
+    expect(mocks.applyStoredNarration).toHaveBeenCalledWith(
+      mocks.prisma,
+      expect.objectContaining({
+        allowedEventIds: ["event-existing"],
+      }),
+    );
   });
 
   it("output_stored owner 跳过 LLM 并从私有快照继续应用", async () => {

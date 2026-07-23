@@ -144,26 +144,31 @@ export async function POST(request: Request) {
     return narratorCompletionSSE({ completion: prepared.completion, signal: request.signal });
   }
   if (prepared.state === "pending") {
-    return narratorCompletionSSE({
-      signal: request.signal,
-      waitForCompletion: () => readGenerationCompletion(
-        prisma as unknown as GenerationRequestClient,
-        {
-          generationId,
-          chapterId,
-          worldId: chapter.timeline.worldId,
-          expectedActiveTimelineId: chapter.timeline.id,
-          mode,
-          scale,
-          content: mode === "say" ? content!.trim() : undefined,
-          directive: directive?.trim() || undefined,
-          playerIndex: prepared.meta.playerIndex,
-          narratorIndex: prepared.meta.narratorIndex,
-        },
-      ),
-    });
+    return createNarrationTaskSSE(
+      generationId,
+      [],
+      {
+        signal: request.signal,
+        waitForCompletion: () => readGenerationCompletion(
+          prisma as unknown as GenerationRequestClient,
+          {
+            generationId,
+            chapterId,
+            worldId: chapter.timeline.worldId,
+            expectedActiveTimelineId: chapter.timeline.id,
+            mode,
+            scale,
+            content: mode === "say" ? content!.trim() : undefined,
+            directive: directive?.trim() || undefined,
+            playerIndex: prepared.meta.playerIndex,
+            narratorIndex: prepared.meta.narratorIndex,
+          },
+        ),
+      },
+    );
   }
   const narratorIndex = prepared.meta.narratorIndex;
+  let allowedEventIds: readonly string[] = [];
 
   const applyOutput = async (output: StoredNarratorOutput) => {
     publishNarrationTaskEvent(progressEvent(
@@ -188,6 +193,7 @@ export async function POST(request: Request) {
           requestMeta: prepared.meta,
           output,
           scale,
+          allowedEventIds,
           logInvalidReveal: ({ abilityId }) => {
             console.warn("[chat] 跳过非法能力揭示", {
               abilityId,
@@ -242,6 +248,7 @@ export async function POST(request: Request) {
       mode,
       directive,
     });
+    allowedEventIds = messages.allowedEventIds;
   } catch (error) {
     try {
       await markGenerationFailed(

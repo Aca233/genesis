@@ -35,6 +35,10 @@ export type BuildOpts = {
   beforeIndex?: number;
 };
 
+export type NarratorContext = ChatMessage[] & {
+  allowedEventIds: string[];
+};
+
 /** 议程绝不注入 schemes——仅把 stanceToPlayer.level 译为一句外显倾向 */
 const STANCE_HINTS: Record<string, string> = {
   hostility: "言行间对玩家神怀有难掩的敌意",
@@ -283,7 +287,7 @@ async function chronicleBlock(
     .join("\n")}`;
 }
 
-export async function buildNarratorContext(opts: BuildOpts): Promise<ChatMessage[]> {
+export async function buildNarratorContext(opts: BuildOpts): Promise<NarratorContext> {
   const world = await prisma.world.findUnique({
     where: { id: opts.worldId },
     include: { lorebookEntries: { where: { enabled: true } } },
@@ -458,5 +462,7 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
   if (lore) messages.push({ role: "system", content: lore, cacheScope: "dynamic" });
   if (chronicle) messages.push({ role: "system", content: chronicle, cacheScope: "dynamic" });
   messages.push({ role: "user", content: parts.join("\n\n"), cacheScope: "dynamic" });
-  return messages;
+  return Object.assign(messages, {
+    allowedEventIds: [...worldActivityContext.actionableEventIds],
+  });
 }
