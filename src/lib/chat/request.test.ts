@@ -184,7 +184,8 @@ describe("prepareGenerationRequest", () => {
       state: "completed",
       completion: {
         messageId: "generation-1",
-        meta: { suggestions: ["继续"], chapterBreakHint: false },
+        meta: { suggestions: ["继续"] },
+        followUp: { kind: "none" },
       },
     });
   });

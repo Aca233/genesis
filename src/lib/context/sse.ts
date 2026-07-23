@@ -2,7 +2,7 @@ import { stream as llmStream } from "@/lib/llm/gateway";
 import type { ChatMessage } from "@/lib/llm/types";
 import { splitMetaBlock, type NarratorMeta } from "@/lib/prompts/narrator";
 import { findMetaStartCandidate, findMetaTailFrame } from "@/lib/prompts/meta-framing";
-import type { GenerationCompletion } from "@/lib/chat/request";
+import type { GenerationCompletion } from "@/lib/chat/follow-up";
 
 const TAIL_WINDOW = 10;
 
@@ -10,7 +10,11 @@ export function narratorSSE(opts: {
   messages: ChatMessage[];
   cacheNamespace?: string;
   signal?: AbortSignal;
-  onDone: (result: { prose: string; meta: NarratorMeta; signal: AbortSignal }) => Promise<{ messageId: string }>;
+  onDone: (result: {
+    prose: string;
+    meta: NarratorMeta;
+    signal: AbortSignal;
+  }) => Promise<GenerationCompletion>;
   onFailure?: (error: Error) => Promise<void>;
   onHeartbeat?: () => Promise<void>;
   heartbeatMs?: number;
@@ -102,8 +106,13 @@ export function narratorSSE(opts: {
         // what splitMetaBlock hands to persistence so the two views cannot diverge.
         const malformedFrame = framed && parsed.prose === full.trim();
         if ((!framed || malformedFrame) && pending) send({ type: "text", text: pending });
-        const { messageId } = await opts.onDone({ ...parsed, signal: upstream.signal });
-        if (!closed && !upstream.signal.aborted) send({ type: "done", messageId, meta: parsed.meta });
+        const completion = await opts.onDone({
+          ...parsed,
+          signal: upstream.signal,
+        });
+        if (!closed && !upstream.signal.aborted) {
+          send({ type: "done", ...completion });
+        }
       } catch (error) {
         await reportFailure(error instanceof Error ? error : new Error(String(error)));
         if (!closed && !upstream.signal.aborted) {
@@ -158,6 +167,7 @@ export function narratorCompletionSSE(opts: {
             type: "done",
             messageId: completion.messageId,
             meta: completion.meta,
+            followUp: completion.followUp,
           })}\n\n`));
         } else if (!opts.signal?.aborted) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({

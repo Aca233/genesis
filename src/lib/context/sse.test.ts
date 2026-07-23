@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { emptyContinuousMeta } from "@/lib/chat/continuous-meta";
 
 const mocks = vi.hoisted(() => ({ stream: vi.fn() }));
 vi.mock("@/lib/llm/gateway", () => ({ stream: mocks.stream }));
@@ -20,7 +21,7 @@ describe("narratorSSE", () => {
       yield { type: "text", text: full.slice(0, 13) };
       yield { type: "text", text: full.slice(13) };
     });
-    const onDone = vi.fn().mockResolvedValue({ messageId: "message-1" });
+    const onDone = vi.fn().mockResolvedValue({ messageId: "message-1", meta: emptyContinuousMeta(), followUp: { kind: "none" } });
 
     const output = await events(narratorSSE({ messages: [], onDone }));
     const streamed = output
@@ -31,7 +32,7 @@ describe("narratorSSE", () => {
     expect(streamed).toBe(full);
     expect(onDone).toHaveBeenCalledWith(expect.objectContaining({
       prose: streamed,
-      meta: { suggestions: [], chapterBreakHint: false },
+      meta: emptyContinuousMeta(),
     }));
   });
 
@@ -41,7 +42,7 @@ describe("narratorSSE", () => {
       yield { type: "text", text: "TA 仍是正文\n下一段" };
       yield { type: "done" };
     });
-    const onDone = vi.fn().mockResolvedValue({ messageId: "message-1" });
+    const onDone = vi.fn().mockResolvedValue({ messageId: "message-1", meta: emptyContinuousMeta(), followUp: { kind: "none" } });
 
     const output = await events(narratorSSE({ messages: [], onDone }));
 
@@ -49,7 +50,7 @@ describe("narratorSSE", () => {
       .toBe("正文 <<<META 仍是正文\n下一段");
     expect(onDone).toHaveBeenCalledWith(expect.objectContaining({
       prose: "正文 <<<META 仍是正文\n下一段",
-      meta: { suggestions: [], chapterBreakHint: false },
+      meta: emptyContinuousMeta(),
       signal: expect.any(AbortSignal),
     }));
   });
@@ -65,7 +66,7 @@ describe("narratorSSE", () => {
       const onHeartbeat = vi.fn().mockResolvedValue(undefined);
       const response = narratorSSE({
         messages: [],
-        onDone: vi.fn().mockResolvedValue({ messageId: "message-1" }),
+        onDone: vi.fn().mockResolvedValue({ messageId: "message-1", meta: emptyContinuousMeta(), followUp: { kind: "none" } }),
         onHeartbeat,
         heartbeatMs: 100,
       });
@@ -96,7 +97,7 @@ describe("narratorSSE", () => {
       const onFailure = vi.fn(() => new Promise<void>((resolve) => { finishFailure = resolve; }));
       const response = narratorSSE({
         messages: [],
-        onDone: vi.fn().mockResolvedValue({ messageId: "message-1" }),
+        onDone: vi.fn().mockResolvedValue({ messageId: "message-1", meta: emptyContinuousMeta(), followUp: { kind: "none" } }),
         onFailure,
         onHeartbeat: vi.fn().mockRejectedValue(new Error("世界操作租约已失效")),
         heartbeatMs: 100,
@@ -129,7 +130,7 @@ describe("narratorSSE", () => {
       if (opts?.signal?.aborted) return;
       yield { type: "text", text: "不应到达" };
     });
-    const onDone = vi.fn().mockResolvedValue({ messageId: "message-1" });
+    const onDone = vi.fn().mockResolvedValue({ messageId: "message-1", meta: emptyContinuousMeta(), followUp: { kind: "none" } });
     const onFailure = vi.fn().mockResolvedValue(undefined);
     const response = narratorSSE({ messages: [], onDone, onFailure });
     const reader = response.body!.getReader();
@@ -148,7 +149,8 @@ describe("narratorCompletionSSE", () => {
   it("以 SSE done 重放已有 messageId 与 meta", async () => {
     const completion = {
       messageId: "message-existing",
-      meta: { suggestions: ["继续"], chapterBreakHint: false },
+      meta: { ...emptyContinuousMeta(), suggestions: ["继续"] },
+      followUp: { kind: "settlement" as const, segmentId: "segment-1" },
     };
 
     const output = await events(narratorCompletionSSE({ completion }));
@@ -171,8 +173,8 @@ describe("narratorCompletionSSE", () => {
 });
 
 it.each([
-  `<<<META\n{"suggestions":[],"chapterBreakHint":false}\nMETA>>>`,
-  `正文\r\n<<<META\r\n{"suggestions":[],"chapterBreakHint":false}\r\nMETA>>>`,
+  `<<<META\n{"suggestions":[],"operation":"continue","immediate_changes":[],"significant_event":false,"settlement_reasons":[]}\nMETA>>>`,
+  `正文\r\n<<<META\r\n{"suggestions":[],"operation":"continue","immediate_changes":[],"significant_event":false,"settlement_reasons":[]}\r\nMETA>>>`,
 ])("SSE 从不发送合法 META framing：%s", async (full) => {
   mocks.stream.mockImplementation(async function* () {
     yield { type: "text", text: full.slice(0, 7) };
@@ -180,7 +182,7 @@ it.each([
   });
   const output = await events(narratorSSE({
     messages: [],
-    onDone: vi.fn().mockResolvedValue({ messageId: "message-1" }),
+    onDone: vi.fn().mockResolvedValue({ messageId: "message-1", meta: emptyContinuousMeta(), followUp: { kind: "none" } }),
   }));
   const text = output.filter((event) => event.type === "text").map((event) => event.text).join("");
   expect(text).not.toContain("<<<META");

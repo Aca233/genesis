@@ -1,6 +1,15 @@
 import type { Prisma } from "@prisma/client";
 import type { Scale } from "@/lib/cards/schemas";
-import type { NarratorMeta } from "@/lib/prompts/narrator";
+import {
+  ContinuousNarratorMetaSchema,
+  emptyContinuousMeta,
+} from "./continuous-meta";
+import {
+  StoredGenerationResultSchema,
+  type GenerationCompletion,
+} from "./follow-up";
+
+export type { GenerationCompletion } from "./follow-up";
 
 const REQUEST_TAG = "chat-generation-request";
 const LEASE_MS = 5 * 60 * 1000;
@@ -16,7 +25,6 @@ export type GenerationRequestMeta = {
   content: string | null; directive: string | null; playerMessageId: string | null;
   narratorMessageId: string; playerIndex: number | null; narratorIndex: number;
 };
-export type GenerationCompletion = { messageId: string; meta: NarratorMeta };
 type RequestRow = {
   id: string; chapterId: string; mode: string; scale: string; content: string | null;
   directive: string | null; status: string; error: string | null; attempt: number;
@@ -66,11 +74,32 @@ function sameSemanticRequest(meta: GenerationRequestMeta, input: PrepareGenerati
     meta.scale === input.scale && meta.content === (input.content ?? null) &&
     meta.directive === (input.directive ?? null) && meta.narratorMessageId === input.generationId;
 }
-function asNarratorMeta(value: unknown): NarratorMeta | null {
+function asGenerationCompletion(
+  value: unknown,
+  narratorMessageId: string,
+): GenerationCompletion | null {
+  const stored = StoredGenerationResultSchema.safeParse(value);
+  if (stored.success) {
+    return {
+      messageId: stored.data.messageId,
+      meta: stored.data.meta,
+      followUp: stored.data.followUp,
+    };
+  }
   if (!value || typeof value !== "object") return null;
-  const meta = value as Partial<NarratorMeta>;
-  return Array.isArray(meta.suggestions) && typeof meta.chapterBreakHint === "boolean"
-    ? meta as NarratorMeta : null;
+  const legacy = value as Record<string, unknown>;
+  if (!Array.isArray(legacy.suggestions)) return null;
+  const normalized = ContinuousNarratorMetaSchema.safeParse({
+    ...emptyContinuousMeta(),
+    suggestions: legacy.suggestions,
+    revealedEventIds: legacy.revealedEventIds,
+    abilityReveals: legacy.abilityReveals,
+  });
+  return normalized.success ? {
+    messageId: narratorMessageId,
+    meta: normalized.data,
+    followUp: { kind: "none" },
+  } : null;
 }
 export type PrepareGenerationInput = {
   generationId: string; chapterId: string; worldId: string; expectedActiveTimelineId: string; mode: ChatGenerationMode; scale: Scale;
@@ -86,14 +115,21 @@ async function completedResult(tx: GenerationRequestTx, row: RequestRow, input: 
   const meta = rowMeta(row);
   const narrator = await tx.message.findUnique({ where: { id: row.narratorMessageId } });
   const narratorRequest = parseGenerationRequestMeta(narrator?.meta);
-  const resultMeta = asNarratorMeta(row.resultMeta);
-  if (!narrator || narrator.role !== "narrator" || narrator.chapterId !== row.chapterId ||
-      narrator.index !== row.narratorIndex || narrator.scale !== row.scale || !resultMeta ||
-      !narratorRequest || !sameSemanticRequest(narratorRequest, input)) {
+  const completion = asGenerationCompletion(row.resultMeta, row.narratorMessageId);
+  const rewriteWithoutSourceMessage = completion?.followUp.kind === "rewrite"
+    && completion.messageId === null;
+  const narratorMatches = narrator
+    && narrator.role === "narrator"
+    && narrator.chapterId === row.chapterId
+    && narrator.index === row.narratorIndex
+    && narrator.scale === row.scale
+    && narratorRequest
+    && sameSemanticRequest(narratorRequest, input);
+  if (!completion || (!rewriteWithoutSourceMessage && !narratorMatches)) {
     throw new Error("generationId 已完成结果与请求绑定不一致");
   }
   return { meta, state: "completed" as const,
-    completion: { messageId: narrator.id, meta: resultMeta } };
+    completion };
 }
 async function inspectOrTakeover(tx: GenerationRequestTx, row: RequestRow, input: PrepareGenerationInput) {
   const meta = rowMeta(row);
