@@ -11,7 +11,13 @@ const mocks = vi.hoisted(() => {
   });
   return {
     prisma: {
-      world: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+      world: {
+        findUnique: vi.fn(),
+        findFirst: vi.fn(),
+        create: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
       timeline: model(),
       chapter: model(),
       message: model(),
@@ -1415,7 +1421,7 @@ describe("存档导出", () => {
       visibility: "hidden",
       events: [{ id: "hidden-event", abilityId: "hidden-ability" }],
     };
-    mocks.prisma.world.findUnique.mockResolvedValue({
+    mocks.prisma.world.findFirst.mockResolvedValue({
       id: "world-1",
       userId: "local",
       mode: "creator",
@@ -1513,8 +1519,9 @@ describe("存档导出", () => {
       ],
       entities: [{ id: "character-1", isCreatorAvatar: true, raceId: "race-1" }],
     });
-    expect(mocks.prisma.world.findUnique).toHaveBeenCalledWith(
+    expect(mocks.prisma.world.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: { id: "world-1", userId: "local" },
         include: expect.objectContaining({
           rewrites: expect.anything(),
           timelines: expect.objectContaining({
