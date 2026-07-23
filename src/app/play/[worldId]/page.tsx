@@ -112,6 +112,9 @@ export default function PlayPage({
       }
       return json;
     });
+    setTaskProgress((current) => json.taskProgress
+      ? reduceTaskProgress(current, json.taskProgress)
+      : null);
     setMessages(enrichRewriteResultMessages(json.messages, rewrite));
   }, [worldId]);
 
@@ -177,6 +180,9 @@ export default function PlayPage({
           return;
         }
         setState(json);
+        setTaskProgress((current) => json.taskProgress
+          ? reduceTaskProgress(current, json.taskProgress)
+          : null);
         setMessages(json.messages);
         // 初始尺度沿用最后一条消息
         const last = json.messages.at(-1);

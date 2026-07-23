@@ -234,6 +234,7 @@ export type PlayState = {
   temporal: { era: string; time: string };
   checkpoint: { segmentId: string; needsSettlement: boolean; settling: boolean };
   operation: { kind: "chat" | "settlement" | "rewrite" } | null;
+  taskProgress: import("@/lib/tasks/progress").DurableTaskProgress | null;
   messages: MessageRow[];
   prevChapterTail: MessageRow[];
   recentRewrite: RecentRewrite | null;

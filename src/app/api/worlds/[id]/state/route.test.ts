@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   godFindMany: vi.fn(),
   entityFindMany: vi.fn(),
   rewriteFindFirst: vi.fn(),
+  generationRequestFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -23,6 +24,7 @@ vi.mock("@/lib/db", () => ({
     god: { findMany: mocks.godFindMany },
     entity: { findMany: mocks.entityFindMany },
     realityRewrite: { findFirst: mocks.rewriteFindFirst },
+    generationRequest: { findFirst: mocks.generationRequestFindFirst },
   },
 }));
 
@@ -130,6 +132,7 @@ describe("GET /api/worlds/[id]/state projections", () => {
       resultTimelineId: "timeline-1",
       createdAt: new Date("2026-07-22T00:00:00.000Z"),
     });
+    mocks.generationRequestFindFirst.mockResolvedValue(null);
   });
 
   it("creator 全知状态返回分支元数据、隐藏议程、完整能力和最近改写", async () => {
@@ -193,6 +196,33 @@ describe("GET /api/worlds/[id]/state projections", () => {
     expect(body.gods[0].agenda).toBeNull();
     expect(body.gods[0].abilities).toEqual([]);
     expect(body.avatars).toEqual([]);
+  });
+
+  it("下发失败聊天任务的安全 durable 摘要而不暴露私有输出", async () => {
+    mocks.generationRequestFindFirst.mockResolvedValue({
+      id: "generation-1",
+      stage: "applying",
+      status: "failed",
+      retryable: true,
+      safeError: "叙事任务中断，请从当前步骤重试",
+      stageUpdatedAt: new Date("2026-07-23T00:00:00.000Z"),
+      outputSnapshot: { prose: "不应下发" },
+      error: "database password",
+    });
+    const response = await GET(new Request("http://localhost"), context);
+    const body = await response.json();
+
+    expect(body.taskProgress).toEqual({
+      taskKind: "chat",
+      taskId: "generation-1",
+      stage: "applying",
+      status: "failed",
+      retryable: true,
+      safeError: "叙事任务中断，请从当前步骤重试",
+      updatedAt: "2026-07-23T00:00:00.000Z",
+    });
+    expect(JSON.stringify(body)).not.toContain("不应下发");
+    expect(JSON.stringify(body)).not.toContain("database password");
   });
 
   it("连续返回最近四个内部记录段且只允许编辑当前开放段", async () => {

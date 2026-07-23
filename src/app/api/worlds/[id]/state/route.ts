@@ -16,6 +16,7 @@ import {
   realityViewer,
 } from "@/lib/reality/visibility";
 import { resolveTemporalState } from "@/lib/chat/continuous-state";
+import { rewriteDurableProgress } from "@/lib/reality/task-runner";
 
 /**
  * GET /api/worlds/[id]/state —— 对局引导：一次拉取对局界面所需全量状态
@@ -63,7 +64,7 @@ export async function GET(
     return NextResponse.json({ error: "时间线尚无内部记录段" }, { status: 404 });
   }
 
-  const [gods, avatars, recentSegments, recentRewrite] = await Promise.all([
+  const [gods, avatars, recentSegments, recentRewrite, generationRequest] = await Promise.all([
     prisma.god.findMany({
       where: { timelineId: world.activeTimelineId },
       orderBy: { createdAt: "asc" },
@@ -107,6 +108,24 @@ export async function GET(
         sourceTimelineId: true,
         resultTimelineId: true,
         createdAt: true,
+        updatedAt: true,
+        error: true,
+        plan: true,
+      },
+    }),
+    prisma.generationRequest.findFirst({
+      where: {
+        chapterId: currentChapter.id,
+        status: { in: ["pending", "failed"] },
+      },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        stage: true,
+        status: true,
+        retryable: true,
+        safeError: true,
+        stageUpdatedAt: true,
       },
     }),
   ]);
@@ -144,6 +163,37 @@ export async function GET(
     (message) => message.role === "narrator",
   ).length;
   const settleState = currentChapter.settleState ?? "open";
+  const taskProgress = world.operationKind === "rewrite" && recentRewrite
+    ? rewriteDurableProgress(recentRewrite as never)
+    : world.operationKind === "settlement" || settleState.startsWith("settling:")
+      ? {
+          taskKind: "settlement" as const,
+          taskId: currentChapter.id,
+          stage: settleState === "settled"
+            ? "completed"
+            : settleState.startsWith("settling:")
+              ? settleState.slice("settling:".length) === "decay"
+                ? "chronicle"
+                : settleState.slice("settling:".length)
+              : "checkpoint_read",
+          status: currentChapter.settleError ? "failed" as const : "running" as const,
+          retryable: currentChapter.settleRetryable ?? true,
+          ...(currentChapter.settleError
+            ? { safeError: "世界整理中断，请从当前步骤重试" }
+            : {}),
+          updatedAt: (currentChapter.settleUpdatedAt ?? currentChapter.createdAt).toISOString(),
+        }
+      : generationRequest
+        ? {
+            taskKind: "chat" as const,
+            taskId: generationRequest.id,
+            stage: generationRequest.stage,
+            status: generationRequest.status === "failed" ? "failed" as const : "running" as const,
+            retryable: generationRequest.retryable,
+            ...(generationRequest.safeError ? { safeError: generationRequest.safeError } : {}),
+            updatedAt: generationRequest.stageUpdatedAt.toISOString(),
+          }
+        : null;
 
   return NextResponse.json({
     world: {
@@ -216,6 +266,7 @@ export async function GET(
     operation: world.operationKind
       ? { kind: world.operationKind }
       : null,
+    taskProgress,
     messages: continuousMessages,
     prevChapterTail: previousMessages,
     recentRewrite,
