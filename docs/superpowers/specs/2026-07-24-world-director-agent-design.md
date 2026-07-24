@@ -251,6 +251,7 @@ flowchart TD
 type WorldDirectorRunState =
   | "queued"
   | "classifying"
+  | "branching"
   | "reading"
   | "planning"
   | "validating"
