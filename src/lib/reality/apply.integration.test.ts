@@ -163,6 +163,30 @@ describe("applyRewritePlan", () => {
     })).toMatchObject({ text: "星轨依照敕令重排", revealed: true, chapterIndex: 2 });
   });
 
+  it("为规划器新增的既定事实补充当前改写来源", async () => {
+    const data = await fixture();
+
+    await apply(data, plan({
+      realityCardPatches: [{
+        section: "establishedFacts",
+        value: [{ ref: "fact-new-stars", text: "新星自此照耀北境" }],
+      }],
+    }));
+
+    expect(await prisma.timeline.findUniqueOrThrow({
+      where: { id: data.timeline.id },
+      select: { realityState: true },
+    })).toMatchObject({
+      realityState: {
+        establishedFacts: [{
+          ref: "fact-new-stars",
+          text: "新星自此照耀北境",
+          establishedByRewriteId: data.rewrite.id,
+        }],
+      },
+    });
+  });
+
   it("追溯改写保留旧消息正文并标注前现实，同时创建重写后历史摘要", async () => {
     const data = await fixture();
     const obsolete = await prisma.entity.create({

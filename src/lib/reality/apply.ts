@@ -370,6 +370,7 @@ async function assertGodRemovalsAreExplicit(
 async function applyRealityCards(
   tx: Prisma.TransactionClient,
   timelineId: string,
+  rewriteId: string,
   plan: ParsedPlan,
 ) {
   const timeline = await tx.timeline.findUniqueOrThrow({
@@ -378,7 +379,34 @@ async function applyRealityCards(
   });
   const state = RealityStateSchema.parse(timeline.realityState);
   for (const patch of plan.realityCardPatches) {
-    state[patch.section] = patch.value as never;
+    switch (patch.section) {
+      case "theme":
+        state.theme = patch.value;
+        break;
+      case "style":
+        state.style = patch.value;
+        break;
+      case "cosmology":
+        state.cosmology = patch.value;
+        break;
+      case "fusionAxiom":
+        state.fusionAxiom = patch.value;
+        break;
+      case "currentEra":
+        state.currentEra = patch.value;
+        break;
+      case "establishedFacts": {
+        const existingFacts = new Map(state.establishedFacts.map((fact) => [fact.ref, fact]));
+        state.establishedFacts = patch.value.map((fact, index) => ({
+          ref: fact.ref ?? `fact-${rewriteId}-${index + 1}`,
+          text: fact.text,
+          establishedByRewriteId: fact.ref === undefined
+            ? rewriteId
+            : existingFacts.get(fact.ref)?.establishedByRewriteId ?? rewriteId,
+        }));
+        break;
+      }
+    }
   }
   const parsed = RealityStateSchema.parse(state);
   await tx.timeline.update({
@@ -1132,7 +1160,7 @@ export async function applyRewritePlan(
     chronicle: new Map(),
   };
 
-  const reality = await applyRealityCards(tx, input.timelineId, plan);
+  const reality = await applyRealityCards(tx, input.timelineId, input.rewriteId, plan);
   const godIds = await applyGodPatches(tx, input.timelineId, plan, refs);
   const entityIds = await applyEntityPatches(tx, input.timelineId, plan, refs);
   await applyAbilityPatches(tx, input.timelineId, plan, refs, entityIds, godIds);

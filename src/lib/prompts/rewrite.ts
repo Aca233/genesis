@@ -26,6 +26,7 @@ Authority rules:
 - For retroactive plans, preserve every prior message verbatim and mark it only as old-reality evidence. never rewrite prior message text. Rebuild the current state and historical summaries instead.
 - For memory_only changes, preserve objective history unless another explicit subcommand also changes objective reality.
 - Use only the explicit patch collections and fields in the schema. Never emit a database path, JSON path, SQL, or arbitrary field path.
+- establishedFacts entries contain only an optional descriptive ref and required text. Do not output establishedByRewriteId; the application records provenance from the current rewrite.
 - All user-facing values are Chinese. branchName is exactly 4–10 Chinese characters.
 
 Output ONLY one JSON object matching this schema. No markdown, commentary, feasibility discussion, check, or alternative:

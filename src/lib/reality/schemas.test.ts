@@ -347,6 +347,21 @@ describe("absolute reality rewrite schemas", () => {
     expect(parsed.success).toBe(true);
   });
 
+  it("validates reality-card values by section and leaves fact provenance to the application", () => {
+    expect(RealityCardPatchSchema.safeParse({
+      section: "establishedFacts",
+      value: [{ text: "新星自此照耀北境" }],
+    }).success).toBe(true);
+    expect(RealityCardPatchSchema.safeParse({
+      section: "establishedFacts",
+      value: [{ ref: "fact-new-stars" }],
+    }).success).toBe(false);
+    expect(RealityCardPatchSchema.safeParse({
+      section: "currentEra",
+      value: { label: "新星元年" },
+    }).success).toBe(false);
+  });
+
   it.each([
     [RealityCardPatchSchema, { path: "world.theme", value: "任意写库" }],
     [RealityCardPatchSchema, { section: "database", value: "任意写库" }],

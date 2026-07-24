@@ -102,20 +102,25 @@ function hasKeys(value: object): boolean {
   return Object.keys(value).length > 0;
 }
 
-export const RealityCardPatchSchema = z.object({
-  section: z.enum([
-    "theme",
-    "style",
-    "cosmology",
-    "fusionAxiom",
-    "currentEra",
-    "establishedFacts",
-  ]),
-  value: z.unknown(),
-}).strict().refine(
-  (patch) => Object.prototype.hasOwnProperty.call(patch, "value"),
-  { path: ["value"], message: "现实卡补丁必须显式提供 value" },
-);
+const PlannedEstablishedFactSchema = z.object({
+  ref: StableRefSchema.optional(),
+  text: z.string().trim().min(1),
+}).strict();
+
+export const RealityCardPatchSchema = z.discriminatedUnion("section", [
+  z.object({ section: z.literal("theme"), value: ThemeCardSchema }).strict(),
+  z.object({ section: z.literal("style"), value: StyleCardSchema }).strict(),
+  z.object({ section: z.literal("cosmology"), value: CosmologyCardSchema }).strict(),
+  z.object({
+    section: z.literal("fusionAxiom"),
+    value: FusionAxiomCardSchema.nullable(),
+  }).strict(),
+  z.object({ section: z.literal("currentEra"), value: z.string() }).strict(),
+  z.object({
+    section: z.literal("establishedFacts"),
+    value: z.array(PlannedEstablishedFactSchema),
+  }).strict(),
+]);
 
 const RewriteGodRelationSchema = z.object({
   targetRef: StableRefSchema,

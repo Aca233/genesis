@@ -21,6 +21,7 @@ describe("absolute-authority rewrite prompts", () => {
     expect(system).toContain("current-time prospective");
     expect(system).toContain("Output ONLY");
     expect(system).toContain('"realityCardPatches"');
+    expect(system).toContain("Do not output establishedByRewriteId");
   });
 
   it("labels all planner inputs and preserves mixed scope hints", () => {
