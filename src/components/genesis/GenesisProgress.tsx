@@ -11,6 +11,7 @@ import {
 } from "@/lib/genesis/stages";
 import { acceptTaskSnapshot } from "@/lib/genesis/client-state";
 import type { WorldMode } from "@/lib/world-mode";
+import { PlayBackground } from "@/components/play/PlayBackground";
 
 type Task = {
   id: string;
@@ -139,7 +140,8 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
   }
 
   return (
-    <main className="relative flex min-h-screen w-full items-center justify-center overflow-hidden px-5 py-10">
+    <main className="play-shell relative flex min-h-screen w-full items-center justify-center overflow-hidden px-5 py-10">
+      <PlayBackground variant="progress" />
       <div className="pointer-events-none absolute inset-0 opacity-60 [background:radial-gradient(circle_at_50%_25%,var(--gilt-glow),transparent_35%)]" />
       <section className="relative grid w-full max-w-5xl gap-10 rounded-2xl border border-line bg-paper-raised/85 p-6 shadow-[0_24px_90px_rgba(46,36,24,0.12)] backdrop-blur-sm md:grid-cols-[0.9fr_1.1fr] md:p-10">
         <div className="flex flex-col justify-between gap-8">

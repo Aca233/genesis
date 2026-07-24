@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import type { WorldDeck } from "@/lib/cards/schemas";
+import { PlayBackground } from "@/components/play/PlayBackground";
 
 /**
  * 创世开局演出（docs/05 §4.1）
@@ -111,11 +112,12 @@ export function GenesisCeremony({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.5 }}
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-paper"
+      className="play-shell ceremony-veil fixed inset-0 z-50 flex items-center justify-center overflow-hidden"
     >
+      <PlayBackground variant="ceremony" />
       {/* 演出主体（跳过后隐去，只留等待态） */}
       {!skipped && (
-        <div className="flex w-full max-w-2xl flex-col items-center px-8">
+        <div className="ceremony-content relative flex w-full max-w-2xl flex-col items-center px-8">
           <AnimatePresence mode="wait">
             {/* 第一幕：原初神谕，金色文楷逐字浮现 */}
             {act === "decree" && (

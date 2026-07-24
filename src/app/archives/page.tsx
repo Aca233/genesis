@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { CelestialPageShell } from "@/components/layout/CelestialPageShell";
 import { worldModeLabel, type WorldMode } from "@/lib/world-mode";
 
 /** 存档列表项（GET /api/worlds 返回 shape） */
@@ -129,8 +130,8 @@ export default function ArchivesPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-6 py-12">
-      <header className="mb-8 flex items-end justify-between">
+    <CelestialPageShell contentClassName="mx-auto w-full max-w-2xl">
+      <header className="mb-8 flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1
             className="text-3xl text-ink"
@@ -175,7 +176,7 @@ export default function ArchivesPage() {
           </Link>
         </div>
       ) : (
-        <ul className="grid gap-4">
+        <ul className="grid min-w-0 gap-4">
           {worlds.map((w) => {
             const badge = STATUS_BADGE[w.status] ?? {
               label: w.status,
@@ -186,15 +187,15 @@ export default function ArchivesPage() {
             return (
               <li
                 key={w.id}
-                className="rounded-lg border border-line bg-paper-raised p-5"
+                className="min-w-0 rounded-lg border border-line bg-paper-raised p-5"
               >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
+                <div className="flex min-w-0 flex-col items-start gap-2 sm:flex-row sm:justify-between sm:gap-4">
+                  <div className="min-w-0 w-full">
                     <h2
-                      className="flex items-center gap-2 text-xl text-ink"
+                      className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-xl text-ink"
                       style={{ fontFamily: "var(--font-display)" }}
                     >
-                      <span className="truncate">{w.name}</span>
+                      <span className="min-w-0 max-w-full truncate">{w.name}</span>
                       <span
                         className={`shrink-0 rounded border px-1.5 py-0.5 text-xs ${badge.cls}`}
                       >
@@ -269,6 +270,6 @@ export default function ArchivesPage() {
           ← 回到原初
         </Link>
       </footer>
-    </main>
+    </CelestialPageShell>
   );
 }

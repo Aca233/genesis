@@ -20,6 +20,7 @@ import {
 import { switchCreatorReality } from "@/components/play/reality-tree-state";
 import { RuneRail } from "@/components/play/RuneRail";
 import { PlayDrawer } from "@/components/play/PlayDrawer";
+import { PlayBackground } from "@/components/play/PlayBackground";
 import type { WorldActivityResponse } from "@/components/play/WorldActivityPanel";
 import {
   advanceActivityCursor,
@@ -577,7 +578,8 @@ export default function PlayPage({
 
   return (
     <EntityIndexProvider index={entityIndex} openEntity={openEntity}>
-      <main className="relative flex min-h-screen flex-col">
+      <main className="play-shell relative flex min-h-screen flex-col">
+        <PlayBackground />
         {/* 世界名（页眉淡墨，紧凑） */}
         <header className="pointer-events-none sticky top-0 z-20 bg-gradient-to-b from-[var(--paper)] via-[var(--paper)]/80 to-transparent px-6 pb-2 pt-2 text-center">
           <span

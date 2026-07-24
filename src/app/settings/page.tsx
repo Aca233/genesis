@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { CelestialPageShell } from "@/components/layout/CelestialPageShell";
 import { PromptCacheStats } from "@/components/settings/PromptCacheStats";
 
 type SlotForm = {
@@ -323,14 +324,14 @@ export default function SettingsPage() {
 
   if (!loaded) {
     return (
-      <main className="flex flex-1 items-center justify-center text-ink-faint">
+      <CelestialPageShell contentClassName="mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-2xl items-center justify-center text-ink-faint">
         展卷中…
-      </main>
+      </CelestialPageShell>
     );
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-6 py-12">
+    <CelestialPageShell contentClassName="mx-auto w-full max-w-2xl">
       <header className="mb-8">
         <button
           onClick={() => {
@@ -405,6 +406,6 @@ export default function SettingsPage() {
           {savedTick && <span className="text-sm text-gilt">✓ 已封存</span>}
         </div>
       </div>
-    </main>
+    </CelestialPageShell>
   );
 }

@@ -26,7 +26,7 @@ const LABELS: Record<string, string> = {
   theme: "主题",
 };
 
-const fieldClassName = "min-h-10 rounded border border-line bg-paper-sunken px-3 py-2 text-ink outline-none transition focus:border-gilt";
+const fieldClassName = "min-h-10 min-w-0 w-full rounded border border-line bg-paper-sunken px-3 py-2 text-ink outline-none transition focus:border-gilt";
 
 export function MaterialLibrary() {
   const [items, setItems] = useState<MaterialListItem[]>([]);
@@ -98,10 +98,10 @@ export function MaterialLibrary() {
   if (open) return <MaterialDetail id={open} onClose={() => setOpen(null)} onChanged={load} />;
 
   return (
-    <div className="grid gap-5">
+    <div className="grid min-w-0 gap-5">
       {error && <p className="rounded border border-cinnabar/30 bg-cinnabar/5 px-4 py-3 text-cinnabar">{error}</p>}
 
-      <section className="grid gap-4 rounded-lg border border-line bg-paper-raised p-4" aria-label="素材筛选">
+      <section className="grid min-w-0 gap-4 rounded-lg border border-line bg-paper-raised p-4" aria-label="素材筛选">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(18rem,1fr)_repeat(3,minmax(9rem,auto))]">
           <label className="grid gap-1 text-xs text-ink-faint">
             关键词
@@ -171,17 +171,17 @@ export function MaterialLibrary() {
         </div>
       </section>
 
-      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <ul className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {shown.map((item) => (
-          <li key={item.id} className={`rounded-lg border bg-paper-raised p-4 ${item.hidden ? "border-line opacity-70" : "border-line"}`}>
-            <button type="button" onClick={() => setOpen(item.id)} className="w-full text-left">
+          <li key={item.id} className={`min-w-0 rounded-lg border bg-paper-raised p-4 ${item.hidden ? "border-line opacity-70" : "border-line"}`}>
+            <button type="button" onClick={() => setOpen(item.id)} className="min-w-0 w-full text-left">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs text-gilt">{LABELS[item.kind] ?? item.kind}</p>
                 <p className="text-xs text-ink-faint">{item.versions.length} 个版本</p>
               </div>
-              <h2 className="mt-1 text-lg text-ink">{item.name}</h2>
+              <h2 className="mt-1 break-words text-lg text-ink [overflow-wrap:anywhere]">{item.name}</h2>
               <p className="mt-2 line-clamp-3 text-sm text-ink-soft">{item.summary}</p>
-              <p className="mt-2 text-xs text-ink-faint">
+              <p className="mt-2 break-words text-xs text-ink-faint [overflow-wrap:anywhere]">
                 {item.sourceWorldName}{!item.sourceWorldId && " · 来源已删除"}
               </p>
             </button>

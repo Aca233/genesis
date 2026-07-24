@@ -42,6 +42,7 @@ import {
   type EmbarkMaterialization,
 } from "@/components/genesis/embark-flow";
 import { streamNarration } from "@/components/play/sse-client";
+import { PlayBackground } from "@/components/play/PlayBackground";
 
 /**
  * 卡片编辑器（M1.4）+ 创世开局演出（M1.5）
@@ -300,15 +301,17 @@ export default function GenesisEditorPage({
   // ── 渲染 ──
   if (loadError) {
     return (
-      <main className="flex flex-1 items-center justify-center px-6">
-        <p className="text-cinnabar">{loadError}</p>
+      <main className="play-shell flex min-h-screen flex-1 items-center justify-center px-6">
+        <PlayBackground variant="genesis" />
+        <p className="genesis-status-panel text-cinnabar">{loadError}</p>
       </main>
     );
   }
   if (!deck) {
     return (
-      <main className="flex flex-1 items-center justify-center text-ink-faint">
-        展卷中…
+      <main className="play-shell flex min-h-screen flex-1 items-center justify-center text-ink-faint">
+        <PlayBackground variant="genesis" />
+        <p className="genesis-status-panel">展卷中…</p>
       </main>
     );
   }
@@ -316,9 +319,11 @@ export default function GenesisEditorPage({
   const busy = rerolling !== null;
 
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 px-6 pb-28 pt-10">
+    <main className="play-shell min-h-screen">
+      <PlayBackground variant="genesis" />
+      <div className="genesis-deck-page mx-auto w-full max-w-6xl px-6 pb-28 pt-10">
       {/* ── 顶部：世界名 + 原初神谕 ── */}
-      <header className="mb-8 grid gap-3">
+      <header className="genesis-deck-header mb-8 grid gap-3">
         <input
           value={deck.worldName}
           onChange={(e) => handleEdit("worldName", e.target.value)}
@@ -642,6 +647,8 @@ export default function GenesisEditorPage({
           <ThemeEditor deck={deck} lockedPaths={lockedPaths} onEdit={handleEdit} />
         )}
       </CardEditorModal>
+
+      </div>
 
       {/* ── 底部固定条 ── */}
       <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-paper-raised/95 backdrop-blur-sm">

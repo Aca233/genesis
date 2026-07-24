@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 生成、加工并接入一组构图一致的日卷/烛光星图古卷背景，在增强主游玩页氛围的同时维持长文本可读性。
+**Goal:** 生成、加工并接入一组构图一致的日卷/烛光星图古卷背景，在统一完整核心流程氛围的同时维持长文本、卡片与表单可读性。
 
-**Architecture:** 先用 `gpt-image-2` 生成 3840×2160 日卷 PNG 母版，再以母版作为参考图编辑出同构烛光 PNG。验收后用 FFmpeg 导出网页 WebP，由主游玩页专用的 `PlayBackground` 展示；CSS 根据现有 `html[data-theme="candle"]` 自动切换图片，其他路由不加载该视觉层。
+**Architecture:** 先用 `gpt-image-2` 生成 3840×2160 日卷 PNG 母版，再以母版作为参考图编辑出同构烛光 PNG。验收后用 FFmpeg 导出网页 WebP，由共享的 `PlayBackground` 和 `CelestialPageShell` 展示；CSS 根据现有 `html[data-theme="candle"]` 自动切换图片，并为首页、创世流程、游玩页和辅助页面设置不同视觉层级。
 
 **Tech Stack:** `gpt-image-2`、PNG、FFmpeg 7、WebP、Next.js 16 App Router、React 19、Tailwind CSS v4、Vitest。
 
@@ -17,7 +17,7 @@
 - 日卷和烛光版的星图、轨道、符印、边饰必须位置一致；烛光版只改颜色、明度、材质气氛和金墨亮度。
 - 背景四周自然延伸到画布边缘，并能承受 CSS `cover` 的少量裁切。
 - 不加入动态粒子、视差或常驻发光动画。
-- 只接入主游玩页；首页、创世仪式和抽屉内部不新增独立插画。
+- 复用同一对背景覆盖首页、创世进度、卡组编辑、开局仪式、主游玩页、往昔诸界、万象藏库和香炉设置；抽屉内部不新增独立插画。
 - 按项目规则，修改代码前以 `node_modules/next/dist/docs/01-app/01-getting-started/11-css.md` 为 Next.js 16 CSS 行为依据。
 
 ---

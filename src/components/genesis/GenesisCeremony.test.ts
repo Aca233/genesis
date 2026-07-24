@@ -1,6 +1,8 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { completeCreatorDeck, completeDeck } from "@/lib/abilities/embark.test-fixtures";
-import { buildCeremonyStamps, ceremonyTitle } from "./GenesisCeremony";
+import { buildCeremonyStamps, ceremonyTitle, GenesisCeremony } from "./GenesisCeremony";
 
 describe("buildCeremonyStamps", () => {
   it("保留诸神模式的玩家神拓印", () => {
@@ -22,4 +24,17 @@ it("末幕使用世界名、纪元、时间和自此有史", () => {
     time: deck.epochConflict.yearLabel,
     seal: "自此有史",
   });
+});
+
+it("仪式使用星图背景和独立遮罩，不透出卡组页面", () => {
+  const html = renderToStaticMarkup(createElement(GenesisCeremony, {
+    decree: "自此开天。",
+    deck: completeDeck(),
+    embark: { phase: "pending" },
+    onFinished: () => undefined,
+  }));
+
+  expect(html).toContain("play-background--ceremony");
+  expect(html).toContain("ceremony-veil");
+  expect(html).toContain("ceremony-content");
 });

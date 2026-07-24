@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/components/theme/useTheme";
 import { MaterialPicker } from "@/components/materials/MaterialPicker";
+import { PlayBackground } from "@/components/play/PlayBackground";
 import type { MaterialSelectionItem } from "@/lib/materials/types";
 import { buildGenesisTaskPayload, defaultGenesisMode } from "@/lib/genesis/create-request";
 import { WORLD_MODES, WORLD_MODE_PRESENTATION, type WorldMode } from "@/lib/world-mode";
@@ -74,8 +75,9 @@ export default function Home() {
   }
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-10 px-6">
-      <header className="text-center">
+    <main className="play-shell flex flex-1 flex-col items-center justify-center gap-10 px-6">
+      <PlayBackground variant="home" />
+      <header className="relative text-center">
         <h1
           className="text-6xl font-black tracking-widest text-ink"
           style={{ fontFamily: "var(--font-display)" }}
@@ -87,7 +89,7 @@ export default function Home() {
         </p>
       </header>
 
-      <section className="w-full max-w-xl">
+      <section className="home-genesis-panel relative w-full max-w-xl">
         <fieldset className="mb-4" disabled={creating}>
           <legend className="mb-2 text-sm text-ink-faint">选择世界模式（创建后不可更改）</legend>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -191,7 +193,7 @@ export default function Home() {
 
       {materialPickerOpen && <MaterialPicker value={materialSelections} onChange={setMaterialSelections} onClose={() => setMaterialPickerOpen(false)} />}
 
-      <footer className="flex flex-col items-center gap-3 text-xs text-ink-faint">
+      <footer className="relative flex flex-col items-center gap-3 text-xs text-ink-faint">
         <nav className="flex gap-8">
           <Link href="/archives" className="transition hover:text-gilt">
             📜 往昔诸界
