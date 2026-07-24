@@ -47,3 +47,4 @@ next-env.d.ts
 # local agent/runtime state
 /.claude/settings.local.json
 /dev-server.log
+/.worktrees/
