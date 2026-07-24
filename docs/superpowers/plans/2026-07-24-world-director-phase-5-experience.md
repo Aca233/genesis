@@ -8,6 +8,17 @@
 
 **Tech Stack:** Next.js 16.2.10、React 19、TypeScript、SSE、Vitest
 
+## Global Constraints
+
+- 版本固定为 Next.js `16.2.10`、React `19.2.4`、Vitest `4.1.10`。
+- 玩家标题固定为 `{世界名} · {纪元} · {时间}`，不得显示章节号或章末流程。
+- 初次进入创建幂等 `initial_observation`；就绪动画不等待 Run 完成。
+- 纯查询和 UI 操作不得创建 Run；行动、观察、续写和时之仪必须创建 Run。
+- 前端只显示“读取世界 → 推演变化 → 校验因果 → 编织正文 → 写入世界”。
+- 最新轮次修订必须精确撤销；有后续历史时必须分叉并保留源现实。
+- 异文、朱批、裁去和重生成不能只修改 Message 文本。
+- 每项行为先写失败测试；每任务独立提交，只包含任务列出的文件。
+
 ---
 
 ## 文件结构
@@ -45,6 +56,10 @@ src/app/api/messages/[id]/variants/route.test.ts
 ---
 
 ### Task 1: 添加前端 Run SSE 客户端
+
+**Interfaces:**
+- Consumes: Phase 4 `DirectorRunEvent` 和 Agent Run HTTP/SSE endpoints。
+- Produces: `CreateRunInput`、`DirectorRunHandlers`、`createAndFollowDirectorRun(...)`、`followDirectorRun(...)`、`reduceDirectorEvent(...)`。
 
 **Files:**
 - Create: `src/components/play/director-run-client.ts`
@@ -105,6 +120,10 @@ Expected: PASS。
 
 ### Task 2: 扩展 world state 返回未完成 Run
 
+**Interfaces:**
+- Consumes: Phase 1 `directorProgress`；Phase 4 `WorldDirectorRun` 持久状态和 provisional frames。
+- Produces: `PlayState.activeDirectorRun`、`PlayState.latestRunId` 和不依赖公开章节字段的 world state DTO。
+
 **Files:**
 - Modify: `src/app/api/worlds/[id]/state/route.ts`
 - Create: `src/app/api/worlds/[id]/state/route.test.ts`
@@ -157,6 +176,10 @@ Expected: PASS。
 ---
 
 ### Task 3: 游戏页面切换到 Run API
+
+**Interfaces:**
+- Consumes: Tasks 1–2 的 Run client、reducer 和 PlayState DTO；现有 `StoryStream`、`InputDeck`、`PlayDrawer`。
+- Produces: `play-director-flow.ts` 的 `resumeOrOpenWorld(...)`；页面 trigger 映射；`TurnChanges` 和 `TurnReferences`。
 
 **Files:**
 - Modify: `src/app/play/[worldId]/page.tsx`
@@ -244,6 +267,10 @@ Expected: PASS。
 
 ### Task 4: 让创世就绪动画与初始观察 Run 并行
 
+**Interfaces:**
+- Consumes: Phase 4 `POST /api/agent-runs`；Task 1 Run client；现有 embark materialization 和 Genesis Ceremony。
+- Produces: 新 `EmbarkMaterialization`、`createEmbarkFlow({ createInitialObservation })` 和稳定 `opening:${worldId}` 幂等键。
+
 **Files:**
 - Modify: `src/components/genesis/embark-flow.ts`
 - Modify: `src/components/genesis/embark-flow.test.ts`
@@ -326,6 +353,10 @@ Expected: PASS。
 
 ### Task 5: 实现最新轮次精确撤销
 
+**Interfaces:**
+- Consumes: Phase 2 `WorldInverseChangeSet`；Phase 4 completed Run/checkpoint/projection sources；当前 `RealityRevision`。
+- Produces: `rollbackLatestRun(client, input): Promise<{ timelineId: string; revision: number }>` 和归档消息读取语义。
+
 **Files:**
 - Create: `src/lib/world-director/reality/revision.ts`
 - Create: `src/lib/world-director/reality/revision.integration.test.ts`
@@ -375,6 +406,10 @@ Expected: PASS。
 
 ### Task 6: 实现历史修订自动分叉
 
+**Interfaces:**
+- Consumes: Task 5 的末端判定；现有 `src/lib/reality/clone.ts`；可信 RunCheckpoint/CutoverBaseline。
+- Produces: `prepareRevisionBranch(client, input): Promise<{ sourceTimelineId; preparedTimelineId; anchorRevision }>`。
+
 **Files:**
 - Create: `src/lib/world-director/reality/branch.ts`
 - Create: `src/lib/world-director/reality/branch.integration.test.ts`
@@ -422,6 +457,10 @@ Expected: PASS。
 ---
 
 ### Task 7: 添加异文、朱批和裁去 Run API
+
+**Interfaces:**
+- Consumes: Phase 4 Controller；Tasks 5–6 的撤销和分叉；Phase 1 `TurnVariant`。
+- Produces: `POST/PATCH /api/agent-runs/[runId]/variants`、`POST /revise`、`POST /cut` 的公开契约。
 
 **Files:**
 - Create: `src/app/api/agent-runs/[runId]/variants/route.ts`
@@ -473,6 +512,10 @@ Expected: PASS。
 ---
 
 ### Task 8: 废弃 Message 直接写入路由
+
+**Interfaces:**
+- Consumes: Task 7 的 revision endpoints；Message 到 `WorldDirectorRun` 的关联。
+- Produces: 对绑定 Run 的旧 Message 写路由返回 409/迁移目标；PlayPage 所有编辑动作统一使用 Run API。
 
 **Files:**
 - Modify: `src/app/api/messages/[id]/route.ts`

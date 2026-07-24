@@ -8,6 +8,18 @@
 
 **Tech Stack:** Prisma 7/PostgreSQL、Next.js 16.2.10、TypeScript、Vitest、现有缓存统计
 
+## Global Constraints
+
+- 版本固定为 Next.js `16.2.10`、Prisma `7.8.0`、Vitest `4.1.10`。
+- 迁移器不得调用 LLM，不得猜测旧 `InverseChangeSet`，不得丢弃玩家正文。
+- 所有活动现实必须生成稳定 `CutoverBaselineCheckpoint`；Hash mismatch 阻止切换。
+- 正式 Provider 必须通过至少一种 Agent 协议；启用搜索时必须返回并保存来源 URL。
+- 正式切换后 `/api/chat` 不得写世界，META parser 只允许存在于 legacy migration。
+- settlement LLM 不得继续判定死亡、新神、新能力、关系或编年史核心事实。
+- 缓存命中必须由 usage 证明；接受缓存键但无读取量时显示 `cache_key_hint_only`。
+- 切换失败后进入只读，不得重新启用旧 META 写入。
+- 每项行为先写失败测试；每任务独立提交，只包含任务列出的文件。
+
 ---
 
 ## 文件结构
@@ -48,6 +60,10 @@ docs/runbooks/world-director-cutover.md
 ---
 
 ### Task 1: 添加 LegacyRun 和切换基线持久化
+
+**Interfaces:**
+- Consumes: Phase 1 Run/revision 模型和现有 Timeline/Message 历史。
+- Produces: Prisma delegates `legacyDirectorRun`、`cutoverBaselineCheckpoint`；`CutoverBaselineSchema` 和 legacy migration contracts。
 
 **Files:**
 - Modify: `prisma/schema.prisma`
@@ -120,6 +136,10 @@ Expected: PASS。
 
 ### Task 2: 确定性编译旧 META 为 LegacyRun
 
+**Interfaces:**
+- Consumes: Task 1 persistence；旧 `Message.meta/variants`、WorldActivity、Chronicle、AbilityEvent。
+- Produces: `LegacyMigrationReport`、`migrateLegacyRuns(client, { worldId?, dryRun }): Promise<LegacyMigrationReport>`。
+
 **Files:**
 - Create: `src/lib/world-director/migration/legacy.ts`
 - Create: `src/lib/world-director/migration/legacy.integration.test.ts`
@@ -173,6 +193,10 @@ Expected: PASS。
 ---
 
 ### Task 3: 生成权威基线和状态 Hash
+
+**Interfaces:**
+- Consumes: Task 1 `CutoverBaselineCheckpoint`；当前权威世界表。
+- Produces: `buildCutoverBaseline(client, timelineId)`、稳定 baseline payload 和 SHA-256 `stateHash`。
 
 **Files:**
 - Create: `src/lib/world-director/migration/baseline.ts`
@@ -231,6 +255,10 @@ Expected: PASS。
 ---
 
 ### Task 4: 生成迁移完整性报告和 CLI
+
+**Interfaces:**
+- Consumes: Tasks 2–3 的 migration/baseline 结果。
+- Produces: 完整性报告 DTO、`director:migrate:dry`、`director:migrate`、`director:verify` CLI。
 
 **Files:**
 - Create: `src/lib/world-director/migration/report.ts`
@@ -305,6 +333,10 @@ Expected: dry-run 不写数据库，报告生成成功。
 ---
 
 ### Task 5: 增加缓存层级与真实能力观测
+
+**Interfaces:**
+- Consumes: Phase 3 L0/L1/Run incremental telemetry；现有 `LlmCall` usage。
+- Produces: 扩展 `LlmCall` 字段、`classifyCacheEvidence(...)`、Gateway telemetry 持久化和分层 cache stats。
 
 **Files:**
 - Create: `src/lib/llm/cache-observability.ts`
@@ -391,6 +423,10 @@ Expected: PASS。
 
 ### Task 6: 更新缓存设置界面
 
+**Interfaces:**
+- Consumes: Task 5 分层 cache stats API DTO。
+- Produces: 缓存统计 UI state 和明确的 confirmed/unconfirmed/hint-only 展示。
+
 **Files:**
 - Modify: `src/app/api/settings/cache-stats/route.ts`
 - Modify: `src/components/settings/PromptCacheStats.tsx`
@@ -430,6 +466,10 @@ Expected: PASS。
 ---
 
 ### Task 7: Shadow replay 和切换门槛自动检查
+
+**Interfaces:**
+- Consumes: Tasks 1–4 的迁移验证；Phase 3 Provider probe；Phase 4 shadow runtime；Phase 5 revision flow。
+- Produces: `shadowReplay(...)`、扩展后的 `director:verify` gate 和非零失败退出语义。
 
 **Files:**
 - Create: `src/lib/world-director/migration/shadow-replay.ts`
@@ -487,6 +527,10 @@ Expected: 测试环境 PASS。
 ---
 
 ### Task 8: 正式切换写路径并停用旧事实生成
+
+**Interfaces:**
+- Consumes: Phase 4 Agent Run API；Phase 5 PlayPage；Task 7 已通过的 cutover gate。
+- Produces: `/api/chat` 410 迁移响应、无 settlement 的 world state/play flow、仅供迁移的 legacy META parser、唯一正式 Agent 写路径。
 
 **Files:**
 - Modify: `src/app/api/chat/route.ts`
@@ -549,6 +593,10 @@ git commit -m "refactor: cut over to world director runtime"
 
 ### Task 9: 编写切换与回滚运行手册
 
+**Interfaces:**
+- Consumes: Tasks 4、7、8 的 CLI、gate 和正式端点行为。
+- Produces: `docs/runbooks/world-director-cutover.md`，包含备份、部署、验证、只读恢复和禁止旧链路回退的操作步骤。
+
 **Files:**
 - Create: `docs/runbooks/world-director-cutover.md`
 
@@ -599,6 +647,10 @@ git commit -m "docs: add world director cutover runbook"
 ---
 
 ### Task 10: 最终验收
+
+**Interfaces:**
+- Consumes: Phase 1–6 全部公开接口、测试、迁移工具和运行手册。
+- Produces: 全量验证证据、玩家九场景验收结果、唯一事实来源 grep 结果和最终可集成分支。
 
 **Files:** 全部相关实现与测试。
 

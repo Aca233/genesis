@@ -8,6 +8,17 @@
 
 **Tech Stack:** TypeScript 5、Zod 4、Prisma 7/PostgreSQL、Vitest 4
 
+## Global Constraints
+
+- 版本固定为 Next.js `16.2.10`、Prisma `7.8.0`、Zod `4.4.3`、Vitest `4.1.10`。
+- 在隔离 worktree 和 `codex/` 分支实施；保护实施前已有改动及 `prisma/migrations/20260724053824/`。
+- 源码语义修改只用原生 `apply_patch`；不得用 shell 或临时脚本改源码。
+- 单个 Run 最多 `4` 次 LLM 调用、最多 `2` 次修正；状态机必须硬拒绝越界。
+- 本阶段只新增基础设施，不改变 `/api/chat`、settlement 或玩家可见行为。
+- 新 Run 必须与既有 chat、settlement、rewrite 共用世界级写锁。
+- 每项行为先写失败测试，测试真实数据库状态和公开结果，不只验证 mock 调用。
+- 每任务独立提交，只包含任务列出的文件。
+
 ---
 
 ## 文件结构
@@ -42,6 +53,10 @@ src/lib/tasks/progress.test.ts
 ---
 
 ### Task 1: 定义 Run 契约、阶段和硬预算
+
+**Interfaces:**
+- Consumes: Zod `z`。
+- Produces: `RunTriggerSchema`、`RunStateSchema`、`RunTrigger`、`RunState`、`MAX_MODEL_CALLS = 4`、`MAX_REPAIRS = 2`、`canSpendModelCall(current: number): boolean`、`canSpendRepair(current: number): boolean`。
 
 **Files:**
 - Create: `src/lib/world-director/contracts/run.ts`
@@ -155,6 +170,10 @@ git commit -m "feat: define world director run contract"
 
 ### Task 2: 实现不可倒退的状态转换
 
+**Interfaces:**
+- Consumes: Task 1 的 `RunState`。
+- Produces: `assertRunTransition(from: RunState, to: RunState): void`。
+
 **Files:**
 - Create: `src/lib/world-director/runtime/transitions.ts`
 - Create: `src/lib/world-director/runtime/transitions.test.ts`
@@ -247,6 +266,10 @@ git commit -m "feat: add world director state machine"
 ---
 
 ### Task 3: 添加 Prisma 持久化模型和 migration
+
+**Interfaces:**
+- Consumes: 现有 `World`、`Timeline`、`Message` 模型；Task 1 的状态和触发字符串。
+- Produces: Prisma delegates `worldDirectorRun`、`worldChangeSet`、`worldInverseChangeSet`、`narrativeClaim`、`runCheckpoint`、`turnVariant`、`realityRevision`，以及对应模型类型。
 
 **Files:**
 - Modify: `prisma/schema.prisma`
@@ -482,6 +505,10 @@ git commit -m "feat: persist world director runs"
 
 ### Task 4: 实现幂等 Run 创建与 revision 初始化
 
+**Interfaces:**
+- Consumes: Task 1 的 `RunTrigger`；Task 3 的 Prisma delegates。
+- Produces: `ReserveRunInput`、`reserveRun(client: PrismaClient, input: ReserveRunInput): Promise<{ run: WorldDirectorRun; created: boolean }>`。
+
 **Files:**
 - Create: `src/lib/world-director/runtime/repository.ts`
 - Create: `src/lib/world-director/runtime/repository.integration.test.ts`
@@ -574,6 +601,10 @@ git commit -m "feat: reserve idempotent director runs"
 ---
 
 ### Task 5: 实现租约、心跳、预算消费和阶段推进
+
+**Interfaces:**
+- Consumes: Task 1 的预算常量和 `RunState`；Task 2 的 `assertRunTransition`；Task 3 的 `worldDirectorRun` delegate。
+- Produces: `DIRECTOR_LEASE_MS`、`DIRECTOR_HEARTBEAT_MS`、`claimRun(...)`、`renewRunLease(...)`、`transitionOwnedRun(...)`、`spendModelCall(...)`、`spendRepair(...)`，签名以本任务 Step 3 代码块为准。
 
 **Files:**
 - Create: `src/lib/world-director/runtime/lease.ts`
@@ -677,6 +708,10 @@ git commit -m "feat: lease and budget director runs"
 
 ### Task 6: 将现有世界操作锁接入 director
 
+**Interfaces:**
+- Consumes: Task 4 的 `reserveRun`；现有 `claimWorldOperation`、`releaseWorldOperation`、`renewWorldOperation`。
+- Produces: 扩展后的 `WorldOperationKind = "chat" | "settlement" | "rewrite" | "director"`；带世界级 director 锁语义的 `reserveRun`。
+
 **Files:**
 - Modify: `src/lib/reality/operation-lock.ts`
 - Modify: `src/lib/reality/operation-lock.test.ts`
@@ -747,6 +782,10 @@ Expected: PASS。
 ---
 
 ### Task 7: 接入统一任务进度投影
+
+**Interfaces:**
+- Consumes: Task 1 的 `RunState`；现有 `DurableTaskProgress`。
+- Produces: `TaskKind` 新成员 `"director"`、`taskStages.director`、`directorProgress(run): DurableTaskProgress`。
 
 **Files:**
 - Modify: `src/lib/tasks/progress.ts`

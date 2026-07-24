@@ -8,6 +8,17 @@
 
 **Tech Stack:** Next.js 16.2.10 Route Handlers、Prisma 7、Zod 4、SSE、Vitest 4
 
+## Global Constraints
+
+- 版本固定为 Next.js `16.2.10`、Prisma `7.8.0`、Zod `4.4.3`、Vitest `4.1.10`。
+- 修改 Route Handler 前读取安装版 Route Handler 文档；修改启动恢复前读取 instrumentation 文档。
+- 正文、权威状态、人物、神明、能力、关系、动态、编年史和现实树必须原子提交。
+- 暂显正文不是正式历史；提交失败不得留下 Message、ChangeSet、投影或 revision 增量。
+- 每个重大 mutation 必须有正文 claim；正文重大事实必须有 mutation。
+- Worker 必须同时维护 Run 租约和世界级 director 操作锁。
+- shadow mode 不得写正式 Message、ChangeSet、投影或 revision。
+- 本阶段保留旧 `/api/chat`；每项行为先写失败测试并独立提交。
+
 ---
 
 ## 文件结构
@@ -49,6 +60,10 @@ node_modules/next/dist/docs/01-app/01-getting-started/15-route-handlers.md
 ---
 
 ### Task 1: 生成 NarrationContract 和系统标题
+
+**Interfaces:**
+- Consumes: Phase 2 `CanonicalChangeSet`；当前 `TemporalState`、`ObserverView`、`StyleProfile` 和 reveal/continuity facts。
+- Produces: `NarrationContractSchema`、`NarrationContract`、`buildNarrationContract(input): NarrationContract`。
 
 **Files:**
 - Create: `src/lib/world-director/narration/contract.ts`
@@ -107,6 +122,10 @@ Expected: PASS。
 ---
 
 ### Task 2: 实现段落帧解析、暂存和协议隔离
+
+**Interfaces:**
+- Consumes: Phase 3 叙事模式文本/结构化帧；Task 1 claim IDs。
+- Produces: `NarrativeStreamFrameSchema`、`NarrativeStreamFrame`、`appendNarrativeFrame(...)`、`validateNarrativeText(...)`、`publicFrame(...)`。
 
 **Files:**
 - Create: `src/lib/world-director/narration/stream.ts`
@@ -167,6 +186,10 @@ Expected: PASS。
 
 ### Task 3: 实现双向证据审计
 
+**Interfaces:**
+- Consumes: Task 1 `NarrationContract`；Task 2 `NarrativeStreamFrame[]`；叙事模型输出的 `NarrativeAssertion[]`。
+- Produces: `EvidenceIssue`、`EvidenceIndex`、`classifyNarrativeAssertion(...)`、`auditEvidence(input)`。
+
 **Files:**
 - Create: `src/lib/world-director/narration/evidence.ts`
 - Create: `src/lib/world-director/narration/evidence.test.ts`
@@ -223,6 +246,10 @@ Expected: PASS。
 ---
 
 ### Task 4: 实现 CanonicalChangeSet 事务应用器
+
+**Interfaces:**
+- Consumes: Phase 2 `CanonicalChangeSet` 和当前 Timeline Prisma transaction。
+- Produces: `ApplyResult`、`applyCanonicalChangeSetInTransaction(tx, input): Promise<ApplyResult>`。
 
 **Files:**
 - Create: `src/lib/world-director/kernel/apply.ts`
@@ -284,6 +311,10 @@ Expected: PASS。
 
 ### Task 5: 实现同步投影应用
 
+**Interfaces:**
+- Consumes: Phase 2 `ProjectionOperation[]`；Task 4 `ApplyResult`；runId/changeSetId/sourceMessageId/TemporalState。
+- Produces: `ProjectionApplyResult`、`applyProjectionPlanInTransaction(tx, input): Promise<ProjectionApplyResult>`。
+
 **Files:**
 - Create: `src/lib/world-director/projections/apply.ts`
 - Create: `src/lib/world-director/projections/apply.integration.test.ts`
@@ -343,6 +374,10 @@ Expected: PASS。
 ---
 
 ### Task 6: 实现原子 commit 和故障注入
+
+**Interfaces:**
+- Consumes: Phase 1 Run/revision/lease；Phase 2 `CompiledChangeSet`；Tasks 1–5 的 contract、frames、evidence、world apply 和 projection apply。
+- Produces: `CommitFailurePoint`、`DirectorCompletion`、`commitDirectorRun(client, input): Promise<DirectorCompletion>`。
 
 **Files:**
 - Create: `src/lib/world-director/kernel/commit.ts`
@@ -423,6 +458,10 @@ Expected: PASS。
 
 ### Task 7: 实现 Controller、Worker 和 durable events
 
+**Interfaces:**
+- Consumes: Phase 1 `reserveRun`、租约、状态机和进度；Phase 3 Agent Loop；Task 6 commit。
+- Produces: `CreateDirectorRunInput`、`createDirectorRun(...)`、`cancelDirectorRun(...)`、`retryDirectorRun(...)`、`ensureDirectorRunRunning(...)`、`executeDirectorRun(...)`、`DirectorRunEvent`。
+
 **Files:**
 - Create: `src/lib/world-director/runtime/controller.ts`
 - Create: `src/lib/world-director/runtime/controller.integration.test.ts`
@@ -493,6 +532,10 @@ Expected: PASS。
 
 ### Task 8: 添加服务端恢复泵
 
+**Interfaces:**
+- Consumes: Task 7 `ensureDirectorRunRunning(runId)` 和 Phase 1 可重试非终态 Run repository。
+- Produces: `pumpDirectorRuns(deps?): Promise<number>`、`startDirectorRunPump(): () => void`、`src/instrumentation.ts` 启动钩子。
+
 **Files:**
 - Create: `src/lib/world-director/runtime/pump.ts`
 - Create: `src/lib/world-director/runtime/pump.integration.test.ts`
@@ -556,6 +599,10 @@ Expected: PASS。
 ---
 
 ### Task 9: 添加 Agent Run Route Handlers
+
+**Interfaces:**
+- Consumes: Task 7 Controller/Worker/events；Task 8 恢复入口。
+- Produces: `POST /api/agent-runs`、`GET /api/agent-runs/[runId]`、`GET /stream`、`POST /cancel`、`POST /retry` 的公开 HTTP/SSE 契约。
 
 **Files:**
 - Create: `src/app/api/agent-runs/route.ts`

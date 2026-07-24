@@ -8,6 +8,17 @@
 
 **Tech Stack:** TypeScript 5、Zod 4、现有 LLM Gateway、Vitest 4
 
+## Global Constraints
+
+- 版本固定为 Next.js `16.2.10`、Zod `4.4.3`、Vitest `4.1.10`。
+- Provider 原生工具不是前提；`native_tools`、`structured_output`、`text_frame` 必须产生相同 `AgentCommand`。
+- 规划模式只接受 Agent 命令；叙事模式禁止工具、JSON、META 和 Agent Frame。
+- L0/L1 必须字节级稳定；人物、时间、关系、搜索结果和 runId 只能进入动态后缀。
+- 单 Run 最多 `4` 次 LLM 调用、`2` 次修正和 `2` 次外部搜索。
+- 外部搜索每次最多 `5` 条且必须有 URL；搜索结果只能成为 `ReferenceCandidate`。
+- Adapter 必须剥离内部 `cacheScope` 和 telemetry，不得发送给 Provider。
+- 本阶段不替换正式 `/api/chat`；每项行为先写失败测试并独立提交。
+
 ---
 
 ## 文件结构
@@ -44,6 +55,10 @@ src/app/settings/page.tsx
 ---
 
 ### Task 1: 定义统一 AgentCommand 与 Text Agent Frame
+
+**Interfaces:**
+- Consumes: Phase 2 工具名称和草案操作边界。
+- Produces: `ToolNameSchema`、`AgentCommandSchema`、`AgentCommand`、`parseTextAgentFrame(text): AgentCommand`。
 
 **Files:**
 - Create: `src/lib/world-director/agent/commands.ts`
@@ -124,6 +139,10 @@ Expected: PASS。
 ---
 
 ### Task 2: 扩展 LLM 类型和 Provider Adapter
+
+**Interfaces:**
+- Consumes: Task 1 的工具名称；现有 `ProviderAdapter`、`CompletionRequest`、`StreamChunk`。
+- Produces: `ToolDefinition`、`AgentProtocolPreference`、扩展后的 `CompletionRequest`/`StreamChunk`，以及三种 Provider 的原生工具 chunk 适配。
 
 **Files:**
 - Modify: `src/lib/llm/types.ts`
@@ -223,6 +242,10 @@ Expected: PASS。
 
 ### Task 3: 实现 Agent Provider 能力探测
 
+**Interfaces:**
+- Consumes: Task 2 的 `AgentProtocolPreference` 和 Adapter 工具/结构化输出能力。
+- Produces: `AgentCapabilityProbe`、`AgentCapabilityProbeSchema`、`probeAgentCapabilities(...)`、`testAgentSlot(slot, apiKey)`。
+
 **Files:**
 - Create: `src/lib/llm/agent-capabilities.ts`
 - Create: `src/lib/llm/agent-capabilities.test.ts`
@@ -299,6 +322,10 @@ Expected: PASS。
 
 ### Task 4: 实现追加式 Conversation 和四层 Prompt Compiler
 
+**Interfaces:**
+- Consumes: Phase 1 Run identity；Task 1 `AgentCommand`；Task 2 `ChatMessage` 和 cache scope。
+- Produces: `RunSeed`、`PromptLayers`、`compileDirectorPrompt(input): ChatMessage[]`、`DirectorConversation`、`hashStablePrefix(messages): string`。
+
 **Files:**
 - Create: `src/lib/world-director/agent/conversation.ts`
 - Create: `src/lib/world-director/agent/conversation.test.ts`
@@ -367,6 +394,10 @@ Expected: PASS。
 ---
 
 ### Task 5: 实现受控外部搜索
+
+**Interfaces:**
+- Consumes: Task 2 Provider `search_result` 能力；Phase 1 Run 的持久工具结果和搜索计数。
+- Produces: `ExternalSearchResultSchema`、`ExternalSearchResult`、`ReferenceCandidate`、`searchExternal(context, request)`。
 
 **Files:**
 - Create: `src/lib/world-director/search/contracts.ts`
@@ -439,6 +470,10 @@ Expected: PASS。
 ---
 
 ### Task 6: 实现最多四次调用的 Agent Loop
+
+**Interfaces:**
+- Consumes: Phase 1 `spendModelCall`/`spendRepair`；Phase 2 `DraftChangeSet`、`validateDraft` 和工具执行器；Tasks 1–5 的协议、conversation、prompt 和搜索。
+- Produces: `DirectorModelClient`、`DirectorToolExecutor`、`PlanningCheckpoint`、`PlanningResult`、`runDirectorPlanningLoop(input): Promise<PlanningResult>`。
 
 **Files:**
 - Create: `src/lib/world-director/agent/loop.ts`
@@ -513,6 +548,10 @@ git commit -m "feat: run bounded world director loop"
 ---
 
 ### Task 7: 在设置页保存并显示完整 Agent 能力探测
+
+**Interfaces:**
+- Consumes: Task 3 的 `AgentCapabilityProbeSchema` 和 `testAgentSlot`；现有 `ModelSlotSchema` 和 Settings API。
+- Produces: 带可选 `agentCapabilities` 的 `ModelSlotSchema`、持久化 probe 的 Settings DTO、设置页能力状态展示。
 
 **Files:**
 - Modify: `src/app/api/settings/test/route.ts`

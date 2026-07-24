@@ -8,6 +8,24 @@
 
 **Tech Stack:** Next.js 16.2.10 Route Handlers、React 19、TypeScript 5、Prisma 7/PostgreSQL、Zod 4、Vitest 4、SSE、现有 LLM Gateway
 
+## Global Constraints
+
+- 运行时版本固定为 Next.js `16.2.10`、React `19.2.4`、Prisma `7.8.0`、Zod `4.4.3`、Vitest `4.1.10`；不得按旧版 Next.js 记忆实现 Route Handler。
+- 修改 Route Handler 前读取 `node_modules/next/dist/docs/01-app/01-getting-started/15-route-handlers.md`；修改服务启动恢复前读取 `node_modules/next/dist/docs/01-app/02-guides/instrumentation.md`。
+- 源码语义修改只使用原生 `apply_patch`；机械替换必须先用 FastCtx `replace` dry-run；不得用 shell、Python、Node 或重定向生成源码。
+- 实施必须在 Codex/宿主提供的隔离 worktree 或 `codex/` 前缀实现分支中进行；不得直接在 `master` 开始实现。
+- 不得清理、覆盖或提交开始实施前已存在的用户改动；`.superpowers/`、`current-play-ui.png`、`prisma/migrations/20260724053824/` 默认不属于本计划。
+- 单一世界导演是唯一 LLM 决策者；不得引入多个模型角色重新解释同一正文。
+- 每个 Run 最多 `4` 次 LLM 调用，规划和正文共用最多 `2` 次自动修正；预算必须由运行时硬拒绝越界。
+- Provider 原生工具调用不是必需能力；`native_tools`、`structured_output`、`text_frame` 必须映射到同一个 `AgentCommand`。
+- 外部搜索每个 Run 最多 `2` 次、每次最多 `5` 条结果；无来源 URL 的搜索结果不能成为世界事实依据。
+- 查询工具只读，草案工具只修改 `DraftChangeSet`；LLM 永远不能直接调用 Prisma、SQL 或任意系统工具。
+- 正文、权威状态、人物、神明、能力、关系、动态、编年史和现实树必须来自同一 `ChangeSet` 并原子提交。
+- 正式切换后禁止新轮次生成或解析尾部 META，禁止 settlement LLM 再次判定核心事实，禁止故障时回退旧写链路。
+- 玩家可见标题固定为 `{世界名} · {纪元} · {时间}`；玩家流程和现实树不得重新引入章节号。
+- 所有新行为先写失败测试，再实现最小代码，再运行聚焦测试；测试真实行为，不以验证 mock 调用次数代替业务结果。
+- 每个任务只能提交该任务列出的文件；提交前执行 `git diff --cached --check` 和 `git diff --cached --name-only`。
+
 ---
 
 ## 实施前保护规则
@@ -44,6 +62,59 @@ flowchart LR
     P4 --> P5["Phase 5<br/>前端、异文与现实修订"]
     P5 --> P6["Phase 6<br/>迁移、切换、缓存与清理"]
 ```
+
+---
+
+## Superpowers 6.2.0 执行协议
+
+六个 Phase 是六份独立实施计划，按依赖顺序串行执行。每份计划拥有自己的：
+
+```text
+.superpowers/sdd/<plan-basename>/
+├─ progress.md
+├─ task-N-brief.md
+├─ task-N-report.md
+└─ review-*.md
+```
+
+每个 Phase 开始时：
+
+1. 运行 `sdd-workspace PLAN_FILE` 取得该计划专属 workspace；
+2. 读取该计划的 `progress.md`；已写入 `Task N: complete` 的任务不得重新分派；
+3. 扫描计划内部冲突；只有真实冲突才集中询问用户；
+4. 为未完成任务建立 todo；
+5. 记录该 Phase 的 `MERGE_BASE`。
+
+每个任务严格执行：
+
+```text
+生成 task brief
+→ 独立实现代理
+→ 实现、真实测试、提交、自审、写 report
+→ 生成 review package
+→ 独立任务审查代理
+→ 同时给出规格符合性和代码质量结论
+→ 必要时定向修复与复审
+→ 写入 progress ledger
+```
+
+审查未通过时最多修复 `5` 轮：
+
+- 第 `1–3` 轮恢复原实现代理；
+- 第 `4–5` 轮换新的、更强实现代理；
+- 每轮只修复明确 findings，并生成仅覆盖修复 diff 的 review package；
+- 第 `5` 轮仍存在真实且会影响后续的结构性问题时，标记 `BLOCKED` 并停止；
+- Minor findings 写入 ledger，交由最终全分支审查裁决。
+
+每个 Phase 全部任务完成后：
+
+1. 使用该 Phase 的 `MERGE_BASE..HEAD` 生成全分支 review package；
+2. 使用最强可用模型执行一次广泛代码审查；
+3. 有 findings 时只进行一轮统一修复和一次定向复审；
+4. 验证通过后删除该计划专属 SDD workspace；
+5. 进入下一 Phase。
+
+Phase 6 完成后，再对 Phase 1 开始前的总 `MERGE_BASE..HEAD` 做一次发布级全分支审查和最终验证。
 
 ---
 

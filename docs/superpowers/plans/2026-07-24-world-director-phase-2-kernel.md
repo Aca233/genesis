@@ -8,6 +8,17 @@
 
 **Tech Stack:** TypeScript 5、Zod 4、Prisma 7、Vitest 4
 
+## Global Constraints
+
+- 版本固定为 Prisma `7.8.0`、Zod `4.4.3`、Vitest `4.1.10`。
+- 查询工具必须只读；草案工具只能返回新 `DraftChangeSet`；任何工具都不能接受 Prisma、SQL 或系统命令。
+- 所有 schema 使用 `.strict()`；未知字段、跨现实引用和未解析临时 ID 必须失败。
+- 世界查询和序列化按稳定 ID、稳定字段顺序输出；相同 revision 的相同请求逐字节一致。
+- 神明关系以 `EntityRelation` 为唯一权威边，`God.relations` 仅作迁移兼容投影。
+- 每个 mutation 必须具有唯一 `mutationKey` 和 `evidenceClaimId`。
+- 本阶段只新增内核能力，不接入正式正文和世界写路径。
+- 每项行为先写失败测试；每任务独立提交，只包含任务列出的文件。
+
 ---
 
 ## 文件结构
@@ -38,6 +49,10 @@ src/lib/world-director/projections/plan.test.ts
 ---
 
 ### Task 1: 定义完整变化代数
+
+**Interfaces:**
+- Consumes: Phase 1 的 `RunTrigger`/现实 revision 语义；Zod。
+- Produces: `WorldMutationSchema`、`DraftChangeSetSchema`、`WorldMutation`、`DraftChangeSet`、`ActivityDraftSchema`、`ChronicleDraftSchema`、`ObserverTransitionSchema`。
 
 **Files:**
 - Create: `src/lib/world-director/draft/schema.ts`
@@ -181,6 +196,10 @@ Expected: PASS。
 
 ### Task 2: 构建确定性 DraftBuilder 和序列化
 
+**Interfaces:**
+- Consumes: Task 1 的 `WorldMutation`、`DraftChangeSet` 和 schemas。
+- Produces: `DraftBuilder.empty(...)`、`DraftBuilder.add(...)`、`DraftBuilder.addMany(...)`、`DraftBuilder.build()`、`stableSerializeDraft(draft): string`。
+
 **Files:**
 - Create: `src/lib/world-director/draft/builder.ts`
 - Create: `src/lib/world-director/draft/builder.test.ts`
@@ -257,6 +276,10 @@ Expected: PASS。
 ---
 
 ### Task 3: 实现有界、只读、稳定输出的 inspect_world
+
+**Interfaces:**
+- Consumes: Prisma `Timeline`、`Entity`、`God`、`Ability`、`EntityRelation`、`WorldEvent`、`WorldActivity`；Phase 1 revision。
+- Produces: `InspectWorldInputSchema`、`InspectScope`、`InspectItem`、`inspectWorld(client, raw): Promise<{ scope; items; nextCursor; truncated }>`。
 
 **Files:**
 - Create: `src/lib/world-director/tools/inspect-world.ts`
@@ -347,6 +370,10 @@ Expected: PASS。
 
 ### Task 4: 实现草案工具分发
 
+**Interfaces:**
+- Consumes: Task 1 的 `DraftChangeSet`；Task 2 的 `DraftBuilder`。
+- Produces: `DraftToolName`、`executeDraftTool(current, command): { draft; acceptedMutationKeys }`。
+
 **Files:**
 - Create: `src/lib/world-director/tools/draft-tools.ts`
 - Create: `src/lib/world-director/tools/draft-tools.test.ts`
@@ -401,6 +428,10 @@ Expected: PASS。
 ---
 
 ### Task 5: 实现 CausalEnvelope
+
+**Interfaces:**
+- Consumes: 当前 Run 的因果 seed IDs、当前现实关联边和 mutation subject IDs。
+- Produces: `validateCausalEnvelope(input): { ok: true } | { ok: false; unreachableIds: string[] }`。
 
 **Files:**
 - Create: `src/lib/world-director/kernel/causal-envelope.ts`
@@ -458,6 +489,10 @@ Expected: PASS。
 ---
 
 ### Task 6: 实现完整校验器
+
+**Interfaces:**
+- Consumes: Task 1 的 `DraftChangeSet`；Task 3 的世界读取 DTO；Task 5 的 `validateCausalEnvelope`；Phase 1 `RealityRevision`。
+- Produces: `ValidationIssue`、`ValidationReport`、`validateDraft(client, input): Promise<ValidationReport>`。
 
 **Files:**
 - Create: `src/lib/world-director/kernel/validate.ts`
@@ -532,6 +567,10 @@ Expected: PASS。
 ---
 
 ### Task 7: 编译正向、反向 ChangeSet 与投影计划
+
+**Interfaces:**
+- Consumes: Task 1 的 `DraftChangeSet`；Task 6 已通过的 `ValidationReport`；读取阶段构建的 `WorldSnapshot`。
+- Produces: `CanonicalChangeSet`、`CompiledChangeSet`、`compileChangeSet(draft, snapshot)`、`ProjectionOperation`、`planProjections(changeSet)`。
 
 **Files:**
 - Create: `src/lib/world-director/kernel/compile.ts`
