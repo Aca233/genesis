@@ -11,25 +11,144 @@ const globalCss = readFileSync(
   "utf8",
 );
 
+function extractCssBlock(source: string, header: RegExp): string {
+  const match = header.exec(source);
+  if (!match) {
+    throw new Error(`Missing CSS block matching ${header}`);
+  }
+
+  const openingBrace = source.indexOf("{", match.index);
+  let depth = 0;
+
+  for (let index = openingBrace; index < source.length; index += 1) {
+    if (source[index] === "{") {
+      depth += 1;
+    } else if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(openingBrace + 1, index);
+      }
+    }
+  }
+
+  throw new Error(`Unclosed CSS block matching ${header}`);
+}
+
+function readDeclaration(block: string, property: string): string {
+  const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const uncommentedBlock = block.replace(/\/\*[\s\S]*?\*\//g, "");
+  const matches = [...uncommentedBlock.matchAll(
+    new RegExp(
+      `(?:^|;)\\s*${escapedProperty}\\s*:\\s*([^;]+)\\s*;`,
+      "gs",
+    ),
+  )];
+  const match = matches.at(-1);
+
+  if (!match) {
+    throw new Error(`Missing CSS declaration ${property}`);
+  }
+
+  return match[1].trim().replace(/\s+/g, " ");
+}
+
 describe("genesis mode background homepage contract", () => {
-  it("passes the existing worldMode state into the visual layer", () => {
-    expect(pageSource).toContain(
-      'import { GenesisModeBackground } from "@/components/genesis/GenesisModeBackground";',
+  it("mounts the mode layer immediately after the existing home background", () => {
+    expect(pageSource).toMatch(
+      /import\s*\{\s*GenesisModeBackground\s*\}\s*from\s*["']@\/components\/genesis\/GenesisModeBackground["']\s*;/,
     );
-    expect(pageSource).toContain(
-      "<GenesisModeBackground mode={worldMode} />",
+    expect(pageSource).toMatch(
+      /<PlayBackground\s+variant\s*=\s*["']home["']\s*\/>\s*<GenesisModeBackground\s+mode\s*=\s*\{\s*worldMode\s*\}\s*\/>/s,
     );
   });
 
-  it("defines crossfade, mobile attenuation, and reduced-motion fallback", () => {
-    expect(globalCss).toContain(".genesis-mode-background__image");
-    expect(globalCss).toContain(
-      ".genesis-mode-background__image.is-active",
+  it("keeps the universal day and candle images while defining both mode themes", () => {
+    const dayTheme = extractCssBlock(globalCss, /:root\s*\{/);
+    const candleTheme = extractCssBlock(
+      globalCss,
+      /\[data-theme\s*=\s*["']candle["']\s*\]\s*\{/,
     );
-    expect(globalCss).toContain("transition: opacity 600ms ease;");
-    expect(globalCss).toContain("@media (max-width: 640px)");
-    expect(globalCss).toContain(
-      "@media (prefers-reduced-motion: reduce)",
+
+    expect(readDeclaration(dayTheme, "--play-background-image")).toMatch(
+      /^url\(\s*["']?\/images\/backgrounds\/play-celestial-day\.webp["']?\s*\)$/,
     );
+    expect(readDeclaration(dayTheme, "--genesis-mode-opacity")).toBe("0.28");
+    expect(readDeclaration(dayTheme, "--genesis-mode-blend")).toBe("multiply");
+
+    expect(readDeclaration(candleTheme, "--play-background-image")).toMatch(
+      /^url\(\s*["']?\/images\/backgrounds\/play-celestial-candle\.webp["']?\s*\)$/,
+    );
+    expect(readDeclaration(candleTheme, "--genesis-mode-opacity")).toBe("0.34");
+    expect(readDeclaration(candleTheme, "--genesis-mode-blend")).toBe("screen");
+  });
+
+  it("crossfades only opacity, protects the center, and keeps the panel translucent", () => {
+    const imageLayer = extractCssBlock(
+      globalCss,
+      /\.genesis-mode-background__image\s*\{/,
+    );
+    const activeLayer = extractCssBlock(
+      globalCss,
+      /\.genesis-mode-background__image\.is-active\s*\{/,
+    );
+    const protectionMask = extractCssBlock(
+      globalCss,
+      /\.genesis-mode-background::after\s*\{/,
+    );
+    const homePanel = extractCssBlock(
+      globalCss,
+      /\.home-genesis-panel\s*\{/,
+    );
+
+    expect(readDeclaration(imageLayer, "transition")).toBe(
+      "opacity 600ms ease",
+    );
+    expect(readDeclaration(activeLayer, "opacity")).toBe(
+      "var(--genesis-mode-opacity)",
+    );
+    expect(readDeclaration(protectionMask, "content")).toBe('""');
+    expect(readDeclaration(protectionMask, "position")).toBe("absolute");
+    expect(readDeclaration(protectionMask, "inset")).toBe("0");
+    expect(readDeclaration(protectionMask, "background")).toMatch(
+      /radial-gradient\(.*var\(--paper\)/,
+    );
+    expect(readDeclaration(homePanel, "background")).toMatch(
+      /^color-mix\(\s*in srgb,\s*var\(--paper\)\s+84%,\s*transparent\s*\)$/,
+    );
+  });
+
+  it("attenuates and repositions the mode layer on mobile", () => {
+    const mobileRules = extractCssBlock(
+      globalCss,
+      /@media\s*\(\s*max-width\s*:\s*640px\s*\)\s*\{/,
+    );
+    const mobileImageLayer = extractCssBlock(
+      mobileRules,
+      /\.genesis-mode-background__image\s*\{/,
+    );
+    const mobileActiveLayer = extractCssBlock(
+      mobileRules,
+      /\.genesis-mode-background__image\.is-active\s*\{/,
+    );
+
+    expect(readDeclaration(mobileImageLayer, "object-position")).toMatch(
+      /^center\s+34%$/,
+    );
+    expect(readDeclaration(mobileActiveLayer, "opacity")).toMatch(
+      /^calc\(\s*var\(--genesis-mode-opacity\)\s*\*\s*0\.72\s*\)$/,
+    );
+  });
+
+  it("disables the mode crossfade when reduced motion is requested", () => {
+    const reducedMotionRules = extractCssBlock(
+      globalCss,
+      /@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)\s*\{/,
+    );
+    const reducedMotionImageLayer = extractCssBlock(
+      reducedMotionRules,
+      /\.genesis-mode-background__image\s*\{/,
+    );
+
+    expect(readDeclaration(reducedMotionImageLayer, "transition")).toBe("none");
   });
 });
