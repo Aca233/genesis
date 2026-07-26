@@ -330,18 +330,45 @@ body > * {
   backdrop-filter: blur(3px);
 }
 
+/* 辅助页内容衬层：半透明古籍 folio——星图透显其后，纸纤维与鎏金饰线与卡片同一材质语言 */
 .celestial-page-content {
   position: relative;
   min-width: 0;
   overflow-wrap: anywhere;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--gilt) 30%, var(--line));
   border-radius: 1.25rem;
   padding: clamp(1.25rem, 3vw, 2.5rem);
-  background: color-mix(in srgb, var(--paper) 91%, transparent);
+  background:
+    var(--fiber-noise),
+    linear-gradient(
+      172deg,
+      color-mix(in srgb, var(--paper) 78%, transparent),
+      color-mix(in srgb, var(--paper) 66%, transparent)
+    );
   box-shadow:
-    0 1.5rem 4.5rem color-mix(in srgb, var(--ink) 8%, transparent),
+    0 1.5rem 4.5rem var(--shadow-warm),
     inset 0 1px color-mix(in srgb, var(--paper-raised) 76%, transparent);
   backdrop-filter: blur(3px);
+}
+
+.celestial-page-content::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border: 1px solid color-mix(in srgb, var(--gilt) 18%, transparent);
+  border-radius: calc(1.25rem - 5px);
+  pointer-events: none;
+}
+
+.celestial-page-content::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 50% 0%, transparent 62%, var(--stain-edge) 100%),
+    radial-gradient(130% 100% at 50% 100%, transparent 66%, var(--stain-blotch) 100%);
 }
 
 .home-genesis-panel {
