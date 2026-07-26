@@ -117,14 +117,18 @@ export function IconPicker({
 
   return (
     <div className="relative">
+      {/* 幕后小注式触发:不与卡片正文抢戏,悬停才泛金 */}
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="flex min-h-10 items-center gap-2 rounded-md border border-line px-3 py-1.5 text-xs text-ink-soft transition hover:border-gilt/50 hover:text-gilt"
+        title={value.playerLocked ? "图标已由你锁定，点击可更换" : "更换此对象的图标"}
+        className="group inline-flex items-center gap-1 text-[11px] text-ink-faint transition hover:text-gilt"
         aria-expanded={open}
       >
-        <WorldIcon icon={value.icon} size={18} />
-        {value.playerLocked ? "已锁定图标" : "更换图标"}
+        <WorldIcon icon={value.icon} size={14} />
+        <span className="underline-offset-2 group-hover:underline">
+          {value.playerLocked ? "图标已锁" : "更换图标"}
+        </span>
       </button>
       {open && (
         <section className="mt-2 grid gap-3 rounded-lg border border-line bg-paper-raised p-3 shadow-lg" aria-label="选择世界图标">

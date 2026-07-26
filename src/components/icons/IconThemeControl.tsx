@@ -69,19 +69,24 @@ export function IconThemeControl({
     }
   }
 
+  // 幕后小注:工具性控件不与「创世」抢戏——单行淡墨,图标库名收进悬停提示
   return (
-    <section className={`rounded-lg border border-line bg-paper-raised/80 ${compact ? "px-3 py-2" : "p-4"}`} aria-label="世界图标主题">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-ink-soft">
-        <strong className="text-ink">图标主题</strong>
-        <span>主库：{FAMILY_LABELS[theme.primaryFamily]}</span>
-        <span>纹章：{FAMILY_LABELS[theme.emblemFamily]}</span>
-        {!compact && <span>母题：{theme.motifTags.join(" · ") || "未命名"}</span>}
-        <button type="button" disabled={busy} onClick={() => void recast()} className="ml-auto rounded border border-gilt/45 px-2 py-1 text-gilt transition hover:bg-gilt/10 disabled:opacity-45">
-          {busy ? "重铸中…" : "重铸图标主题"}
-        </button>
-      </div>
-      {!compact && theme.visualTone.length > 0 && <p className="mt-2 text-xs text-ink-faint">视觉关键词：{theme.visualTone.join("、")}</p>}
-      {message && <p role="status" className="mt-1 text-xs text-ink-faint">{message}</p>}
+    <section
+      className={`flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-ink-faint ${compact ? "" : "border-b border-line/60 pb-2"}`}
+      aria-label="世界图标主题"
+    >
+      <span className="select-none text-[10px] tracking-[0.25em]">图标印记</span>
+      <span className="text-ink-soft">{theme.motifTags.join(" · ") || "未命名"}</span>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void recast()}
+        title={`重铸此世界的图标印记（主库 ${FAMILY_LABELS[theme.primaryFamily]}，纹章 ${FAMILY_LABELS[theme.emblemFamily]}）；玩家锁定项保留`}
+        className="ml-auto text-[11px] text-ink-faint underline-offset-2 transition hover:text-gilt hover:underline disabled:opacity-45"
+      >
+        {busy ? "重铸中…" : "重铸"}
+      </button>
+      {message && <p role="status" className="w-full text-[11px] text-ink-faint">{message}</p>}
     </section>
   );
 }
