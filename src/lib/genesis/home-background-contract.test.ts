@@ -58,7 +58,7 @@ describe("genesis mode background homepage contract", () => {
       /import\s*\{\s*GenesisModeBackground\s*\}\s*from\s*["']@\/components\/genesis\/GenesisModeBackground["']\s*;/,
     );
     expect(pageSource).toMatch(
-      /<PlayBackground\s+variant\s*=\s*["']home["']\s*\/>\s*<GenesisModeBackground\s+mode\s*=\s*\{\s*worldMode\s*\}\s*\/>/s,
+      /<PlayBackground\s+variant\s*=\s*["']home["']\s*\/>\s*<GenesisModeBackground\s+mode\s*=\s*\{\s*worldMode\s*\}\s*\/>/,
     );
   });
 
