@@ -402,7 +402,7 @@ export default function GenesisEditorPage({
           </blockquote>
         )}
         <p className="text-xs text-ink-faint">
-          点开任意古籍笺细览全文；手改字段将上锁 🔒，重掷时保留。满意后点「创世」。
+          点开任意古籍笺细览全文；手改字段将上锁，重掷时保留。满意后点「创世」。
         </p>
       </header>
 

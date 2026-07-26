@@ -7,6 +7,7 @@ import { ScaleDial, SCALE_STOPS } from "./ScaleDial";
 import { useTheme } from "@/components/theme/useTheme";
 import type { TaskProgressView } from "./task-progress-state";
 import { TaskProgressBar } from "./TaskProgressBar";
+import { OperationIcon } from "@/components/icons/OperationIcon";
 
 /**
  * 输入区：时之仪（尺度表盘）+ AI 建议 + 多行输入 + 发送/续笔/停止 + 烛光切换。
@@ -256,10 +257,12 @@ export function InputDeck({
             {/* 烛光切换（游戏内） */}
             <button
               onClick={() => setMode(candle ? "day" : "candle")}
-              className="shrink-0 text-xs text-ink-faint transition hover:text-gilt"
+              className="inline-flex shrink-0 items-center gap-1 text-xs text-ink-faint transition hover:text-gilt"
               title={candle ? "切回日卷（亮色）" : "燃烛夜读（暗色）"}
             >
-              {candle ? "☀ 日卷" : "🕯 烛光"}
+              {candle
+                ? <><OperationIcon name="sun" size={12} /> 日卷</>
+                : <><OperationIcon name="candle" size={12} /> 烛光</>}
             </button>
           </div>
 

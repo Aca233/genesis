@@ -3,6 +3,7 @@
 import { motion, AnimatePresence } from "motion/react";
 import type { DeckCardKey } from "@/lib/cards/schemas";
 import { memo, useState } from "react";
+import { OperationIcon } from "@/components/icons/OperationIcon";
 
 /** 卡片墙：古籍笺卡片 + 组头（重掷控制） */
 
@@ -57,10 +58,10 @@ function DeckCardBase({
           )}
           {lockedCount > 0 && (
             <span
-              className="text-gilt/80"
+              className="inline-flex items-center gap-0.5 text-gilt/80"
               title={`${lockedCount} 处手改字段，重掷时保留`}
             >
-              🔒{lockedCount}
+              <OperationIcon name="lock" size={11} />{lockedCount}
             </span>
           )}
         </span>
@@ -156,9 +157,9 @@ export function GroupHeader({
           onClick={() => setOpen((v) => !v)}
           disabled={rerolling || disabled}
           title={warning ?? "重掷整组（手改字段保留）"}
-          className="rounded-md border border-gilt/40 px-2.5 py-0.5 text-xs text-gilt transition hover:bg-gilt/10 disabled:opacity-40"
+          className="inline-flex items-center gap-1 rounded-md border border-gilt/40 px-2.5 py-0.5 text-xs text-gilt transition hover:bg-gilt/10 disabled:opacity-40"
         >
-          {rerolling ? "⚄ 重掷中…" : "⚄ 重掷"}
+          <OperationIcon name="dice" size={12} />{rerolling ? "重掷中…" : "重掷"}
         </button>
         {warning && (
           <span className="text-xs text-ink-faint">{warning}</span>

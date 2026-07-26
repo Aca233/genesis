@@ -11,6 +11,9 @@ const OPERATIONS = {
   scroll: "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 17V5a2 2 0 0 0-2-2H4M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3\"/>",
   sun: "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 17a5 5 0 1 0 0-10a5 5 0 0 0 0 10ZM12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42\"/>",
   candle: "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 9a2 2 0 0 0 2-2c0-1-.5-1.6-1-2.5c-.4-.72-.8-1.5-1-2.5c-.2 1-.6 1.78-1 2.5c-.5.9-1 1.5-1 2.5a2 2 0 0 0 2 2ZM9 12.5h6M9.5 12.5V21h5v-8.5M7.5 21h9\"/>",
+  lock: "<rect x=\"5\" y=\"11\" width=\"14\" height=\"10\" rx=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/><path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-width=\"2\" d=\"M8 11V7a4 4 0 0 1 8 0v4\"/>",
+  dice: "<rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"3\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/><circle cx=\"8.2\" cy=\"8.2\" r=\"1.3\" fill=\"currentColor\"/><circle cx=\"15.8\" cy=\"8.2\" r=\"1.3\" fill=\"currentColor\"/><circle cx=\"12\" cy=\"12\" r=\"1.3\" fill=\"currentColor\"/><circle cx=\"8.2\" cy=\"15.8\" r=\"1.3\" fill=\"currentColor\"/><circle cx=\"15.8\" cy=\"15.8\" r=\"1.3\" fill=\"currentColor\"/>",
+  ascend: "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 19V5M5 12l7-7 7 7\"/>",
 } as const;
 
 export type OperationIconName = keyof typeof OPERATIONS;

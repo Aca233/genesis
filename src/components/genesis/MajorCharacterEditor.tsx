@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { WorldDeck } from "@/lib/cards/schemas";
+import { OperationIcon } from "@/components/icons/OperationIcon";
 import {
   abilityRefsInDeck,
   availableRacialInnateAbilityRefs,
@@ -39,7 +40,7 @@ function ReferenceChoices({
   return (
     <fieldset className="grid gap-1">
       <legend className="text-xs text-ink-faint">
-        {label}{locked && <span className="ml-1 text-gilt/80" title="手改字段，重掷时保留">🔒</span>}
+        {label}{locked && <span className="ml-1 inline-flex text-gilt/80" title="手改字段，重掷时保留"><OperationIcon name="lock" size={10} /></span>}
       </legend>
       <div className="grid gap-1.5 rounded-md border border-line bg-paper p-3">
         {options.length === 0 ? (

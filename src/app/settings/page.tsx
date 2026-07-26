@@ -144,7 +144,7 @@ function SlotEditor({
                 className="text-xs text-gilt/70 transition hover:text-gilt disabled:opacity-40"
                 title="从端点取回可用模型列表"
               >
-                {listing ? "取名录中…" : "📜 取诸名录"}
+                {listing ? "取名录中…" : "取诸名录"}
               </button>
             </span>
             <input

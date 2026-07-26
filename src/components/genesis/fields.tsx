@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { isPathLocked } from "./deck-utils";
+import { OperationIcon } from "@/components/icons/OperationIcon";
 
 /** 卡片编辑器通用字段控件：文本 / 多行 / 下拉 / 字符串数组（可增删行）+ 封蜡块 */
 
@@ -23,10 +24,10 @@ function LabelRow({ label, locked }: { label: string; locked: boolean }) {
       {label}
       {locked && (
         <span
-          className="cursor-help text-gilt/80"
+          className="inline-flex cursor-help items-center gap-0.5 text-gilt/80"
           title="手改字段，重掷时保留"
         >
-          🔒 <span className="text-[10px]">手改字段，重掷时保留</span>
+          <OperationIcon name="lock" size={10} /> <span className="text-[10px]">手改字段，重掷时保留</span>
         </span>
       )}
     </span>

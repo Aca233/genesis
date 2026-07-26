@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CelestialPageShell } from "@/components/layout/CelestialPageShell";
+import { OperationIcon } from "@/components/icons/OperationIcon";
 import { worldModeLabel, type WorldMode } from "@/lib/world-mode";
 
 /** 存档列表项（GET /api/worlds 返回 shape） */
@@ -136,10 +137,10 @@ export default function ArchivesPage() {
             ← 回到原初
           </Link>
           <h1
-            className="mt-2 text-3xl text-ink"
+            className="mt-2 flex items-center gap-2 text-3xl text-ink"
             style={{ fontFamily: "var(--font-display)" }}
           >
-            📜 往昔诸界
+            <OperationIcon name="archives" size={26} /> 往昔诸界
           </h1>
           <p className="mt-2 text-sm text-ink-faint">
             汝所书写过的每一部创世史，皆封存于此。

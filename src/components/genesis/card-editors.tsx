@@ -24,6 +24,7 @@ import {
   SealedBlock,
   Sect,
 } from "./fields";
+import { OperationIcon } from "@/components/icons/OperationIcon";
 
 /** 各卡片的全文编辑表单（在 CardEditorModal 内使用） */
 
@@ -344,9 +345,9 @@ export function MinorGodsEditor({
                 type="button"
                 title="升格为主神（声纹与议程以占位模板补全，请随后完善）"
                 onClick={() => onPromote(i)}
-                className="rounded-md border border-gilt/40 px-2.5 py-0.5 text-xs text-gilt transition hover:bg-gilt/10"
+                className="inline-flex items-center gap-1 rounded-md border border-gilt/40 px-2.5 py-0.5 text-xs text-gilt transition hover:bg-gilt/10"
               >
-                ☖ 升格
+                <OperationIcon name="ascend" size={11} /> 升格
               </button>
               <button
                 type="button"
@@ -404,7 +405,7 @@ export function FactionEditor({
       <fieldset className="grid gap-1">
         <legend className="text-xs text-ink-faint">
           关键人物（仅可引用人物名录）
-          {isPathLocked(lockedPaths, keyRefsPath) && <span className="ml-1 text-gilt/80" title="手改字段，重掷时保留">🔒</span>}
+          {isPathLocked(lockedPaths, keyRefsPath) && <span className="ml-1 inline-flex text-gilt/80" title="手改字段，重掷时保留"><OperationIcon name="lock" size={10} /></span>}
         </legend>
         <div className="grid gap-1.5 rounded-md border border-line bg-paper p-3">
           {deck.majorCharacters.map((character) => {
