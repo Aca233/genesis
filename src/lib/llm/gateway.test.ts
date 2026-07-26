@@ -118,3 +118,95 @@ describe("complete transport attempts", () => {
     expect(mocks.complete).not.toHaveBeenCalled();
   });
 });
+
+describe("输出上限续写接力", () => {
+  const usageChunk = (truncated: boolean) => ({
+    type: "usage",
+    usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: null, cacheWriteTokens: null },
+    cacheRequested: false,
+    cacheFallback: false,
+    truncated,
+  });
+
+  it("complete: 截断结果自动续写并拼接,接缝重叠被去重", async () => {
+    mocks.stream
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: '{"name":"星海' };
+        yield usageChunk(true);
+        yield { type: "done" };
+      })
+      .mockImplementationOnce(async function* () {
+        // 续写开头重复了上一轮结尾的「星海」,应被裁掉
+        yield { type: "text", text: '星海纪元"}' };
+        yield usageChunk(false);
+        yield { type: "done" };
+      });
+
+    await expect(complete("narrative", {
+      task: "genesis",
+      failOnTruncation: true,
+      messages: [{ role: "user", content: "create" }],
+    }, { maxAttempts: 1, allowFallback: false })).resolves.toBe('{"name":"星海纪元"}');
+
+    expect(mocks.stream).toHaveBeenCalledTimes(2);
+    const continuation = mocks.stream.mock.calls[1][1];
+    expect(continuation.messages.at(-2)).toMatchObject({ role: "assistant", content: '{"name":"星海' });
+    expect(continuation.messages.at(-1).content).toContain("从被截断的确切位置继续");
+  });
+
+  it("complete: 未要求完整输出时截断按原样返回,不追加请求", async () => {
+    mocks.stream.mockImplementationOnce(async function* () {
+      yield { type: "text", text: "partial prose" };
+      yield usageChunk(true);
+      yield { type: "done" };
+    });
+
+    await expect(complete("narrative", {
+      task: "narrative",
+      messages: [{ role: "user", content: "tell" }],
+    }, { maxAttempts: 1, allowFallback: false })).resolves.toBe("partial prose");
+    expect(mocks.stream).toHaveBeenCalledTimes(1);
+  });
+
+  it("stream: 截断后续写轮的文本继续吐出,拼接结果连续", async () => {
+    mocks.stream
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: "第一段" };
+        yield usageChunk(true);
+        yield { type: "done" };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: "第二段" };
+        yield usageChunk(false);
+        yield { type: "done" };
+      });
+
+    let text = "";
+    for await (const chunk of stream("narrative", {
+      task: "genesis",
+      failOnTruncation: true,
+      messages: [{ role: "user", content: "create" }],
+    })) {
+      if (chunk.type === "text") text += chunk.text;
+    }
+    expect(text).toBe("第一段第二段");
+    expect(mocks.stream).toHaveBeenCalledTimes(2);
+  });
+
+  it("stream: 连续截断超过轮数上限时报可操作错误", async () => {
+    mocks.stream.mockImplementation(async function* () {
+      yield { type: "text", text: "片段" };
+      yield usageChunk(true);
+      yield { type: "done" };
+    });
+
+    const consume = async () => {
+      for await (const chunk of stream("narrative", {
+        task: "genesis",
+        failOnTruncation: true,
+        messages: [{ role: "user", content: "create" }],
+      })) void chunk;
+    };
+    await expect(consume()).rejects.toThrow("输出被上游截断且续写接力");
+  });
+});

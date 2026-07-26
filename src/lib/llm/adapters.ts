@@ -43,13 +43,6 @@ function publicMessages(messages: ChatMessage[]) {
   return messages.map(({ role, content }) => ({ role, content }));
 }
 
-/** 上游输出上限截断:截断的正文只会让下游 JSON 解析莫名失败,按请求方要求显式报错。 */
-function truncationError(req: CompletionRequest): Error {
-  const asked = req.maxTokens ? `请求 ${req.maxTokens} tokens 未被满足，` : "";
-  return new Error(
-    `输出被上游截断（${asked}该模型/中转通道存在单次输出上限，常见为 4096）。长文生成需要支持 ≥16k 输出的通道，请在香炉更换模型或端点。`,
-  );
-}
 
 async function errorBody(res: Response): Promise<string> {
   return (await res.text().catch(() => "")).slice(0, 500);
@@ -207,10 +200,8 @@ const openaiAdapter: ProviderAdapter = {
     const json = await attempt.response.json();
     const text = json.choices?.[0]?.message?.content;
     if (typeof text !== "string") throw new Error("响应缺少 choices[0].message.content");
-    if (req.failOnTruncation && json.choices?.[0]?.finish_reason === "length") {
-      throw truncationError(req);
-    }
     return {
+      truncated: json.choices?.[0]?.finish_reason === "length",
       text,
       usage: normalizeOpenAiUsage(json.usage),
       cacheRequested: attempt.cacheRequested,
@@ -234,12 +225,12 @@ const openaiAdapter: ProviderAdapter = {
         // Some compatible relays occasionally inject non-JSON lines.
       }
     }
-    if (req.failOnTruncation && finishReason === "length") throw truncationError(req);
     yield {
       type: "usage",
       usage: usage ?? emptyUsage(),
       cacheRequested: attempt.cacheRequested,
       cacheFallback: attempt.cacheFallback,
+      truncated: finishReason === "length",
     };
     yield { type: "done" };
   },
@@ -375,10 +366,8 @@ const anthropicAdapter: ProviderAdapter = {
       .map((block: { text: string }) => block.text)
       .join("");
     if (typeof text !== "string" || !text) throw new Error("响应缺少 content text 块");
-    if (req.failOnTruncation && json.stop_reason === "max_tokens") {
-      throw truncationError(req);
-    }
     return {
+      truncated: json.stop_reason === "max_tokens",
       text,
       usage: normalizeAnthropicUsage(json.usage),
       cacheRequested: attempt.cacheRequested,
@@ -407,12 +396,12 @@ const anthropicAdapter: ProviderAdapter = {
         // Ignore malformed relay events.
       }
     }
-    if (req.failOnTruncation && stopReason === "max_tokens") throw truncationError(req);
     yield {
       type: "usage",
       usage: normalizeAnthropicUsage(usageRaw),
       cacheRequested: attempt.cacheRequested,
       cacheFallback: attempt.cacheFallback,
+      truncated: stopReason === "max_tokens",
     };
     yield { type: "done" };
   },
@@ -466,14 +455,12 @@ const geminiAdapter: ProviderAdapter = {
       ?.map((part: { text?: string }) => part.text ?? "")
       .join("");
     if (typeof text !== "string" || !text) throw new Error("响应缺少 candidates[0].content.parts");
-    if (req.failOnTruncation && json.candidates?.[0]?.finishReason === "MAX_TOKENS") {
-      throw truncationError(req);
-    }
     return {
       text,
       usage: normalizeGeminiUsage(json.usageMetadata),
       cacheRequested: buildPromptCachePlan(slot, req).enabled,
       cacheFallback: false,
+      truncated: json.candidates?.[0]?.finishReason === "MAX_TOKENS",
     };
   },
 
@@ -504,12 +491,12 @@ const geminiAdapter: ProviderAdapter = {
         // Ignore malformed relay events.
       }
     }
-    if (req.failOnTruncation && finishReason === "MAX_TOKENS") throw truncationError(req);
     yield {
       type: "usage",
       usage: usage ?? emptyUsage(),
       cacheRequested: buildPromptCachePlan(slot, req).enabled,
       cacheFallback: false,
+      truncated: finishReason === "MAX_TOKENS",
     };
     yield { type: "done" };
   },

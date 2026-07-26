@@ -116,6 +116,7 @@ type CollectedStream = {
   usage?: NormalizedUsage;
   cacheRequested: boolean;
   cacheFallback: boolean;
+  truncated: boolean;
 };
 
 async function collectStream(
@@ -128,16 +129,54 @@ async function collectStream(
   let usage: NormalizedUsage | undefined;
   let cacheRequested = false;
   let cacheFallback = false;
+  let truncated = false;
   for await (const chunk of adapter.stream(slot, req, apiKey)) {
     if (chunk.type === "text") text += chunk.text;
     if (chunk.type === "usage") {
       usage = chunk.usage;
       cacheRequested = chunk.cacheRequested;
       cacheFallback = chunk.cacheFallback;
+      truncated = chunk.truncated ?? false;
     }
   }
   if (!text.trim()) throw new Error("流式响应为空");
-  return { text, usage, cacheRequested, cacheFallback };
+  return { text, usage, cacheRequested, cacheFallback, truncated };
+}
+
+// ───────────── 输出上限续写拼接:让 4096 上限的通道也能完成长文生成 ─────────────
+
+/** 单次请求最多接力续写的轮数（8 轮 × 4k ≈ 32k，足够覆盖创世全卷）。 */
+const MAX_CONTINUATION_ROUNDS = 8;
+
+const CONTINUE_NUDGE =
+  "你的上一条输出因长度上限被截断。从被截断的确切位置继续输出剩余内容：不要重复任何已输出的字符，不要添加任何解释、前言、省略号或代码围栏，直接接着写。";
+
+/** 续写请求:把已产出文本作为 assistant 消息回填,请求从断点继续。 */
+function continuationRequest(req: CompletionRequest, partial: string): CompletionRequest {
+  return {
+    ...req,
+    messages: [
+      ...req.messages,
+      { role: "assistant", content: partial },
+      { role: "user", content: CONTINUE_NUDGE },
+    ],
+  };
+}
+
+/** 接缝去重:续写开头若与已产出文本结尾重叠,裁掉重叠段（最多回看 400 字符）。 */
+function trimOverlap(previous: string, next: string): string {
+  const window = Math.min(400, previous.length, next.length);
+  for (let k = window; k > 0; k -= 1) {
+    if (previous.endsWith(next.slice(0, k))) return next.slice(k);
+  }
+  return next;
+}
+
+function truncationError(req: CompletionRequest): Error {
+  const asked = req.maxTokens ? `请求 ${req.maxTokens} tokens 未被满足，` : "";
+  return new Error(
+    `输出被上游截断且续写接力 ${MAX_CONTINUATION_ROUNDS} 轮后仍未完成（${asked}该模型/中转通道存在单次输出上限）。请在香炉更换支持更长输出的模型或端点。`,
+  );
 }
 
 /** Non-streaming business completion, using streamed transport first for relay compatibility. */
@@ -157,15 +196,45 @@ export async function complete(
     startedAt,
   };
 
+  /** 需要完整输出时,对截断结果做续写接力;超过轮数上限才判失败。 */
+  const stitchStreamed = async (): Promise<string> => {
+    let result = await collectStream(adapter, slot, req, apiKey);
+    await logCall({ ...baseLog, ok: true, usage: result.usage,
+      cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+    if (!req.failOnTruncation) return result.text;
+    let text = result.text;
+    for (let round = 0; result.truncated; round += 1) {
+      if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
+      result = await collectStream(adapter, slot, continuationRequest(req, text), apiKey);
+      await logCall({ ...baseLog, ok: true, usage: result.usage,
+        cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+      text += trimOverlap(text, result.text);
+    }
+    return text;
+  };
+
+  const stitchCompleted = async (): Promise<string> => {
+    let result = await adapter.complete(slot, req, apiKey);
+    await logCall({ ...baseLog, ok: true, usage: result.usage,
+      cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+    if (!req.failOnTruncation) return result.text;
+    let text = result.text;
+    for (let round = 0; result.truncated; round += 1) {
+      if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
+      result = await adapter.complete(slot, continuationRequest(req, text), apiKey);
+      await logCall({ ...baseLog, ok: true, usage: result.usage,
+        cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+      text += trimOverlap(text, result.text);
+    }
+    return text;
+  };
+
   const maxAttempts = Math.max(1, options?.maxAttempts ?? MAX_RETRIES);
   const allowFallback = options?.allowFallback ?? true;
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
-      const result = await collectStream(adapter, slot, req, apiKey);
-      await logCall({ ...baseLog, ok: true, usage: result.usage,
-        cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
-      return result.text;
+      return await stitchStreamed();
     } catch (error) {
       lastError = error;
       if (!isRetryable(error) || attempt === maxAttempts - 1) break;
@@ -175,10 +244,7 @@ export async function complete(
 
   if (allowFallback) {
     try {
-      const result = await adapter.complete(slot, req, apiKey);
-      await logCall({ ...baseLog, ok: true, usage: result.usage,
-        cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
-      return result.text;
+      return await stitchCompleted();
     } catch (fallbackError) {
       const finalError = lastError ?? fallbackError;
       const message = finalError instanceof Error ? finalError.message : String(finalError);
@@ -210,20 +276,57 @@ export async function* stream(
   };
 
   try {
-    let usage: NormalizedUsage | undefined;
-    let cacheRequested = false;
-    let cacheFallback = false;
-    for await (const chunk of adapter.stream(slot, req, apiKey, options)) {
-      if (chunk.type === "usage") {
-        usage = chunk.usage;
-        cacheRequested = chunk.cacheRequested;
-        cacheFallback = chunk.cacheFallback;
-      } else {
-        yield chunk;
+    let accumulated = "";
+    let truncated = false;
+    const runRound = async function* (roundReq: CompletionRequest, overlapBase: string) {
+      let usage: NormalizedUsage | undefined;
+      let cacheRequested = false;
+      let cacheFallback = false;
+      truncated = false;
+      // 接缝缓冲:续写轮开头可能与已产出结尾重叠,先攒足 400 字符做去重
+      let seamBuffer: string | null = overlapBase ? "" : null;
+      for await (const chunk of adapter.stream(slot, roundReq, apiKey, options)) {
+        if (chunk.type === "usage") {
+          usage = chunk.usage;
+          cacheRequested = chunk.cacheRequested;
+          cacheFallback = chunk.cacheFallback;
+          truncated = chunk.truncated ?? false;
+        } else if (chunk.type === "text") {
+          if (seamBuffer !== null) {
+            seamBuffer += chunk.text;
+            if (seamBuffer.length >= 400) {
+              const deduped = trimOverlap(overlapBase, seamBuffer);
+              seamBuffer = null;
+              if (deduped) {
+                accumulated += deduped;
+                yield { type: "text", text: deduped } as StreamChunk;
+              }
+            }
+          } else {
+            accumulated += chunk.text;
+            yield chunk;
+          }
+        } else {
+          yield chunk;
+        }
+      }
+      if (seamBuffer !== null && seamBuffer) {
+        const deduped = trimOverlap(overlapBase, seamBuffer);
+        if (deduped) {
+          accumulated += deduped;
+          yield { type: "text", text: deduped } as StreamChunk;
+        }
+      }
+      await logCall({ ...baseLog, ok: true, usage, cacheRequested, cacheFallback });
+    };
+
+    yield* runRound(req, "");
+    if (req.failOnTruncation) {
+      for (let round = 0; truncated && !options?.signal?.aborted; round += 1) {
+        if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
+        yield* runRound(continuationRequest(req, accumulated), accumulated);
       }
     }
-    if (options?.signal?.aborted) return;
-    await logCall({ ...baseLog, ok: true, usage, cacheRequested, cacheFallback });
   } catch (error) {
     if (options?.signal?.aborted) return;
     const message = error instanceof Error ? error.message : String(error);

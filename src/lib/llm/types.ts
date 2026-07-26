@@ -42,6 +42,8 @@ export type AdapterCompletionResult = {
   usage: NormalizedUsage;
   cacheRequested: boolean;
   cacheFallback: boolean;
+  /** 上游因输出上限提前收笔（finish_reason=length 等）；由网关决定续写或报错 */
+  truncated?: boolean;
 };
 
 export type LlmTask =
@@ -78,5 +80,7 @@ export type StreamChunk =
       usage: NormalizedUsage;
       cacheRequested: boolean;
       cacheFallback: boolean;
+      /** 上游因输出上限提前收笔；由网关决定续写或报错 */
+      truncated?: boolean;
     }
   | { type: "done" };
