@@ -23,6 +23,9 @@
   --line: rgba(46, 36, 24, 0.14); /* 分隔细线 */
   --play-background-image: url("/images/backgrounds/play-celestial-day.webp");
   --play-background-opacity: 0.58;
+  --genesis-mode-opacity: 0.38;
+  --genesis-mode-filter: saturate(1.12) sepia(0.06) brightness(1.02) contrast(1.08);
+  --genesis-mode-blend: normal;
 }
 
 [data-theme="candle"] {
@@ -41,6 +44,9 @@
   --line: rgba(232, 223, 200, 0.12);
   --play-background-image: url("/images/backgrounds/play-celestial-candle.webp");
   --play-background-opacity: 0.66;
+  --genesis-mode-opacity: 0.34;
+  --genesis-mode-filter: saturate(0.86) sepia(0.16) brightness(0.86) contrast(1.04);
+  --genesis-mode-blend: screen;
 }
 
 @theme inline {
@@ -111,6 +117,40 @@ body > * {
 
 .play-background--home {
   opacity: calc(var(--play-background-opacity) * 0.86);
+}
+
+.genesis-mode-background {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.genesis-mode-background__image {
+  object-fit: cover;
+  object-position: center 38%;
+  opacity: 0;
+  filter: var(--genesis-mode-filter);
+  mix-blend-mode: var(--genesis-mode-blend);
+  transition: opacity 600ms ease;
+}
+
+.genesis-mode-background__image.is-active {
+  opacity: var(--genesis-mode-opacity);
+}
+
+.genesis-mode-background::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      ellipse at 50% 64%,
+      color-mix(in srgb, var(--paper) 58%, transparent) 0 24%,
+      color-mix(in srgb, var(--paper) 24%, transparent) 46%,
+      transparent 76%
+    );
 }
 
 .play-background--supporting {
@@ -193,7 +233,7 @@ body > * {
   border: 1px solid var(--line);
   border-radius: 1rem;
   padding: clamp(1rem, 2.5vw, 1.5rem);
-  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  background: color-mix(in srgb, var(--paper) 84%, transparent);
   box-shadow:
     0 1.5rem 4rem color-mix(in srgb, var(--ink) 8%, transparent),
     inset 0 1px color-mix(in srgb, var(--paper-raised) 72%, transparent);
@@ -207,6 +247,24 @@ body > * {
 
   .play-background--home {
     opacity: calc(var(--play-background-opacity) * 0.62);
+  }
+
+  .genesis-mode-background__image {
+    object-position: center 34%;
+  }
+
+  .genesis-mode-background__image.is-active {
+    opacity: calc(var(--genesis-mode-opacity) * 0.72);
+  }
+
+  .genesis-mode-background::after {
+    background:
+      radial-gradient(
+        ellipse at 50% 66%,
+        color-mix(in srgb, var(--paper) 70%, transparent) 0 32%,
+        color-mix(in srgb, var(--paper) 30%, transparent) 54%,
+        transparent 82%
+      );
   }
 
   .play-background--supporting {
@@ -232,6 +290,10 @@ body > * {
 
 @media (prefers-reduced-motion: reduce) {
   .play-background {
+    transition: none;
+  }
+
+  .genesis-mode-background__image {
     transition: none;
   }
 }

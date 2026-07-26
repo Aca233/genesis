@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "@/components/theme/useTheme";
 import { MaterialPicker } from "@/components/materials/MaterialPicker";
 import { PlayBackground } from "@/components/play/PlayBackground";
+import { GenesisModeBackground } from "@/components/genesis/GenesisModeBackground";
 import type { MaterialSelectionItem } from "@/lib/materials/types";
 import { buildGenesisTaskPayload, defaultGenesisMode } from "@/lib/genesis/create-request";
 import { WORLD_MODES, WORLD_MODE_PRESENTATION, type WorldMode } from "@/lib/world-mode";
@@ -77,6 +78,7 @@ export default function Home() {
   return (
     <main className="play-shell flex flex-1 flex-col items-center justify-center gap-10 px-6">
       <PlayBackground variant="home" />
+      <GenesisModeBackground mode={worldMode} />
       <header className="relative text-center">
         <h1
           className="text-6xl font-black tracking-widest text-ink"
