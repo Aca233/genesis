@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { GenesisTask, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { stream } from "@/lib/llm/gateway";
+import { isTransientLlmError, stream } from "@/lib/llm/gateway";
 import { completeStructured } from "@/lib/llm/structured";
 import {
   CreatorWorldDeckSchema,
@@ -21,6 +21,9 @@ import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
 
 const USER_ID = "local";
 const LEASE_MS = 60 * 1000;
+/** 瞬时网络故障允许的最大总尝试数（attempt 在租约认领时自增）。 */
+const MAX_TRANSIENT_ATTEMPTS = 3;
+const TRANSIENT_RETRY_DELAY_MS = 5 * 1000;
 const CHECKPOINT_MS = 1_000;
 
 export type GenesisTaskDto = {
@@ -274,16 +277,29 @@ async function runGenesisTask(taskId: string): Promise<void> {
     clearInterval(leaseHeartbeat);
     await persistWorld(prisma as unknown as PersistWorldDb, task, leaseToken, deck, parsedEntries);
   } catch (error) {
+    // 瞬时网络故障（中转站掐断长响应等）自动重排队，而非终局失败；其余错误照旧终局。
+    const transient = isTransientLlmError(error) && task.attempt < MAX_TRANSIENT_ATTEMPTS;
     await prisma.genesisTask.updateMany({
       where: { id: taskId, leaseToken, status: { in: ["running", "repairing"] } },
-      data: {
-        status: "failed",
-        error: safeError(error),
-        rawOutput: latestRaw,
-        leaseToken: null,
-        leaseExpiresAt: null,
-      },
+      data: transient
+        ? {
+            status: "queued",
+            error: null,
+            rawOutput: latestRaw,
+            leaseToken: null,
+            leaseExpiresAt: null,
+          }
+        : {
+            status: "failed",
+            error: safeError(error),
+            rawOutput: latestRaw,
+            leaseToken: null,
+            leaseExpiresAt: null,
+          },
     });
+    if (transient) {
+      setTimeout(() => ensureGenesisTaskRunning(taskId), TRANSIENT_RETRY_DELAY_MS);
+    }
   } finally {
     clearInterval(leaseHeartbeat);
   }

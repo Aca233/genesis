@@ -56,6 +56,11 @@ function isRetryable(error: unknown): boolean {
   return isNetworkError(message);
 }
 
+/** 供任务运行器判断：该错误是否属于值得整体重试的瞬时故障（网络断流/上游过载）。 */
+export function isTransientLlmError(error: unknown): boolean {
+  return isRetryable(error);
+}
+
 function describeError(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);
   if (isNetworkError(message) && !/^HTTP \d/.test(message)) {
