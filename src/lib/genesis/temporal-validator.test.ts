@@ -110,6 +110,25 @@ function validCanonEvents() {
   ];
 }
 
+/** 引用均落在 completeDeck 稳定 ref 上的合法阶段 2 锚点关系（schema 可解析）。 */
+function validRelationsAtAnchor() {
+  return [
+    {
+      sourceRef: "character-1",
+      targetRef: "character-2",
+      status: "ally" as const,
+      publicDescription: "议会中的同僚与盟友",
+    },
+    {
+      sourceRef: "character-2",
+      targetRef: "god-major-1",
+      status: "unknown" as const,
+      publicDescription: "对潮汐之神心存敬畏",
+      hiddenDescription: "私下研习潮汐禁仪",
+    },
+  ];
+}
+
 function issuesOf(deck: TemporalConsistencyDeckView, code: TemporalIssueCode) {
   return collectTemporalIssues(deck).filter((issue) => issue.code === code);
 }
@@ -123,10 +142,11 @@ describe("collectTemporalIssues", () => {
     expect(() => validateTemporalConsistency(deck)).not.toThrow();
   });
 
-  it("合法的 IP 锚点卡组（含将临之事）零问题", () => {
+  it("合法的 IP 锚点卡组（含将临之事与锚点关系）零问题", () => {
     const deck = PantheonWorldDeckSchema.parse({
       ...completeDeck(),
       temporalAnchor: ipTemporalAnchorCard(),
+      relationsAtAnchor: validRelationsAtAnchor(),
       canonEvents: validCanonEvents(),
     });
     expect(collectTemporalIssues(deck)).toEqual([]);
@@ -205,6 +225,42 @@ describe("collectTemporalIssues", () => {
       })),
     };
     expect(collectTemporalIssues(view)).toEqual([]);
+  });
+
+  it("T3 豁免：relationsAtAnchor 的追念关系（memorial=true）豁免对应的人物与势力", () => {
+    const deck = PantheonWorldDeckSchema.parse({
+      ...completeDeck(),
+      temporalAnchor: ipTemporalAnchorCard(),
+      relationsAtAnchor: [{
+        sourceRef: "character-1",
+        targetRef: "faction-court",
+        status: "family" as const,
+        publicDescription: "先王旧部之后",
+        memorial: true,
+      }],
+    });
+    deck.factions[0]!.statusAtAnchor = "dissolved";
+    const issues = collectTemporalIssues(deck);
+    // character-1 由锚点追念关系豁免；其余五名 active 成员仍被逐一点名。
+    expect(issues).toHaveLength(5);
+    expect(issues.every((issue) => issue.code === "INACTIVE_FACTION_WITH_MEMBERS")).toBe(true);
+    expect(issues.some((issue) => issue.message.includes("(character-1)"))).toBe(false);
+  });
+
+  it("T3 不豁免：memorial 缺省的锚点关系不构成追念", () => {
+    const deck = PantheonWorldDeckSchema.parse({
+      ...completeDeck(),
+      temporalAnchor: ipTemporalAnchorCard(),
+      relationsAtAnchor: [{
+        sourceRef: "character-1",
+        targetRef: "faction-court",
+        status: "subordinate" as const,
+        publicDescription: "仍以议会旧部自居",
+      }],
+    });
+    deck.factions[0]!.statusAtAnchor = "dissolved";
+    const issues = issuesOf(deck, "INACTIVE_FACTION_WITH_MEMBERS");
+    expect(issues).toHaveLength(6);
   });
 
   it("T3 豁免：非 active 人物的成员关系视为历史记载（追念）", () => {
@@ -418,6 +474,26 @@ describe("collectTemporalIssues", () => {
     expect(issues.some((issue) => issue.message.includes('"ghost-entity"'))).toBe(true);
     expect(issues.some((issue) => issue.message.includes('"never-happened"'))).toBe(true);
     expect(issues.some((issue) => issue.message.includes('"ghost-target"'))).toBe(true);
+  });
+
+  it("T7 DANGLING_TEMPORAL_REF：锚点关系主客体的悬空 ref 被逐一点名", () => {
+    const base = anchoredDeck();
+    const view: TemporalConsistencyDeckView = {
+      ...base,
+      relationsAtAnchor: [
+        { sourceRef: "character-1", targetRef: "ghost-friend" },
+        { sourceRef: "ghost-source", targetRef: "god-major-1", memorial: true },
+      ],
+    };
+    const issues = collectTemporalIssues(view);
+    expect(issues).toHaveLength(2);
+    expect(issues.every((issue) => issue.code === "DANGLING_TEMPORAL_REF")).toBe(true);
+    expect(issues.some((issue) =>
+      issue.message.includes("relationsAtAnchor[0]") && issue.message.includes('"ghost-friend"'),
+    )).toBe(true);
+    expect(issues.some((issue) =>
+      issue.message.includes("relationsAtAnchor[1]") && issue.message.includes('"ghost-source"'),
+    )).toBe(true);
   });
 });
 

@@ -115,7 +115,7 @@ export function PlayDrawer({
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 320, damping: 34 }}
-            className="fixed right-0 top-0 z-50 flex h-full flex-col border-l border-gilt/40 bg-paper pr-12 shadow-[-1.25rem_0_3rem_var(--shadow-warm)] [background-image:var(--fiber-noise),linear-gradient(196deg,color-mix(in_srgb,var(--paper-raised)_92%,transparent),color-mix(in_srgb,var(--paper)_96%,transparent)_42%)] max-sm:pb-14 max-sm:pr-0"
+            className="fixed right-0 top-0 z-50 flex h-full flex-col border-l border-gilt/40 bg-paper pr-12 shadow-[-1.25rem_0_3rem_var(--shadow-warm)] [background-image:var(--fiber-noise),linear-gradient(196deg,color-mix(in_srgb,var(--paper-raised)_92%,transparent),color-mix(in_srgb,var(--paper)_96%,transparent)_42%)] max-sm:pb-16 max-sm:pr-0"
             style={{ width: "min(43rem, 92vw)" }}
             role="dialog"
             aria-label={tabTitle(world.mode, tab)}

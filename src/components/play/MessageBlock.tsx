@@ -251,18 +251,44 @@ export const MessageBlock = memo(function MessageBlock({
           </button>
         </article>
       ) : isPlayer ? (
-        /* 敕谕引文：墨书正文 + 鎏金左律（.decree），衬凹纸底如御笔原件 */
-        <blockquote className="decree my-5 whitespace-pre-wrap rounded-r-lg bg-paper-sunken/50 py-2.5 pr-4 leading-loose text-ink!">
+        /* 敕谕匾额：居中典仪化引文——上⁂转场花饰、鎏金发丝线夹「敕」小印、
+           凹纸衬底如御笔原件、下发丝线收束 */
+        <blockquote className="my-7 text-center leading-loose text-ink">
           <span
-            className="select-none text-gilt"
-            style={{
-              fontFamily: "var(--font-display)",
-              textShadow: "0 0 8px var(--gilt-glow)",
-            }}
+            aria-hidden="true"
+            className="mb-2 block select-none text-xl leading-none text-gilt/50"
           >
-            {mode === "creator" ? "你颁下敕令：" : "你降下神谕："}
+            ⁂
           </span>
-          {content}
+          <span aria-hidden="true" className="mx-auto flex max-w-md items-center gap-2.5">
+            <span className="h-px flex-1 bg-gradient-to-r from-transparent to-gilt/50" />
+            <span
+              className="select-none rounded-[0.2rem] border border-gilt/55 px-1 py-0.5 text-[10px] leading-none text-gilt"
+              style={{
+                fontFamily: "var(--font-display)",
+                textShadow: "0 0 6px var(--gilt-glow)",
+              }}
+            >
+              敕
+            </span>
+            <span className="h-px flex-1 bg-gradient-to-l from-transparent to-gilt/50" />
+          </span>
+          <div className="mx-auto mt-2.5 max-w-xl whitespace-pre-wrap rounded-md bg-paper-sunken/50 px-5 py-2.5">
+            <span
+              className="select-none text-gilt"
+              style={{
+                fontFamily: "var(--font-display)",
+                textShadow: "0 0 8px var(--gilt-glow)",
+              }}
+            >
+              {mode === "creator" ? "你颁下敕令：" : "你降下神谕："}
+            </span>
+            {content}
+          </div>
+          <span
+            aria-hidden="true"
+            className="mx-auto mt-2.5 block h-px max-w-md bg-gradient-to-r from-transparent via-gilt/50 to-transparent"
+          />
         </blockquote>
       ) : (
         <div className="my-4">

@@ -11,6 +11,7 @@ export const GENESIS_TOP_LEVEL_KEYS = [
   "races",
   "places",
   "majorCharacters",
+  "relationsAtAnchor",
   "epochConflict",
   "canonEvents",
   "style",

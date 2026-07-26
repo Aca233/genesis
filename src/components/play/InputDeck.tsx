@@ -125,6 +125,15 @@ export function InputDeck({
 
   return (
     <div className="sticky bottom-0 z-30 mx-auto w-full max-w-3xl px-4 pb-3 xl:max-w-4xl">
+      {/* 纸色帷幕：书案下的柔和纵向渐隐，正文行至案缘化入纸底而非被硬切（双主题随 --paper） */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-14 bottom-0 inset-x-0 -z-10"
+        style={{
+          background:
+            "linear-gradient(to top, color-mix(in srgb, var(--paper) 94%, transparent) 0%, color-mix(in srgb, var(--paper) 78%, transparent) 52%, transparent 100%)",
+        }}
+      />
       <AnimatePresence initial={false}>
         {taskProgress && (
           <motion.div
@@ -336,7 +345,9 @@ export function InputDeck({
             <button
               onClick={send}
               disabled={!text.trim()}
-              className="seal-button min-h-8! shrink-0 px-6! py-1! text-sm!"
+              className={`seal-button min-h-8! shrink-0 px-6! py-1! text-sm! ${
+                text.trim() ? "seal-button--lit" : ""
+              }`}
             >
               发送
             </button>

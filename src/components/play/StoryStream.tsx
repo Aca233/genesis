@@ -139,7 +139,7 @@ export function StoryStream({
               setStickBottom(true);
               bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
             }}
-            className="fixed bottom-40 left-1/2 z-20 -translate-x-1/2 rounded-full border border-gilt/35 bg-paper-raised/95 px-4 py-1 text-xs text-ink-soft shadow-[0_2px_12px_var(--shadow-warm)] transition hover:border-gilt/60 hover:text-gilt"
+            className="fixed bottom-44 left-1/2 z-[35] -translate-x-1/2 rounded-full border border-gilt/35 bg-paper-raised/95 px-4 py-1 text-xs text-ink-soft shadow-[0_2px_12px_var(--shadow-warm)] transition hover:border-gilt/60 hover:text-gilt"
           >
             ↓ 回到卷尾
           </motion.button>

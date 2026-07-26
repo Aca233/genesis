@@ -714,6 +714,189 @@ describe("时间锚点（temporalAnchor）与锚点状态", () => {
   });
 });
 
+function characterStateAtAnchorFixture() {
+  return {
+    identity: "晨钟议会的年轻执政官",
+    locationRef: "place-city" as string | null,
+    factionMemberships: [
+      { factionRef: "faction-court", role: "执政官", status: "active" as const },
+    ],
+    currentGoals: ["稳住议会", "查明旧神苏醒的传闻"],
+    currentSituation: "正处于抉择之前",
+    knowledgeHints: ["知道星图学会藏有禁忌记录"],
+  };
+}
+
+type StageTwoRawDeck = Record<string, unknown> & {
+  majorCharacters: Array<Record<string, unknown>>;
+  majorGods: Array<Record<string, unknown>>;
+  playerGod: Record<string, unknown>;
+  factions: Array<Record<string, unknown>>;
+  races: Array<Record<string, unknown>>;
+  places: Array<Record<string, unknown>>;
+};
+
+describe("阶段 2 锚点快照、锚点关系与卡级溯源", () => {
+  const issueAt = (result: ReturnType<typeof WorldDeckSchema.safeParse>, path: string) => {
+    if (result.success) throw new Error("预期解析失败");
+    return result.error.issues.some((issue) => issue.path.join(".") === path);
+  };
+  const stageTwoRaw = (): StageTwoRawDeck => {
+    const raw = completeDeck() as unknown as StageTwoRawDeck;
+    raw.temporalAnchor = ipTemporalAnchorCard();
+    return raw;
+  };
+  const relationFixture = (overrides: Record<string, unknown> = {}) => ({
+    sourceRef: "character-1",
+    targetRef: "character-2",
+    status: "ally",
+    publicDescription: "议会中的同僚与盟友",
+    ...overrides,
+  });
+
+  it("旧卡组解析不注入 stateAtAnchor/provenance/relationsAtAnchor（字节不变）", () => {
+    const parsed = WorldDeckSchema.parse(completeDeck());
+    expect(Object.keys(parsed)).not.toContain("relationsAtAnchor");
+    if (parsed.mode !== "pantheon") throw new Error("预期 pantheon 卡组");
+    for (const card of [
+      parsed.majorCharacters[0]!,
+      parsed.majorGods[0]!,
+      parsed.playerGod,
+      parsed.factions[0]!,
+      parsed.races[0]!,
+      parsed.places[0]!,
+    ]) {
+      expect(Object.keys(card)).not.toContain("stateAtAnchor");
+      expect(Object.keys(card)).not.toContain("provenance");
+    }
+  });
+
+  it("解析携带瘦快照、锚点关系与卡级溯源的完整阶段 2 卡组", () => {
+    const raw = stageTwoRaw();
+    raw.majorCharacters[0]!.stateAtAnchor = characterStateAtAnchorFixture();
+    raw.majorCharacters[0]!.provenance = { canonRelation: "canon", evidence: ["原著第一卷登场"] };
+    raw.majorGods[0]!.stateAtAnchor = { currentRank: "ascended", currentDomains: ["潮汐"] };
+    raw.majorGods[0]!.provenance = { canonRelation: "canon_inferred" };
+    raw.playerGod.stateAtAnchor = { currentRank: "nascent" };
+    raw.factions[0]!.stateAtAnchor = {
+      leaderRefs: ["character-1"],
+      territoryRefs: ["place-city"],
+      currentStrength: "尚能维持城内秩序",
+    };
+    raw.factions[0]!.provenance = { canonRelation: "generated_original" };
+    raw.races[0]!.provenance = { canonRelation: "canon" };
+    raw.places[0]!.provenance = { canonRelation: "player_override", evidence: ["神谕改写"] };
+    raw.relationsAtAnchor = [
+      relationFixture(),
+      relationFixture({
+        targetRef: "god-major-1",
+        status: "unknown",
+        publicDescription: "对潮汐之神心存敬畏",
+        hiddenDescription: "私下研习潮汐禁仪",
+      }),
+    ];
+
+    const parsed = WorldDeckSchema.parse(raw);
+    if (parsed.mode !== "pantheon") throw new Error("预期 pantheon 卡组");
+    expect(parsed.majorCharacters[0]!.stateAtAnchor).toMatchObject({
+      identity: "晨钟议会的年轻执政官",
+      locationRef: "place-city",
+      factionMemberships: [{ factionRef: "faction-court", status: "active" }],
+      currentGoals: ["稳住议会", "查明旧神苏醒的传闻"],
+    });
+    expect(parsed.majorGods[0]!.provenance?.canonRelation).toBe("canon_inferred");
+    expect(parsed.playerGod.stateAtAnchor?.currentRank).toBe("nascent");
+    expect(parsed.factions[0]!.stateAtAnchor?.leaderRefs).toEqual(["character-1"]);
+    expect(parsed.relationsAtAnchor).toHaveLength(2);
+    expect(parsed.relationsAtAnchor![1]).toMatchObject({
+      targetRef: "god-major-1",
+      hiddenDescription: "私下研习潮汐禁仪",
+    });
+  });
+
+  it.each([
+    ["人物快照目标超过 3 条", (raw: StageTwoRawDeck) => {
+      raw.majorCharacters[0]!.stateAtAnchor = {
+        ...characterStateAtAnchorFixture(),
+        currentGoals: ["一", "二", "三", "四"],
+      };
+    }],
+    ["人物快照已知提示超过 3 条", (raw: StageTwoRawDeck) => {
+      raw.majorCharacters[0]!.stateAtAnchor = {
+        ...characterStateAtAnchorFixture(),
+        knowledgeHints: ["一", "二", "三", "四"],
+      };
+    }],
+    ["人物快照越界成员状态", (raw: StageTwoRawDeck) => {
+      raw.majorCharacters[0]!.stateAtAnchor = {
+        ...characterStateAtAnchorFixture(),
+        factionMemberships: [{ factionRef: "faction-court", role: "执政官", status: "retired" }],
+      };
+    }],
+    ["溯源证据超过 3 条", (raw: StageTwoRawDeck) => {
+      raw.races[0]!.provenance = { canonRelation: "canon", evidence: ["一", "二", "三", "四"] };
+    }],
+    ["越界 canonRelation", (raw: StageTwoRawDeck) => {
+      raw.places[0]!.provenance = { canonRelation: "fanon" };
+    }],
+    ["神明快照越界位阶", (raw: StageTwoRawDeck) => {
+      raw.majorGods[0]!.stateAtAnchor = { currentRank: "supreme" };
+    }],
+  ])("拒绝%s", (_label, mutate) => {
+    const raw = stageTwoRaw();
+    mutate(raw);
+    expect(WorldDeckSchema.safeParse(raw).success).toBe(false);
+  });
+
+  it("拒绝越界关系状态与未解析到卡组 ref 的锚点关系主客体", () => {
+    const badStatus = stageTwoRaw();
+    badStatus.relationsAtAnchor = [relationFixture({ status: "friend" })];
+    expect(WorldDeckSchema.safeParse(badStatus).success).toBe(false);
+
+    const dangling = stageTwoRaw();
+    dangling.relationsAtAnchor = [
+      relationFixture({ sourceRef: "ghost-source" }),
+      relationFixture({ targetRef: "ghost-target", status: "enemy" }),
+    ];
+    const result = WorldDeckSchema.safeParse(dangling);
+    expect(issueAt(result, "relationsAtAnchor.0.sourceRef")).toBe(true);
+    expect(issueAt(result, "relationsAtAnchor.1.targetRef")).toBe(true);
+  });
+
+  it("active 人物的锚点关系超过 4 条被拒；非 active 主体不受上限约束", () => {
+    const fiveRelations = () =>
+      ["character-2", "character-3", "character-4", "character-5", "character-6"].map((target) =>
+        relationFixture({ targetRef: target, publicDescription: "同侪之谊" }),
+      );
+
+    const four = stageTwoRaw();
+    four.relationsAtAnchor = fiveRelations().slice(0, 4);
+    expect(WorldDeckSchema.safeParse(four).success).toBe(true);
+
+    const capped = stageTwoRaw();
+    capped.relationsAtAnchor = fiveRelations();
+    expect(issueAt(WorldDeckSchema.safeParse(capped), "relationsAtAnchor.4.sourceRef")).toBe(true);
+
+    const dead = stageTwoRaw();
+    dead.majorCharacters[0]!.statusAtAnchor = "dead";
+    dead.relationsAtAnchor = fiveRelations().map((relation) =>
+      relationFixture({ ...relation, memorial: true }),
+    );
+    expect(WorldDeckSchema.safeParse(dead).success).toBe(true);
+  });
+
+  it("追念关系（memorial）解析保留且 relationsAtAnchor 进入重掷粒度键", () => {
+    const raw = stageTwoRaw();
+    raw.majorCharacters[1]!.statusAtAnchor = "dead";
+    raw.relationsAtAnchor = [
+      relationFixture({ status: "family", publicDescription: "先王之子", memorial: true }),
+    ];
+    const parsed = WorldDeckSchema.parse(raw);
+    expect(parsed.relationsAtAnchor![0]!.memorial).toBe(true);
+    expect(DECK_CARD_KEYS).toContain("relationsAtAnchor");
+  });
+});
+
 it("为当前能力版旧草稿中缺少 ref 的地点补确定性引用", () => {
   const raw = completeDeck();
   delete (raw.places[0] as Partial<(typeof raw.places)[number]>).ref;

@@ -85,6 +85,15 @@ describe("TopLevelJsonProgressScanner", () => {
       .toBe(GENESIS_TOP_LEVEL_KEYS.indexOf("worldName") + 1);
   });
 
+  it("relationsAtAnchor 数组值完整闭合后才被报告，且紧随 majorCharacters 排序", () => {
+    const scanner = new TopLevelJsonProgressScanner();
+
+    expect(scanner.push('{"relationsAtAnchor":[{"sourceRef":"character-1"}')).toEqual([]);
+    expect(scanner.push("]")).toEqual(["relationsAtAnchor"]);
+    expect(GENESIS_TOP_LEVEL_KEYS.indexOf("relationsAtAnchor"))
+      .toBe(GENESIS_TOP_LEVEL_KEYS.indexOf("majorCharacters") + 1);
+  });
+
   it("支持数字、布尔值和 null 这类原始值", () => {
     const scanner = new TopLevelJsonProgressScanner();
     const completed = scanner.push('{"worldName":123,"cosmology":true,"fusionAxiom":null,"theme":false}');

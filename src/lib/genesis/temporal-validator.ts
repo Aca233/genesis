@@ -96,6 +96,16 @@ interface CharacterCardView extends AnchoredCardView {
   abilities: TimedAbilityView[];
 }
 
+/**
+ * 阶段 2 锚点关系视图（§7 relationsAtAnchor）：T3 追念豁免读取 memorial，
+ * T7 解析 sourceRef/targetRef。其余字段（status/描述）与时间校验无关，不在此列。
+ */
+interface RelationAtAnchorView {
+  sourceRef: string;
+  targetRef: string;
+  memorial?: boolean;
+}
+
 type TemporalConditionView =
   | { kind: "entity_status"; entityRef: string }
   | { kind: "relation_status"; sourceRef: string; targetRef: string }
@@ -135,6 +145,7 @@ export interface TemporalConsistencyDeckView {
   races: RaceCardView[];
   places: AnchoredCardView[];
   majorCharacters: CharacterCardView[];
+  relationsAtAnchor?: RelationAtAnchorView[];
   canonEvents?: CanonEventView[];
 }
 
@@ -157,6 +168,11 @@ function effectiveStatus(card: AnchoredCardView, fallback = "active"): string {
 
 function label(card: { ref: string; name?: string; title?: string }): string {
   return `「${card.name ?? card.title ?? card.ref}」(${card.ref})`;
+}
+
+/** 追念豁免查询用的实体对键（JSON 编码避免 ref 内容造成歧义）。 */
+function pairKey(left: string, right: string): string {
+  return JSON.stringify([left, right]);
 }
 
 // ───────────────────────── 主入口 ─────────────────────────
@@ -220,8 +236,15 @@ export function collectTemporalIssues(deck: TemporalConsistencyDeckView): Tempor
   }
 
   // ── T3 INACTIVE_FACTION_WITH_MEMBERS：已消亡势力不得再有现任成员 ──
-  // 豁免（§10.3 追念）：memorial=true 的成员关系；以及人物自身锚点非 active
+  // 豁免（§10.3 追念）：memorial=true 的成员关系；relationsAtAnchor 中人物与该势力
+  // 之间的追念关系（阶段 2，memorial=true）；以及人物自身锚点非 active
   // （其成员关系属于历史记载，如「先王之子」的追念，而非现任关系）。
+  const memorialPairs = new Set<string>();
+  for (const relation of deck.relationsAtAnchor ?? []) {
+    if (relation.memorial !== true) continue;
+    memorialPairs.add(pairKey(relation.sourceRef, relation.targetRef));
+    memorialPairs.add(pairKey(relation.targetRef, relation.sourceRef));
+  }
   for (const character of deck.majorCharacters) {
     const characterStatus = effectiveStatus(character);
     for (const membership of character.factionMemberships) {
@@ -230,6 +253,7 @@ export function collectTemporalIssues(deck: TemporalConsistencyDeckView): Tempor
       const factionStatus = effectiveStatus(faction);
       if (!INACTIVE_FACTION_STATUSES.has(factionStatus)) continue;
       if (membership.memorial === true) continue;
+      if (memorialPairs.has(pairKey(character.ref, membership.factionRef))) continue;
       if (characterStatus !== "active") continue;
       push(
         "INACTIVE_FACTION_WITH_MEMBERS",
@@ -360,6 +384,12 @@ export function collectTemporalIssues(deck: TemporalConsistencyDeckView): Tempor
       }
     }
   }
+  // 阶段 2 锚点关系（§7 relationsAtAnchor）：主客体都必须解析到既有实体卡。
+  deck.relationsAtAnchor?.forEach((relation, index) => {
+    const where = `锚点关系 relationsAtAnchor[${index}]`;
+    requireCardRef(relation.sourceRef, `${where}的主体`);
+    requireCardRef(relation.targetRef, `${where}的客体`);
+  });
   for (const faction of deck.factions) {
     for (const { ref } of faction.keyCharacterRefs) {
       if (characters.has(ref)) continue;

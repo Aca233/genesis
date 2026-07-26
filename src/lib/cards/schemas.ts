@@ -128,6 +128,78 @@ export const TemporalAnchorCardSchema = z.object({
 });
 export type TemporalAnchorCard = z.infer<typeof TemporalAnchorCardSchema>;
 
+// ───────────── 锚点瘦快照与卡级溯源（时间一致设计稿 §6.1/§7，阶段 2 加法契约） ─────────────
+
+/**
+ * 卡级溯源（§6.1）：标记条目与原作正史的关系。卡级而非逐字段；
+ * basis=original 的原创世界整体省略（全部必然是 generated_original）。
+ */
+export const ProvenanceSchema = z.object({
+  canonRelation: z.enum(["canon", "canon_inferred", "player_override", "generated_original"])
+    .describe("条目与原作正史的关系：canon=原作既有；canon_inferred=由原作合理推断；player_override=玩家改写原作；generated_original=本世界原创。basis=original 的原创世界整体省略 provenance"),
+  evidence: z.array(z.string()).max(3).optional()
+    .describe("可选证据线索，中文，至多 3 条；模型伪造引用不可信，仅供审计线索"),
+}).strict();
+export type Provenance = z.infer<typeof ProvenanceSchema>;
+
+/** 人物锚点瘦快照（§7 阶段 2）：只写锚点时刻的当前态，绝不写生平综述。 */
+export const CharacterStateAtAnchorSchema = z.object({
+  identity: z.string().min(1)
+    .describe("锚点时刻的身份，中文一句话——此刻是谁，而非将来会成为谁"),
+  locationRef: StableRefSchema.nullable()
+    .describe("锚点时刻所在地点的稳定 ref；行踪不定或不在任何已立卡地点时为 null"),
+  factionMemberships: z.array(z.object({
+    factionRef: StableRefSchema.describe("势力稳定 ref"),
+    role: z.string().describe("锚点时刻在该势力中的职务，中文"),
+    status: z.enum(["active", "former", "secret"])
+      .describe("成员关系状态：active=现任；former=已脱离；secret=秘密成员"),
+  }).strict()).describe("锚点时刻的势力成员关系；没有则为空数组"),
+  currentGoals: z.array(z.string()).max(3)
+    .describe("锚点时刻正在追求的目标，中文，至多 3 条"),
+  currentSituation: z.string().min(1)
+    .describe("锚点时刻的处境，中文一句话"),
+  knowledgeHints: z.array(z.string()).max(3).optional()
+    .describe("锚点时刻已知晓之事的提示，中文，至多 3 条；提示性而非权威知识边界"),
+}).strict();
+export type CharacterStateAtAnchor = z.infer<typeof CharacterStateAtAnchorSchema>;
+
+/** 势力锚点瘦快照（§7 阶段 2）。 */
+export const FactionStateAtAnchorSchema = z.object({
+  leaderRefs: z.array(StableRefSchema).optional()
+    .describe("锚点时刻的现任领袖/掌权人物稳定 ref 列表；必须解析到既有人物卡"),
+  territoryRefs: z.array(StableRefSchema).optional()
+    .describe("锚点时刻实际控制的地点稳定 ref 列表；必须解析到既有地点卡"),
+  currentStrength: z.string().optional()
+    .describe("锚点时刻的实力概况，中文一句话"),
+}).strict();
+export type FactionStateAtAnchor = z.infer<typeof FactionStateAtAnchorSchema>;
+
+/** 神明锚点瘦快照（§7 阶段 2）。 */
+export const GodStateAtAnchorSchema = z.object({
+  currentRank: RankSchema.optional()
+    .describe("锚点时刻的当前位阶；与卡面 rank 不同时填写"),
+  currentDomains: z.array(z.string()).optional()
+    .describe("锚点时刻实际掌握的领域；与卡面 domains 不同时填写"),
+}).strict();
+export type GodStateAtAnchor = z.infer<typeof GodStateAtAnchorSchema>;
+
+/**
+ * 锚点关系（§7 阶段 2）：有界——每名 active 人物 1–4 条锚点相关关系。
+ * 指向非 active 实体的追念关系（如「先王之子」）必须 memorial=true，
+ * 消费者为 Narrator 关系块与导演工具查询（T3 豁免读取 memorial）。
+ */
+export const RelationAtAnchorSchema = z.object({
+  sourceRef: StableRefSchema.describe("关系主体的稳定 ref（通常为 active 人物）；必须解析到既有卡"),
+  targetRef: StableRefSchema.describe("关系客体的稳定 ref；必须解析到既有卡；指向锚点非 active 实体时必须 memorial=true"),
+  status: z.enum(["ally", "enemy", "rival", "subordinate", "family", "unknown", "no_contact"])
+    .describe("锚点时刻的关系状态：ally=盟友；enemy=敌对；rival=竞争；subordinate=从属；family=亲缘；unknown=未知；no_contact=尚无往来"),
+  publicDescription: z.string().min(1).describe("公开可见的关系描述，中文一句话"),
+  hiddenDescription: z.string().optional().describe("对玩家隐藏的关系真相，中文；无隐情则省略"),
+  memorial: z.boolean().optional()
+    .describe("追念关系标记：targetRef 指向锚点非 active 实体（已死/未生/已解散等）时必须为 true；现存关系省略"),
+}).strict();
+export type RelationAtAnchor = z.infer<typeof RelationAtAnchorSchema>;
+
 // ───────────────────────── 单卡 ─────────────────────────
 
 /** 卡组阶段使用的能力完整描述；ref 是草稿内的稳定关系键。 */
@@ -192,6 +264,10 @@ export const MajorCharacterCardSchema = z.object({
     .describe("锚点时刻的人物状态：active=在世且可活动；unborn=尚未出生；dead=已死亡；missing=失踪；sealed=被封印；historical=只存在于历史记载。缺省视为 active（旧卡组兼容）"),
   anchorNote: z.string().optional()
     .describe("一句话说明该锚点状态的来由（如「三年前战死于北境」）；active 且无须说明时留空"),
+  stateAtAnchor: CharacterStateAtAnchorSchema.optional()
+    .describe("锚点瘦快照（阶段 2）：只写锚点时刻的当前态（身份/所在/成员关系/目标/处境/已知提示），绝不写生平综述"),
+  provenance: ProvenanceSchema.optional()
+    .describe("卡级溯源（阶段 2）：IP 世界标记条目与原作正史的关系；basis=original 世界整体省略"),
   learnedTraditionRefs: z.array(z.object({ sourceAbilityRef: StableRefSchema })),
   racialOverrides: z.array(RacialOverrideSchema),
   abilities: z.array(PersonalDeckAbilitySchema).min(2).max(5).describe("个人技能"),
@@ -251,6 +327,10 @@ export const MajorGodCardSchema = z.object({
     .describe("锚点时刻的神明状态：active=活跃临世；dormant=沉眠；sealed=被封印；dead=已死亡；fragmented=神格破碎；not_yet_ascended=尚未成神。缺省视为 active（旧卡组兼容）"),
   anchorNote: z.string().optional()
     .describe("一句话说明该锚点状态的来由（如「诸神黄昏中陨落」）；active 且无须说明时留空"),
+  stateAtAnchor: GodStateAtAnchorSchema.optional()
+    .describe("锚点瘦快照（阶段 2）：锚点时刻的当前位阶与领域，与卡面不同时填写"),
+  provenance: ProvenanceSchema.optional()
+    .describe("卡级溯源（阶段 2）：IP 世界标记条目与原作正史的关系；basis=original 世界整体省略"),
   abilities: z.array(DivineDeckAbilitySchema).min(3).max(6).describe("神权能力"),
 });
 
@@ -284,6 +364,8 @@ export const PlayerGodCardSchema = z.object({
     .describe("锚点时刻的玩家神状态；玩家神同样受锚点约束，不是时间规则的例外。开局可操作的玩家神应为 active。缺省视为 active（旧卡组兼容）"),
   anchorNote: z.string().optional()
     .describe("一句话说明该锚点状态的来由；active 且无须说明时留空"),
+  stateAtAnchor: GodStateAtAnchorSchema.optional()
+    .describe("锚点瘦快照（阶段 2）：锚点时刻的当前位阶与领域，与卡面不同时填写；玩家神同样受锚点约束"),
   abilities: z.array(DivineDeckAbilitySchema).min(3).max(6).describe("玩家神权"),
 });
 
@@ -299,6 +381,10 @@ export const FactionCardSchema = z.object({
     .describe("锚点时刻的势力状态：active=正常运转；forming=正在成形；dissolved=已解散；destroyed=已被摧毁；historical=只存在于历史记载。缺省视为 active（旧卡组兼容）"),
   anchorNote: z.string().optional()
     .describe("一句话说明该锚点状态的来由（如「十年前于内战中解散」）；active 且无须说明时留空"),
+  stateAtAnchor: FactionStateAtAnchorSchema.optional()
+    .describe("锚点瘦快照（阶段 2）：锚点时刻的现任领袖、实控疆域与实力概况"),
+  provenance: ProvenanceSchema.optional()
+    .describe("卡级溯源（阶段 2）：IP 世界标记条目与原作正史的关系；basis=original 世界整体省略"),
   keyCharacterRefs: z.array(z.object({ ref: StableRefSchema })).describe("关键人物稳定引用"),
   // 旧草稿兼容字段；新的运行时关系以 keyCharacterRefs 为准。
   keyFigures: z.array(z.string()).optional().default([]).describe("旧草稿关键人物名"),
@@ -316,6 +402,8 @@ export const RaceCardSchema = z.object({
     .describe("锚点时刻的种族状态：active=繁盛存续；declining=衰落中；extinct=已灭绝；not_yet_emerged=尚未出现。缺省视为 active（旧卡组兼容）"),
   anchorNote: z.string().optional()
     .describe("一句话说明该锚点状态的来由（如「大寂灭后仅余孑遗」）；active 且无须说明时留空"),
+  provenance: ProvenanceSchema.optional()
+    .describe("卡级溯源（阶段 2）：IP 世界标记条目与原作正史的关系；basis=original 世界整体省略"),
   abilities: z.array(RaceDeckAbilitySchema).min(2).max(5).describe("先天能力与族群技艺"),
 });
 
@@ -330,6 +418,8 @@ export const PlaceCardSchema = z.object({
     .describe("锚点时刻的地点状态：accessible=可以抵达；hidden=隐匿未显；sealed=被封锁；destroyed=已毁灭；not_yet_created=尚未出现。缺省视为 accessible（旧卡组兼容）"),
   anchorNote: z.string().optional()
     .describe("一句话说明该锚点状态的来由（如「沉入海底已两百年」）；accessible 且无须说明时留空"),
+  provenance: ProvenanceSchema.optional()
+    .describe("卡级溯源（阶段 2）：IP 世界标记条目与原作正史的关系；basis=original 世界整体省略"),
 });
 
 export const EpochConflictCardSchema = z.object({
@@ -449,6 +539,8 @@ const SharedWorldDeckShape = {
   factions: z.array(FactionCardSchema).min(2).max(8),
   races: z.array(RaceCardSchema),
   majorCharacters: z.array(MajorCharacterCardSchema).min(4).max(12),
+  relationsAtAnchor: z.array(RelationAtAnchorSchema).optional()
+    .describe("锚点关系（阶段 2，有界）：每名 active 人物 1–4 条锚点相关关系；指向非 active 实体的追念关系必须 memorial=true；所有 ref 必须解析到既有卡。旧卡组（无此键）按旧行为解析"),
   places: z.array(PlaceCardSchema),
   epochConflict: EpochConflictCardSchema,
   canonEvents: z.array(CanonFutureEventSchema).min(3).max(5).optional()
@@ -681,16 +773,80 @@ function validateCanonFutureAxis(deck: CanonAxisDeckView, ctx: z.RefinementCtx):
   });
 }
 
+/** Structural view of the deck fields the anchor-relations validator reads. */
+type RelationsAtAnchorDeckView = {
+  playerGod?: { ref: string };
+  majorGods: Array<{ ref: string }>;
+  races: Array<{ ref: string }>;
+  factions: Array<{ ref: string }>;
+  places: Array<{ ref: string }>;
+  majorCharacters: Array<{ ref: string; statusAtAnchor?: string }>;
+  relationsAtAnchor?: Array<{ sourceRef: string; targetRef: string }>;
+};
+
+/** §7 阶段 2 有界关系：每名 active 人物至多 4 条（下限 1 条由提示词与审计把守）。 */
+const MAX_RELATIONS_PER_ACTIVE_CHARACTER = 4;
+
+/**
+ * 锚点关系校验（§7 阶段 2）：sourceRef/targetRef 必须解析到既有卡组稳定 ref；
+ * 每名 active 人物（statusAtAnchor 缺省视为 active）作为关系主体至多 4 条。
+ */
+function validateRelationsAtAnchor(deck: RelationsAtAnchorDeckView, ctx: z.RefinementCtx): void {
+  const relations = deck.relationsAtAnchor;
+  if (relations === undefined) return;
+
+  const cardRefs = new Set<string>([
+    ...(deck.playerGod === undefined ? [] : [deck.playerGod.ref]),
+    ...deck.majorGods.map((god) => god.ref),
+    ...deck.races.map((race) => race.ref),
+    ...deck.factions.map((faction) => faction.ref),
+    ...deck.places.map((place) => place.ref),
+    ...deck.majorCharacters.map((character) => character.ref),
+  ]);
+  const activeCharacterRefs = new Set(
+    deck.majorCharacters
+      .filter((character) => (character.statusAtAnchor ?? "active") === "active")
+      .map((character) => character.ref),
+  );
+
+  const relationCountBySource = new Map<string, number>();
+  relations.forEach((relation, index) => {
+    for (const [key, ref] of [
+      ["sourceRef", relation.sourceRef],
+      ["targetRef", relation.targetRef],
+    ] as const) {
+      if (cardRefs.has(ref)) continue;
+      ctx.addIssue({
+        code: "custom",
+        path: ["relationsAtAnchor", index, key],
+        message: `锚点关系引用 "${ref}" 未解析到任何卡组稳定 ref`,
+      });
+    }
+    if (!activeCharacterRefs.has(relation.sourceRef)) return;
+    const count = (relationCountBySource.get(relation.sourceRef) ?? 0) + 1;
+    relationCountBySource.set(relation.sourceRef, count);
+    if (count === MAX_RELATIONS_PER_ACTIVE_CHARACTER + 1) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["relationsAtAnchor", index, "sourceRef"],
+        message: `active 人物 "${relation.sourceRef}" 的锚点关系超过上限 ${MAX_RELATIONS_PER_ACTIVE_CHARACTER} 条——每名 active 人物 1–4 条锚点相关关系`,
+      });
+    }
+  });
+}
+
 /** Single superRefine entry combining reference uniqueness and the canon future axis. */
 function validateDeckIntegrity(
   deck: DeckReferenceGraph & {
     canonEvents?: CanonFutureEvent[];
     temporalAnchor?: { anchorOrdinal: number };
+    relationsAtAnchor?: Array<{ sourceRef: string; targetRef: string }>;
   },
   ctx: z.RefinementCtx,
 ): void {
   validateModeAwareDeckReferenceUniqueness(deck, ctx);
   validateCanonFutureAxis(deck, ctx);
+  validateRelationsAtAnchor(deck, ctx);
 }
 
 /** Strict contracts for new Genesis output and rerolls. */
@@ -894,7 +1050,10 @@ export function normalizeLegacyWorldDeck(raw: unknown): LegacyWorldDeck {
   });
 }
 
-/** 卡片键（重掷粒度）。temporalAnchor 参与重掷 API 粒度；其编辑器 UI（时间校准卡）随后续批次交付。 */
+/**
+ * 卡片键（重掷粒度）。temporalAnchor/relationsAtAnchor 参与重掷 API 粒度；
+ * 其编辑器 UI（时间校准卡、关系卡）随后续批次交付。
+ */
 export const DECK_CARD_KEYS = [
   "temporalAnchor",
   "cosmology",
@@ -905,14 +1064,18 @@ export const DECK_CARD_KEYS = [
   "factions",
   "races",
   "majorCharacters",
+  "relationsAtAnchor",
   "places",
   "epochConflict",
   "style",
   "theme",
 ] as const;
 /**
- * 编辑器 UI 消费的卡片键。时间校准卡 UI（确认页只读卡 + 重掷入口）交付前，
- * temporalAnchor 暂不进入 DeckCardKey，以免 CARD_KEY_LABELS 等穷举映射被迫提前变更；
- * UI 落地时应把本类型改回 (typeof DECK_CARD_KEYS)[number] 并补齐中文标签。
+ * 编辑器 UI 消费的卡片键。时间校准卡与锚点关系卡 UI（确认页只读卡 + 重掷入口）交付前，
+ * temporalAnchor/relationsAtAnchor 暂不进入 DeckCardKey，以免 CARD_KEY_LABELS 等穷举映射
+ * 被迫提前变更；UI 落地时应把本类型改回 (typeof DECK_CARD_KEYS)[number] 并补齐中文标签。
  */
-export type DeckCardKey = Exclude<(typeof DECK_CARD_KEYS)[number], "temporalAnchor">;
+export type DeckCardKey = Exclude<
+  (typeof DECK_CARD_KEYS)[number],
+  "temporalAnchor" | "relationsAtAnchor"
+>;

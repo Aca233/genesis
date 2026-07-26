@@ -615,6 +615,33 @@ body > * {
     inset 0 0 1.5rem rgba(0, 0, 0, 0.22);
 }
 
+/* ── 玺印钮·燃金变体：御笔已蘸墨时的实心鎏金印——金面墨字，页面最亮之物；
+   空笔（disabled）仍回落未点燃的蜡印底稿。 */
+.seal-button--lit:not(:disabled):not([aria-disabled="true"]) {
+  color: color-mix(in srgb, var(--seal-ground-lo) 90%, #000);
+  text-shadow: 0 1px 0 color-mix(in srgb, #ffe9b2 40%, transparent);
+  background:
+    linear-gradient(
+      174deg,
+      color-mix(in srgb, #ffe9b2 55%, var(--gilt-bright)),
+      var(--gilt-bright) 30%,
+      var(--gilt) 70%,
+      color-mix(in srgb, var(--gilt) 72%, #1c130a)
+    ) padding-box,
+    linear-gradient(
+      158deg,
+      var(--gilt-bright),
+      var(--gilt) 34%,
+      color-mix(in srgb, var(--gilt) 46%, #1c130a) 62%,
+      var(--gilt-bright)
+    ) border-box;
+  box-shadow:
+    0 0 1.2rem var(--seal-glow),
+    0 0 2.4rem color-mix(in srgb, var(--seal-glow) 60%, transparent),
+    0 3px 14px var(--shadow-warm),
+    inset 0 1px 0 color-mix(in srgb, #fff3cf 50%, transparent);
+}
+
 /* ── 泥金章题：两侧发丝线向外淡出的节标题 ──
    结构：<h2 class="illuminated-header"><span class="illuminated-header__glyph">✦</span>标题</h2>
    引导纹章槽可省略；裸文本节点即为标题内容。 */
