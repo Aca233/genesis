@@ -52,6 +52,7 @@ export type LlmTask =
   | "extract"
   | "chronicle"
   | "reroll"
+  | "finale"
   | "test";
 
 export type CompletionRequest = {
@@ -63,6 +64,11 @@ export type CompletionRequest = {
   task: LlmTask;
   /** Enables provider prompt-cache hints when the stable prefix is large enough. */
   cache?: PromptCacheRequest;
+  /**
+   * 上游因输出上限截断（finish_reason=length / stop_reason=max_tokens）时显式报错，
+   * 而非静默交付被斩断的文本。结构化输出与创世等"必须完整"的调用应开启。
+   */
+  failOnTruncation?: boolean;
 };
 
 export type StreamChunk =

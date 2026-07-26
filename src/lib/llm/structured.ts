@@ -70,6 +70,8 @@ export async function completeStructured<T>(
       task: opts.task,
       temperature: opts.temperature,
       maxTokens: opts.maxTokens,
+      // 结构化输出必须完整:截断的 JSON 只会在校验层莫名失败
+      failOnTruncation: true,
       cache: opts.cache,
       messages: [
         { role: "system", content: opts.system, cacheScope: "global" },

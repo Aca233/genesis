@@ -205,6 +205,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
         for await (const chunk of stream("narrative", {
           task: "genesis",
           maxTokens: 16000,
+          failOnTruncation: true,
           cache: { namespace: `genesis:v1:${mode}` },
           messages: [
             { role: "system", content: genesisRequest.system, cacheScope: "global" },
