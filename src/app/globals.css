@@ -23,9 +23,9 @@
   --line: rgba(46, 36, 24, 0.14); /* 分隔细线 */
   --play-background-image: url("/images/backgrounds/play-celestial-day.webp");
   --play-background-opacity: 0.58;
-  --genesis-mode-opacity: 0.28;
-  --genesis-mode-filter: saturate(0.72) sepia(0.2) brightness(0.96);
-  --genesis-mode-blend: multiply;
+  --genesis-mode-opacity: 0.38;
+  --genesis-mode-filter: saturate(1.12) sepia(0.06) brightness(1.02) contrast(1.08);
+  --genesis-mode-blend: normal;
 }
 
 [data-theme="candle"] {

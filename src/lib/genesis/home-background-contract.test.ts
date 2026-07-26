@@ -72,13 +72,19 @@ describe("genesis mode background homepage contract", () => {
     expect(readDeclaration(dayTheme, "--play-background-image")).toMatch(
       /^url\(\s*["']?\/images\/backgrounds\/play-celestial-day\.webp["']?\s*\)$/,
     );
-    expect(readDeclaration(dayTheme, "--genesis-mode-opacity")).toBe("0.28");
-    expect(readDeclaration(dayTheme, "--genesis-mode-blend")).toBe("multiply");
+    expect(readDeclaration(dayTheme, "--genesis-mode-opacity")).toBe("0.38");
+    expect(readDeclaration(dayTheme, "--genesis-mode-filter")).toBe(
+      "saturate(1.12) sepia(0.06) brightness(1.02) contrast(1.08)",
+    );
+    expect(readDeclaration(dayTheme, "--genesis-mode-blend")).toBe("normal");
 
     expect(readDeclaration(candleTheme, "--play-background-image")).toMatch(
       /^url\(\s*["']?\/images\/backgrounds\/play-celestial-candle\.webp["']?\s*\)$/,
     );
     expect(readDeclaration(candleTheme, "--genesis-mode-opacity")).toBe("0.34");
+    expect(readDeclaration(candleTheme, "--genesis-mode-filter")).toBe(
+      "saturate(0.86) sepia(0.16) brightness(0.86) contrast(1.04)",
+    );
     expect(readDeclaration(candleTheme, "--genesis-mode-blend")).toBe("screen");
   });
 
