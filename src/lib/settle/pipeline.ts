@@ -4,6 +4,10 @@ import {
   applyAbilityExtractionInTransaction,
   type AbilityExtractionTx,
 } from "@/lib/abilities/extraction";
+import {
+  assignAutomaticIcon,
+  type IconAssignmentTx,
+} from "@/lib/icons/assignment";
 import { completeStructured } from "@/lib/llm/structured";
 import {
   EXTRACTION_MAX_ABILITIES,
@@ -278,6 +282,12 @@ async function* settleChapterWithLease(
   const timeline = chapter.timeline;
   const world = timeline.world;
   const mode = WorldModeSchema.parse(world.mode);
+  const observerTime = timeline.observerState && typeof timeline.observerState === "object" && !Array.isArray(timeline.observerState)
+    ? (timeline.observerState as { timeLabel?: unknown }).timeLabel
+    : null;
+  const settlementTimeLabel = typeof observerTime === "string" && observerTime.trim()
+    ? observerTime.trim()
+    : "此刻";
   assertActiveReality(world.activeTimelineId, timeline.id);
   const parsedReality = RealityStateSchema.safeParse(timeline.realityState);
   if (mode === "creator" && !parsedReality.success) throw new Error("创世主现实状态无效");
@@ -361,7 +371,14 @@ async function* settleChapterWithLease(
     yield { step: "pantheon", detail: "诸神行动落定" };
     await assertLeaseOwned();
     await withSettlementLeaseFence(worldId, token, async (tx) => {
-      await applyPantheonTurns(tx, timeline.id, chapter.index, settlement.pantheonTurns, mode);
+      await applyPantheonTurns(
+        tx,
+        timeline.id,
+        chapter.index,
+        settlementTimeLabel,
+        settlement.pantheonTurns,
+        mode,
+      );
       await setState(tx, chapterId, "extract");
     });
   }
@@ -379,7 +396,15 @@ async function* settleChapterWithLease(
     await assertLeaseOwned();
     await assertTimelineStillActive(world.id, timeline.id);
     await withSettlementLeaseFence(worldId, token, async (tx) => {
-      await applyExtraction(tx, timeline.id, chapterId, chapterText, settlement.extraction, mode);
+      await applyExtraction(
+        tx,
+        world.id,
+        timeline.id,
+        chapterId,
+        chapterText,
+        settlement.extraction,
+        mode,
+      );
       await setState(tx, chapterId, "chronicle");
     });
   }
@@ -391,12 +416,20 @@ async function* settleChapterWithLease(
     await assertLeaseOwned();
     await assertTimelineStillActive(world.id, timeline.id);
     await withSettlementLeaseFence(worldId, token, async (tx) => {
-      await applyChronicle(tx, timeline.id, chapterId, chapter.index, settlement.chronicle);
+      const chronicleEntries = await applyChronicle(
+        tx,
+        timeline.id,
+        chapterId,
+        chapter.index,
+        settlement.chronicle,
+      );
       await applySettlementActivity(tx as unknown as SettlementActivityTx, {
+        worldId: world.id,
         timelineId: timeline.id,
         chapterId,
         sourceMessageId: chapterText.messages.at(-1)?.id ?? chapterId,
         worldActivity: settlement.worldActivity,
+        chronicleEntries,
       });
       await setState(tx, chapterId, "decay");
     });
@@ -710,6 +743,7 @@ async function applyPantheonTurns(
   db: SettlementTransaction,
   timelineId: string,
   chapterIndex: number,
+  timeLabel: string,
   turns: ModeAwareChapterSettlement["pantheonTurns"],
   mode: WorldMode,
 ) {
@@ -733,7 +767,7 @@ async function applyPantheonTurns(
     if (!turn) {
       await db.chronicleEntry.create({
         data: {
-          timelineId, chapterIndex, yearLabel: "",
+          timelineId, chapterIndex, yearLabel: timeLabel,
           text: `${god.name}静观本章风云，未有所动。`,
           entityIds: [], godIds: [god.id], revealed: false, source: "pantheon",
         },
@@ -742,7 +776,7 @@ async function applyPantheonTurns(
     }
     await db.chronicleEntry.create({
       data: {
-        timelineId, chapterIndex, yearLabel: "", text: turn.action.description,
+        timelineId, chapterIndex, yearLabel: timeLabel, text: turn.action.description,
         entityIds: [], godIds: [god.id], revealed: false, source: "pantheon",
       },
     });
@@ -790,6 +824,14 @@ async function applyChronicle(
     entityNameMap(timelineId),
     godNameMap(timelineId),
   ]);
+  const activityEntries = chronicle.entries.map((entry) => ({
+    yearLabel: entry.yearLabel,
+    text: entry.text,
+    subjectIds: [
+      ...entry.entityNames.map((name) => entityMap.get(name)),
+      ...entry.godNames.map((name) => godMap.get(name)),
+    ].filter((id): id is string => id !== undefined),
+  }));
   {
     const existing = await db.chronicleEntry.findMany({
       where: { timelineId, chapterIndex, source: "narrative", revealed: true },
@@ -821,6 +863,7 @@ async function applyChronicle(
       },
     });
   }
+  return activityEntries;
 }
 
 // ───────────────────────── 辅助 ─────────────────────────
@@ -916,6 +959,7 @@ async function godNameMap(timelineId: string): Promise<Map<string, string>> {
 /** 应用单次模型响应中的状态抽取；不再发起模型调用。 */
 async function applyExtraction(
   db: SettlementTransaction,
+  worldId: string,
   timelineId: string,
   chapterId: string,
   chapterText: Awaited<ReturnType<typeof chapterProse>>,
@@ -990,6 +1034,13 @@ async function applyExtraction(
       });
       byName.set(created.name, created);
       for (const alias of created.aliases) byName.set(alias, created);
+      await assignAutomaticIcon(tx as unknown as IconAssignmentTx, {
+        worldId,
+        timelineId,
+        subjectType: "entity",
+        subjectId: created.id,
+        iconConcept: ne.iconConcept,
+      });
     }
 
     // 既有实体增量
@@ -1106,6 +1157,13 @@ async function applyExtraction(
       });
       godByName.set(created.name, created);
       for (const alias of created.aliases) godByName.set(alias, created);
+      await assignAutomaticIcon(tx as unknown as IconAssignmentTx, {
+        worldId,
+        timelineId,
+        subjectType: "god",
+        subjectId: created.id,
+        iconConcept: newGod.iconConcept,
+      });
     }
     for (const gu of normalizedExtraction.godUpdates) {
       const target = godByName.get(gu.name);
@@ -1199,6 +1257,15 @@ async function applyExtraction(
           ? String(rejected.change.ownerName)
           : "未知",
         reason: rejected.reason,
+      });
+    }
+    for (const created of result.createdAbilities) {
+      await assignAutomaticIcon(tx as unknown as IconAssignmentTx, {
+        worldId,
+        timelineId,
+        subjectType: "ability",
+        subjectId: created.abilityId,
+        iconConcept: created.iconConcept,
       });
     }
 

@@ -24,6 +24,9 @@ model World {
   styleCard          Json?      @map("style_card") // 叙事风格卡
   cosmology          Json? // 宇宙论卡
   fusionAxiom        Json?      @map("fusion_axiom") // 融合公理卡（仅多IP融合）
+  iconTheme          Json?      @map("icon_theme")
+  iconThemeRevision  Int        @default(0) @map("icon_theme_revision")
+  iconThemeOperationKey String?  @map("icon_theme_operation_key")
   activeTimelineId   String?    @map("active_timeline_id")
   operationKind      String?    @map("operation_kind")
   operationToken     String?    @map("operation_token")
@@ -91,6 +94,7 @@ model Timeline {
   worldEvents     WorldEvent[]
   worldActivities WorldActivity[]
   entityRelations EntityRelation[]
+  iconAssignments IconAssignment[]
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
 
@@ -147,6 +151,23 @@ model GenerationRequest {
   @@index([chapterId, status])
   @@index([chapterId, stage])
   @@map("generation_requests")
+}
+
+model IconAssignment {
+  id           String   @id @default(cuid())
+  timelineId   String   @map("timeline_id")
+  timeline     Timeline @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  subjectType  String   @map("subject_type")
+  subjectId    String   @map("subject_id")
+  token        String
+  source       String
+  playerLocked Boolean  @default(false) @map("player_locked")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([timelineId, subjectType, subjectId])
+  @@index([timelineId])
+  @@map("icon_assignments")
 }
 
 model WorldEvent {

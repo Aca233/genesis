@@ -23,6 +23,7 @@ describe("version 4 世界存档导出", () => {
       mode: "creator",
       status: "playing",
       activeTimelineId: "timeline-1",
+      iconTheme: { version: 1, catalogVersion: 1, primaryFamily: "tabler" },
       rewrites: [],
       lorebookEntries: [],
       timelines: [{
@@ -116,6 +117,15 @@ describe("version 4 世界存档导出", () => {
           timeLabel: "第七日",
           createdAt: new Date("2026-07-23T00:00:00Z"),
         }],
+        iconAssignments: [{
+          id: "icon-assignment-1",
+          timelineId: "timeline-1",
+          subjectType: "event",
+          subjectId: "world-event-1",
+          token: "event.conflict",
+          source: "player",
+          playerLocked: true,
+        }],
       }],
     });
 
@@ -132,6 +142,12 @@ describe("version 4 世界存档导出", () => {
     expect(archive.world.timelines[0].worldActivities).toContainEqual(
       expect.objectContaining({ id: "world-activity-1", visibility: "hidden" }),
     );
+    expect(archive.world.iconTheme).toEqual(expect.objectContaining({ primaryFamily: "tabler" }));
+    expect(archive.world.timelines[0].iconAssignments).toEqual([
+      expect.objectContaining({ subjectId: "world-event-1", token: "event.conflict" }),
+    ]);
+    expect(archive.iconCreditsMarkdown).toContain("# Icon Credits");
+    expect(archive.iconCreditsMarkdown).toContain("CC BY 3.0");
     expect(archive.world.timelines[0].entityRelations).toEqual([expect.objectContaining({
       id: "relation-1",
       sourceEntityId: "entity-1",
@@ -152,6 +168,7 @@ describe("version 4 世界存档导出", () => {
             worldEvents: expect.anything(),
             worldActivities: expect.anything(),
             entityRelations: expect.anything(),
+            iconAssignments: expect.anything(),
             chapters: expect.objectContaining({
               include: { messages: { orderBy: { index: "asc" } } },
             }),

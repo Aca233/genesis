@@ -3,13 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   worldFindUnique: vi.fn(),
   timelineFindUnique: vi.fn(),
-  chapterFindFirst: vi.fn(),
   chapterFindUnique: vi.fn(),
   chapterFindMany: vi.fn(),
   godFindMany: vi.fn(),
   entityFindMany: vi.fn(),
   rewriteFindFirst: vi.fn(),
   generationRequestFindFirst: vi.fn(),
+  iconAssignmentFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -17,7 +17,6 @@ vi.mock("@/lib/db", () => ({
     world: { findUnique: mocks.worldFindUnique },
     timeline: { findUnique: mocks.timelineFindUnique },
     chapter: {
-      findFirst: mocks.chapterFindFirst,
       findUnique: mocks.chapterFindUnique,
       findMany: mocks.chapterFindMany,
     },
@@ -25,6 +24,7 @@ vi.mock("@/lib/db", () => ({
     entity: { findMany: mocks.entityFindMany },
     realityRewrite: { findFirst: mocks.rewriteFindFirst },
     generationRequest: { findFirst: mocks.generationRequestFindFirst },
+    iconAssignment: { findMany: mocks.iconAssignmentFindMany },
   },
 }));
 
@@ -67,6 +67,8 @@ const worldFixture = {
   styleCard: null,
   cosmology: null,
   fusionAxiom: null,
+  iconTheme: null,
+  iconThemeRevision: 0,
   draftDeck: null,
   operationKind: null,
   operationLeaseExpiresAt: null,
@@ -81,13 +83,6 @@ describe("GET /api/worlds/[id]/state projections", () => {
       branchName: "原初现实",
       branchSummary: "群星初燃",
       observerState: observer("omniscient"),
-    });
-    mocks.chapterFindFirst.mockResolvedValue({
-      id: "chapter-1",
-      index: 1,
-      title: "初燃",
-      settleState: "open",
-      messages: [],
     });
     mocks.chapterFindUnique.mockResolvedValue(null);
     mocks.chapterFindMany.mockResolvedValue([{
@@ -139,6 +134,22 @@ describe("GET /api/worlds/[id]/state projections", () => {
       plan: null,
     });
     mocks.generationRequestFindFirst.mockResolvedValue(null);
+    mocks.iconAssignmentFindMany.mockResolvedValue([
+      {
+        subjectType: "god",
+        subjectId: "god-moon",
+        token: "divinity.pantheon",
+        source: "player",
+        playerLocked: true,
+      },
+      {
+        subjectType: "ability",
+        subjectId: "ability-hidden",
+        token: "ability.ritual",
+        source: "generated",
+        playerLocked: false,
+      },
+    ]);
   });
 
   it("creator 全知状态返回分支元数据、隐藏议程、完整能力和最近改写", async () => {
@@ -153,10 +164,27 @@ describe("GET /api/worlds/[id]/state projections", () => {
       observerState: observer("omniscient"),
     });
     expect(body.gods[0]).toMatchObject({
+      iconAssignment: {
+        token: "divinity.pantheon",
+        source: "player",
+        playerLocked: true,
+        icon: { body: expect.stringContaining("<") },
+      },
       agenda: { schemes: ["遮蔽星门"] },
       agendaRevealed: false,
       relations: { "god-sun": { label: "rival" } },
-      abilities: [{ name: "暗潮神权", visibility: "hidden", worldVisible: false, effect: "令海潮吞没一段历史" }],
+      abilities: [{
+        name: "暗潮神权",
+        visibility: "hidden",
+        worldVisible: false,
+        effect: "令海潮吞没一段历史",
+        iconAssignment: {
+          token: "ability.ritual",
+          source: "generated",
+          playerLocked: false,
+          icon: { body: expect.stringContaining("<") },
+        },
+      }],
     });
     expect(body.recentRewrite).toMatchObject({ id: "rewrite-1", summary: "群星轨迹已经改变" });
     expect(body.avatars).toEqual([expect.objectContaining({
@@ -295,7 +323,7 @@ describe("GET /api/worlds/[id]/state projections", () => {
       operationKind: "settlement",
       operationLeaseExpiresAt: new Date("2000-01-01T00:00:00.000Z"),
     });
-    mocks.chapterFindFirst.mockResolvedValue({
+    mocks.chapterFindMany.mockResolvedValue([{
       id: "chapter-1",
       index: 1,
       title: "初燃",
@@ -305,7 +333,7 @@ describe("GET /api/worlds/[id]/state projections", () => {
       settleUpdatedAt: new Date("2026-07-23T02:00:00.000Z"),
       createdAt: new Date("2026-07-23T00:00:00.000Z"),
       messages: [],
-    });
+    }]);
 
     const body = await (await GET(new Request("http://localhost"), context)).json();
 
@@ -328,7 +356,7 @@ describe("GET /api/worlds/[id]/state projections", () => {
       operationKind: "settlement",
       operationLeaseExpiresAt: new Date("2999-01-01T00:00:00.000Z"),
     });
-    mocks.chapterFindFirst.mockResolvedValue({
+    mocks.chapterFindMany.mockResolvedValue([{
       id: "chapter-1",
       index: 1,
       title: "初燃",
@@ -338,7 +366,7 @@ describe("GET /api/worlds/[id]/state projections", () => {
       settleUpdatedAt: new Date("2026-07-23T02:00:00.000Z"),
       createdAt: new Date("2026-07-23T00:00:00.000Z"),
       messages: [],
-    });
+    }]);
 
     const body = await (await GET(new Request("http://localhost"), context)).json();
 
@@ -368,7 +396,6 @@ describe("GET /api/worlds/[id]/state projections", () => {
         meta: null,
       }],
     }));
-    mocks.chapterFindFirst.mockResolvedValue(segments[4]);
     mocks.chapterFindUnique.mockResolvedValue(segments[3]);
     mocks.chapterFindMany.mockResolvedValue([...segments].reverse().slice(0, 4));
 

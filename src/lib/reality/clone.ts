@@ -3,6 +3,7 @@ import {
   assertWorldEventParentAcyclic,
   remapWorldActivityGraph,
 } from "@/lib/world-activity/clone";
+import { remapIconAssignmentSubject } from "@/lib/icons/assignment";
 
 const RESERVED_GOD_RELATION_KEYS = new Set(["player"]);
 
@@ -234,6 +235,7 @@ export async function cloneTimelineGraph(
       worldEvents: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       worldActivities: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       entityRelations: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+      iconAssignments: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
     },
   });
   if (source.worldId !== input.worldId) {
@@ -657,6 +659,30 @@ export async function cloneTimelineGraph(
         parentEventId: event.parentEventId,
         originActivityId: event.originActivityId,
         updatedAt: event.updatedAt,
+      },
+    });
+  }
+
+  for (const assignment of source.iconAssignments) {
+    const subjectId = remapIconAssignmentSubject(assignment.subjectType, assignment.subjectId, maps);
+    if (subjectId === null) {
+      console.error("现实分叉跳过无法映射的图标分配", {
+        sourceTimelineId: source.id,
+        subjectType: assignment.subjectType,
+        subjectId: assignment.subjectId,
+      });
+      continue;
+    }
+    await tx.iconAssignment.create({
+      data: {
+        timelineId: child.id,
+        subjectType: assignment.subjectType,
+        subjectId,
+        token: assignment.token,
+        source: assignment.source,
+        playerLocked: assignment.playerLocked,
+        createdAt: assignment.createdAt,
+        updatedAt: assignment.updatedAt,
       },
     });
   }

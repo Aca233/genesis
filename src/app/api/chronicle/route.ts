@@ -37,7 +37,7 @@ export async function GET(request: Request) {
   );
   const omniscient = isOmniscientViewer(viewer);
 
-  const [entries, gods, entities] = await Promise.all([
+  const [entries, timeRows, gods, entities] = await Promise.all([
     prisma.chronicleEntry.findMany({
       where: {
         timelineId,
@@ -58,6 +58,11 @@ export async function GET(request: Request) {
         source: true,
       },
     }),
+    prisma.chronicleEntry.findMany({
+      where: { timelineId },
+      orderBy: [{ chapterIndex: "asc" }, { createdAt: "asc" }],
+      select: { chapterIndex: true, yearLabel: true },
+    }),
     prisma.god.findMany({
       where: { timelineId, tier: { in: ["major", "player"] } },
       select: { id: true, name: true },
@@ -69,11 +74,30 @@ export async function GET(request: Request) {
       orderBy: { name: "asc" },
     }),
   ]);
+  const timeByInternalIndex = new Map<number, string>();
+  for (const row of timeRows) {
+    if (!timeByInternalIndex.has(row.chapterIndex) && row.yearLabel.trim()) {
+      timeByInternalIndex.set(row.chapterIndex, row.yearLabel);
+    }
+  }
+  const godById = new Map(gods.map((god) => [god.id, god]));
 
   return NextResponse.json({
     entries: entries.flatMap((entry) => {
       const projection = projectChronicleForViewer(entry, viewer);
-      return projection === null ? [] : [projection];
+      return projection === null ? [] : [{
+        ...projection,
+        gods: entry.godIds.flatMap((id) => {
+          const god = godById.get(id);
+          return god ? [god] : [];
+        }),
+        yearLabel: entry.yearLabel.trim()
+          || timeByInternalIndex.get(entry.chapterIndex)
+          || "时间未载",
+        revealedAtTimeLabel: entry.revealedAtChapter === null
+          ? null
+          : timeByInternalIndex.get(entry.revealedAtChapter) ?? null,
+      }];
     }),
     gods,
     entities,

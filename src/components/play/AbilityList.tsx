@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import type {
   AbilityEventView,
   AbilityKind,
@@ -6,6 +9,8 @@ import type {
   AbilityView,
 } from "./types";
 import { SaveMaterialVersionButton } from "@/components/materials/SaveMaterialVersionButton";
+import { IconPicker, type IconAssignmentView } from "@/components/icons/IconPicker";
+import { WorldIcon } from "@/components/icons/WorldIcon";
 
 export type { AbilityView } from "./types";
 
@@ -153,22 +158,42 @@ function AbilityCard({
   ability,
   history,
   allowMaterialSave,
+  worldId,
+  timelineId,
 }: {
   ability: AbilityView;
   history: AbilityEventView[];
   allowMaterialSave: boolean;
+  worldId?: string;
+  timelineId?: string;
 }) {
   const source = sourceLabel(ability);
+  const [iconAssignment, setIconAssignment] = useState<IconAssignmentView | undefined>(
+    ability.iconAssignment,
+  );
   return (
     <li className={`rounded-md border p-3 ${ability.visibility === "rumored" ? "border-line bg-paper-sunken" : "border-line bg-paper-raised"}`}>
-      <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h5 className="text-sm text-ink">{ability.name}</h5>
+      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <span className="flex min-w-0 items-center gap-2">
+          {iconAssignment && <WorldIcon icon={iconAssignment.icon} size={20} />}
+          <h5 className="text-sm text-ink">{ability.name}</h5>
+        </span>
         {"worldVisible" in ability && !ability.worldVisible ? (
           <span className="text-[10px] tracking-widest text-cinnabar/75">天外批注 · 世界内不可见</span>
         ) : ability.visibility === "rumored" ? (
           <span className="fog-text text-[10px] tracking-widest">传闻</span>
         ) : null}
         {allowMaterialSave && <SaveMaterialVersionButton sourceType="ability" sourceId={ability.id} compact />}
+        {worldId && timelineId && iconAssignment && (
+          <IconPicker
+            worldId={worldId}
+            timelineId={timelineId}
+            subjectType="ability"
+            subjectId={ability.id}
+            value={iconAssignment}
+            onChange={setIconAssignment}
+          />
+        )}
       </header>
       {source && <p className="mt-1 text-xs text-gilt/75">来源：{source}</p>}
       {(ability.visibility === "known" || "worldVisible" in ability) && ability.bloodlineJustification && (
@@ -194,6 +219,8 @@ export function AbilityList({
   labels,
   emptyText = "尚无已载能力",
   allowMaterialSave = false,
+  worldId,
+  timelineId,
 }: {
   abilities: readonly AbilityView[];
   historyByAbilityId?: Readonly<Record<string, AbilityEventView[]>>;
@@ -201,6 +228,8 @@ export function AbilityList({
   labels?: Partial<Record<AbilityKind, string>>;
   emptyText?: string;
   allowMaterialSave?: boolean;
+  worldId?: string;
+  timelineId?: string;
 }) {
   const groups = groupAbilities(abilities, kinds, labels);
   if (groups.length === 0) return <p className="fog-text text-sm">{emptyText}</p>;
@@ -217,6 +246,8 @@ export function AbilityList({
                 ability={ability}
                 history={historyByAbilityId[ability.id] ?? []}
                 allowMaterialSave={allowMaterialSave}
+                worldId={worldId}
+                timelineId={timelineId}
               />
             ))}
           </ul>

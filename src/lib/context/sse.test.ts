@@ -175,6 +175,7 @@ describe("narratorCompletionSSE", () => {
 it.each([
   `<<<META\n{"suggestions":[],"operation":"continue","immediate_changes":[],"significant_event":false,"settlement_reasons":[]}\nMETA>>>`,
   `正文\r\n<<<META\r\n{"suggestions":[],"operation":"continue","immediate_changes":[],"significant_event":false,"settlement_reasons":[]}\r\nMETA>>>`,
+  `正文\n<<<META {"suggestions":[],"operation":"continue","temporal_state":{"era":"时空崩毁之纪元","time":"两百年重置中"},"immediate_changes":[],"world_actions":[],"activity_entries":[{"actorId":"god-dragon","action":"death","targetIds":[],"consequence":"龙神死亡。"}],"important_event_mutation":null,"significant_event":true,"settlement_reasons":["important_death"],"revealed_event_ids":[],"ability_reveals":[]} META>>>`,
 ])("SSE 从不发送合法 META framing：%s", async (full) => {
   mocks.stream.mockImplementation(async function* () {
     yield { type: "text", text: full.slice(0, 7) };

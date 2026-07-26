@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { projectVersionTwoWorld } from "@/lib/archive/v2";
+import { parseWorldIconTheme } from "@/lib/icons/theme";
+import { collectIconCredits, renderIconCreditsMarkdown } from "@/lib/icons/credits";
 
 /**
  * GET /api/worlds/[id]/export —— 导出 owner-private version 4 存档。
@@ -191,6 +193,7 @@ export async function GET(
           worldEvents: { orderBy: { createdAt: "asc" } },
           worldActivities: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
           entityRelations: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+          iconAssignments: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
         },
       },
       rewrites: { orderBy: { createdAt: "asc" } },
@@ -206,6 +209,21 @@ export async function GET(
     version: 4,
     exportedAt: new Date().toISOString(),
     world: projectVersionFourWorld(world),
+    iconCreditsMarkdown: renderIconCreditsMarkdown(collectIconCredits({
+      theme: parseWorldIconTheme(world.iconTheme),
+      assignments: world.timelines.flatMap((timeline) =>
+        timeline.iconAssignments.flatMap((assignment) =>
+          (["entity", "god", "ability", "event"] as const).includes(
+            assignment.subjectType as "entity" | "god" | "ability" | "event",
+          )
+            ? [{
+                subjectType: assignment.subjectType as "entity" | "god" | "ability" | "event",
+                subjectId: assignment.subjectId,
+                token: assignment.token,
+              }]
+            : []),
+      ),
+    })),
   };
 
   const encodedName = encodeURIComponent(`genesis-${world.name}.json`);

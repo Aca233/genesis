@@ -481,6 +481,9 @@ async function applyGodPatches(
   for (const patch of plan.godPatches) {
     if (patch.op !== "remove") continue;
     requireTimelineTarget(godIds, patch.targetId, "待删除神明");
+    await tx.iconAssignment.deleteMany({
+      where: { timelineId, subjectType: "god", subjectId: patch.targetId },
+    });
     await tx.god.delete({ where: { id: patch.targetId } });
     godIds.delete(patch.targetId);
   }
@@ -599,6 +602,9 @@ async function applyEntityPatches(
   for (const patch of plan.entityPatches) {
     if (patch.op !== "remove") continue;
     requireTimelineTarget(entityIds, patch.targetId, "待删除实体");
+    await tx.iconAssignment.deleteMany({
+      where: { timelineId, subjectType: "entity", subjectId: patch.targetId },
+    });
     await tx.entity.delete({ where: { id: patch.targetId } });
     entityIds.delete(patch.targetId);
   }
@@ -697,6 +703,9 @@ async function applyAbilityPatches(
   for (const patch of plan.abilityPatches) {
     if (patch.op !== "remove") continue;
     requireTimelineTarget(abilityIds, patch.targetId, "待删除能力");
+    await tx.iconAssignment.deleteMany({
+      where: { timelineId, subjectType: "ability", subjectId: patch.targetId },
+    });
     await tx.ability.delete({ where: { id: patch.targetId } });
     abilityIds.delete(patch.targetId);
   }

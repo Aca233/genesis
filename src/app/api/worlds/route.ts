@@ -8,6 +8,7 @@ import { validateDeckReferences } from "@/lib/abilities/validator";
 import { genesisSystem, genesisUserPrompt } from "@/lib/prompts/genesis";
 import { parseStWorldbook, lorebookExcerpts } from "@/lib/lorebook/st-import";
 import { WorldModeSchema } from "@/lib/world-mode";
+import { buildWorldIconTheme } from "@/lib/icons/theme";
 
 /**
  * POST /api/worlds —— 创世：一句话 → 世界卡组草稿
@@ -96,6 +97,7 @@ export async function POST(request: Request) {
       fusionAxiom: deck.fusionAxiom
         ? (deck.fusionAxiom as unknown as Prisma.InputJsonValue)
         : undefined,
+      iconTheme: buildWorldIconTheme(deck) as unknown as Prisma.InputJsonValue,
       lorebookEntries: {
         create: parsedEntries.map((e) => ({
           keys: e.keys,

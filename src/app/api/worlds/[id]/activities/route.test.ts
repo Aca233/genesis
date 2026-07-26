@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({
   timelineFindUnique: vi.fn(),
   eventFindMany: vi.fn(),
   activityFindMany: vi.fn(),
+  chronicleFindMany: vi.fn(),
+  entityFindMany: vi.fn(),
+  godFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -13,6 +16,9 @@ vi.mock("@/lib/db", () => ({
     timeline: { findUnique: mocks.timelineFindUnique },
     worldEvent: { findMany: mocks.eventFindMany },
     worldActivity: { findMany: mocks.activityFindMany },
+    chronicleEntry: { findMany: mocks.chronicleFindMany },
+    entity: { findMany: mocks.entityFindMany },
+    god: { findMany: mocks.godFindMany },
   },
 }));
 
@@ -81,6 +87,12 @@ describe("GET /api/worlds/[id]/activities", () => {
       subjectIds: ["entity-secret"],
       createdAt: new Date("2026-07-23T02:00:00.000Z"),
     })]);
+    mocks.chronicleFindMany.mockResolvedValue([]);
+    mocks.entityFindMany.mockResolvedValue([{
+      id: "entity-1",
+      name: "霜河军团",
+    }]);
+    mocks.godFindMany.mockResolvedValue([]);
   });
 
   it("returns focused event, important events and projected recent activity", async () => {
@@ -90,6 +102,12 @@ describe("GET /api/worlds/[id]/activities", () => {
     expect(json.focusedEvent.id).toBe("event-1");
     expect(json.importantEvents).toHaveLength(1);
     expect(json.recentActivities).toHaveLength(1);
+    expect(json.recentActivities[0].subjects).toEqual([{
+      id: "entity-1",
+      name: "霜河军团",
+      entityId: "entity-1",
+      godId: null,
+    }]);
     expect(JSON.stringify(json)).not.toContain("密谋者毒杀了信使");
     expect(mocks.activityFindMany).toHaveBeenCalledWith(expect.objectContaining({
       take: 2,
@@ -195,5 +213,38 @@ describe("GET /api/worlds/[id]/activities", () => {
         event: { select: { visibility: true } },
       },
     }));
+  });
+
+  it("旧存档没有动态记录时使用公开编年史补出近期动态", async () => {
+    mocks.activityFindMany.mockResolvedValue([]);
+    mocks.eventFindMany.mockResolvedValue([]);
+    mocks.chronicleFindMany.mockResolvedValue([{
+      id: "chronicle-1",
+      yearLabel: "星火纪元七年",
+      text: "北港守军封锁盐路，商队被迫改道。",
+      entityIds: ["entity-1"],
+      godIds: ["god-1"],
+      createdAt: new Date("2026-07-23T03:00:00.000Z"),
+    }]);
+    mocks.godFindMany.mockResolvedValue([{
+      id: "god-1",
+      name: "潮神",
+      codexEntityId: null,
+    }]);
+
+    const response = await GET(request(), context);
+    const json = await response.json();
+
+    expect(json.recentActivities).toEqual([expect.objectContaining({
+      id: "chronicle:chronicle-1",
+      recordType: "activity",
+      text: "北港守军封锁盐路，商队被迫改道。",
+      subjectIds: ["entity-1", "god-1"],
+      subjects: [
+        { id: "entity-1", name: "霜河军团", entityId: "entity-1", godId: null },
+        { id: "god-1", name: "潮神", entityId: null, godId: "god-1" },
+      ],
+      eraLabel: "星火纪元七年",
+    })]);
   });
 });

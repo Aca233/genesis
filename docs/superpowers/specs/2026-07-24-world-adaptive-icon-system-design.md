@@ -2,7 +2,7 @@
 
 **日期：** 2026-07-24
 
-**状态：** 已完成产品评审，等待 World Director Runtime 完成后制定实施计划
+**状态：** 实施中；当前基于 settlement／reality 事务落地兼容垂直切片
 
 **目标项目：** 创世
 **架构名称：** World-Adaptive Icon System（世界自适应图标系统）
@@ -32,7 +32,7 @@
 
 1. 第一期完整覆盖叙事层，包括导航、实体纹章、神明、能力、事件、素材库、创世卡和叙事状态。
 2. 关闭、返回、删除、发送、编辑、重试、设置等通用操作图标不随世界变化。
-3. 旧世界和 v1–v3 旧存档统一使用默认主题，不自动调用 LLM，也不后台回填。
+3. 不保留旧世界和 v1–v3 存档兼容；导入端只接受 v4，旧版本在任何写事务开始前明确拒绝。
 4. 新世界的初次图标主题并入现有创世卡组生成响应，不增加独立模型调用。
 5. 每个世界只允许一个主图标家族和一个纹章图标家族。
 6. 玩家修改创世卡后不自动重算主题；提供手动“重铸图标主题”。
@@ -46,19 +46,20 @@
 
 ---
 
-## 3. 与 World Director Runtime 的依赖
+## 3. 与 World Director Runtime 的边界
 
-### 3.1 实施门槛
+### 3.1 当前接入基线
 
-本系统不得与 World Director Runtime 并行修改正式代码。正式实施必须基于 World Director Phase 6 完成并合并后的主线。
+仓库当前没有可接入的 World Director Runtime Phase 6、`DraftChangeSet` 或 `ProjectionPlan` 实现，因此它不再作为图标系统的实施前置条件。当前版本接入现有的 settlement、能力抽取、世界动态结算和 reality 事务，并保持未来迁移所需的边界清晰。
 
-原因是两个系统会同时修改：
+当前共用改动面包括：
 
 ```text
 prisma/schema.prisma
 prisma/migrations/*
-src/lib/world-director/draft/schema.ts
-src/lib/world-director/projections/*
+src/lib/settle/pipeline.ts
+src/lib/abilities/extraction.ts
+src/lib/world-activity/settlement.ts
 src/lib/reality/clone.ts
 src/app/play/[worldId]/page.tsx
 src/components/play/types.ts
@@ -69,31 +70,28 @@ src/components/play/ChroniclePanel.tsx
 src/components/play/WorldActivityPanel.tsx
 ```
 
-在 Agent 重构完成前实施，会把图标逻辑接入即将移除的 META、settlement 和旧聊天 SSE 写路径，并产生大量 schema、事务、现实克隆和前端文件冲突。
+图标分配必须作为非事实附属数据与对象创建处于同一事务；分配失败不得改变世界事实提交语义。未来若 World Director Runtime 落地，应迁移同一契约，而不是保留两套分配路径。
 
-### 3.2 Agent 架构中的接入点
+### 3.2 当前接入点与未来迁移契约
 
-新对象的图标语义必须进入 World Director 变化代数，而不是旧抽取器：
+当前结构化抽取结果携带 `iconConcept`，由服务端验证、确定性解析并在相同事务写入：
 
 ```text
-World Director DraftChangeSet
-→ entity.create / god.create / ability.create / event.record
-→ ActivityDraft / ChronicleDraft
+Extractor / Settlement structured output
+→ entity / god / ability / event create
 → iconConcept
-→ Kernel 验证目录令牌
-→ ProjectionPlan 确定性解析
+→ schema 拒绝 Iconify ID、SVG 和 path payload
+→ IconResolver 确定性解析
 → 与本轮世界变化在同一事务写入 IconAssignment
 ```
 
-相关字段至少覆盖：
+当前字段至少覆盖：
 
 ```text
-entity.create.iconConcept
-god.create.iconConcept
-ability.create.iconConcept
-event.record.iconConcept
-ActivityDraft.iconConcept
-ChronicleDraft.iconConcept
+newEntities[].iconConcept
+newGods[].iconConcept
+abilityChanges[].iconConcept
+world activity create／derive event iconConcept
 ```
 
 ### 3.3 与世界事实的边界
@@ -240,7 +238,7 @@ type WorldIconTheme = {
 
 - `WorldIconTheme` 属于 `World`，所有现实共享。
 - 新世界保存生成主题。
-- 旧世界在读取时使用代码内置默认主题，不写回数据库。
+- 旧世界不属于第一版支持边界，不要求读取兼容、后台回填或模型迁移。
 - 世界级玩家覆盖进入 `lockedAssignments`。
 - 主题重铸保留全部世界级和时间线级玩家锁定项。
 
@@ -689,8 +687,8 @@ playerLocked = true
 
 导入规则：
 
-- v1–v3：使用默认主题，不生成主题；
-- v4：校验家族、目录版本和令牌；
+- 只接受 v4；v1–v3 和未知版本在任何数据库写事务前返回 400；
+- v4 校验世界图、家族、目录版本和令牌；
 - 未知家族回退到固定默认值；
 - 未知令牌逐项回退；
 - 非法单项覆盖被丢弃并进入导入摘要；
@@ -749,7 +747,7 @@ type AttributionRecord = {
 - 现实分叉复制分配并按对象映射重写 ID；
 - 源现实和子现实的单项覆盖互不污染；
 - 删除现实级联删除分配；
-- v1–v3 导入使用默认主题；
+- v1–v3 导入明确拒绝且不启动写事务；
 - v4 未知令牌不阻断导入；
 - 导出只汇总实际使用的 CC BY 图标。
 
@@ -810,14 +808,13 @@ type AttributionRecord = {
 
 第一版完成必须同时满足：
 
-- World Director Runtime Phase 6 已完成并合并；
 - 约 500 枚精选目录落地并通过完整性测试；
 - 新世界生成完整 `WorldIconTheme`；
-- 旧世界使用默认主题且不自动调用模型；
+- 导入只接受 v4，v1–v3 不进入写事务；
 - 已确认的全部叙事入口支持动态图标；
 - 操作层统一固定为 Phosphor；
-- World Director 创建和投影支持 `iconConcept`；
-- 图标分配与 Agent 世界变化正确集成；
+- 当前结构化创建／结算入口支持严格 `iconConcept`；
+- 图标分配与对象创建、世界动态和现实变化正确集成；
 - 世界主题重铸可用；
 - 单项选择、锁定和恢复可用；
 - 现实分叉正确继承时间线覆盖；
@@ -829,17 +826,17 @@ type AttributionRecord = {
 
 ## 19. 推荐实施顺序
 
-World Director Phase 6 合并后，从新主线创建独立图标系统分支并按以下顺序实施：
+按以下顺序实施并验证：
 
 1. 目录契约、精选数据和完整性测试；
 2. `WorldIconTheme`、`IconAssignment` 和迁移；
 3. `IconResolver`、本地 SVG 加载和缓存；
 4. 固定 `OperationIcon` 和动态 `WorldIcon`；
 5. 创世主题生成、校验、预览和重铸；
-6. 扩展 World Director `DraftChangeSet` 的 `iconConcept`；
-7. 接入 ProjectionPlan、原子提交和现实克隆；
+6. 扩展当前结构化抽取和结算 schema 的 `iconConcept`；
+7. 接入 settlement／reality 原子提交和现实克隆；
 8. 改造实体纹章、导航、能力、事件、素材和创世卡界面；
 9. 单项选择器、锁定和恢复；
 10. v4 导入导出、许可清单和视觉验收。
 
-在实施计划编写前，必须重新读取合并后的 World Director schema、ChangeSet、Projection、现实修订和前端 Run API，不能以本设计编写时的旧文件结构作为实施依据。
+未来引入 World Director Runtime 时，必须以相同 `iconConcept`、`IconAssignment` 和原子提交契约迁移当前接入点，并删除旧路径，不能并存两套真源。

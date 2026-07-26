@@ -43,6 +43,7 @@ import {
 } from "@/components/genesis/embark-flow";
 import { streamNarration } from "@/components/play/sse-client";
 import { PlayBackground } from "@/components/play/PlayBackground";
+import { IconThemeControl, type IconThemeSummary } from "@/components/icons/IconThemeControl";
 
 /**
  * 卡片编辑器（M1.4）+ 创世开局演出（M1.5）
@@ -71,6 +72,8 @@ export default function GenesisEditorPage({
   const [genesisInput, setGenesisInput] = useState("");
   const [lockedPaths, setLockedPaths] = useState<string[]>([]);
   const [revision, setRevision] = useState<string | null>(null);
+  const [iconTheme, setIconTheme] = useState<IconThemeSummary | null>(null);
+  const [iconThemeRevision, setIconThemeRevision] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // ── 编辑状态 ──
@@ -115,6 +118,8 @@ export default function GenesisEditorPage({
         setGenesisInput(world.genesisInput ?? "");
         setLockedPaths(world.lockedPaths ?? []);
         setRevision(parseWorldRevision(world.updatedAt));
+        setIconTheme(world.iconTheme);
+        setIconThemeRevision(world.iconThemeRevision ?? 0);
       })
       .catch((err) => !cancelled && setLoadError(String(err instanceof Error ? err.message : err)));
     return () => {
@@ -341,6 +346,16 @@ export default function GenesisEditorPage({
         </p>
       </header>
 
+      {iconTheme && (
+        <div className="mb-8">
+          <IconThemeControl
+            worldId={worldId}
+            initialTheme={iconTheme}
+            initialRevision={iconThemeRevision}
+          />
+        </div>
+      )}
+
       {/* ── 宇宙论 ── */}
       <GroupHeader title="宇宙论" cardKey="cosmology" rerolling={rerolling === "cosmology"} disabled={busy} onReroll={reroll} />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -402,25 +417,27 @@ export default function GenesisEditorPage({
           {deck.mode === "pantheon"
             ? deck.majorGods.map((god, index) => (
                 <DeckCard
-                  key={`${index}-${god.name}`}
+                  key={god.ref}
                   title={god.name}
                   subtitle={`${RANK_LABELS[god.rank]} · ${god.domains.join("、")} · 关系：${RELATION_LABELS[god.initialRelationToPlayer.label]}`}
                   lines={[clip(god.persona)]}
                   lockedCount={countLockedUnder(lockedPaths, `majorGods.${index}`)}
                   sealed={!revealed.has(`majorGods.${index}`)}
                   rerolling={rerolling === "majorGods"}
+                  openIndex={index}
                   onOpen={() => setOpenCard({ kind: "majorGod", index })}
                 />
               ))
             : deck.majorGods.map((god, index) => (
                 <DeckCard
-                  key={`${index}-${god.name}`}
+                  key={god.ref}
                   title={god.name}
                   subtitle={`${RANK_LABELS[god.rank]} · ${god.domains.join("、")} · 神际关系：${god.relations.length} 条`}
                   lines={[clip(god.persona)]}
                   lockedCount={countLockedUnder(lockedPaths, `majorGods.${index}`)}
                   sealed={!revealed.has(`majorGods.${index}`)}
                   rerolling={rerolling === "majorGods"}
+                  openIndex={index}
                   onOpen={() => setOpenCard({ kind: "majorGod", index })}
                 />
               ))}
@@ -457,12 +474,13 @@ export default function GenesisEditorPage({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {deck.factions.map((f, i) => (
           <DeckCard
-            key={`${i}-${f.name}`}
+            key={f.ref}
             title={f.name}
             subtitle={f.kind}
             lines={[clip(f.overview), clip(`信仰:${f.faith}`)]}
             lockedCount={countLockedUnder(lockedPaths, `factions.${i}`)}
             rerolling={rerolling === "factions"}
+            openIndex={i}
             onOpen={() => setOpenCard({ kind: "faction", index: i })}
           />
         ))}
@@ -481,12 +499,13 @@ export default function GenesisEditorPage({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {deck.races.map((r, i) => (
           <DeckCard
-            key={`${i}-${r.name}`}
+            key={r.ref}
             title={r.name}
             subtitle={`寿命:${r.lifespan}`}
             lines={[clip(r.traits), clip(`渊源:${r.divineTies}`)]}
             lockedCount={countLockedUnder(lockedPaths, `races.${i}`)}
             rerolling={rerolling === "races"}
+            openIndex={i}
             onOpen={() => setOpenCard({ kind: "race", index: i })}
           />
         ))}
@@ -514,6 +533,7 @@ export default function GenesisEditorPage({
               lines={[clip(`目标：${character.goals}`), clip(`技能：${skillCount} 项`)]}
               lockedCount={countLockedUnder(lockedPaths, `majorCharacters.${index}`)}
               rerolling={rerolling === "majorCharacters"}
+              openIndex={index}
               onOpen={() => setOpenCard({ kind: "majorCharacter", index })}
             />
           );
@@ -533,12 +553,13 @@ export default function GenesisEditorPage({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {deck.places.map((p, i) => (
           <DeckCard
-            key={`${i}-${p.name}`}
+            key={p.ref}
             title={p.name}
             subtitle={`${p.kind} · ${clip(p.allegiance, 20)}`}
             lines={[clip(p.overview)]}
             lockedCount={countLockedUnder(lockedPaths, `places.${i}`)}
             rerolling={rerolling === "places"}
+            openIndex={i}
             onOpen={() => setOpenCard({ kind: "place", index: i })}
           />
         ))}

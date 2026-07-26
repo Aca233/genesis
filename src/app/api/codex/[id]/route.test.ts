@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   entityFindUnique: vi.fn(),
   entityRelationFindMany: vi.fn(),
   chronicleFindMany: vi.fn(),
+  iconAssignmentFindUnique: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -13,6 +14,7 @@ vi.mock("@/lib/db", () => ({
     },
     entityRelation: { findMany: mocks.entityRelationFindMany },
     chronicleEntry: { findMany: mocks.chronicleFindMany },
+    iconAssignment: { findUnique: mocks.iconAssignmentFindUnique },
   },
 }));
 
@@ -70,7 +72,7 @@ function entity(mode: "creator" | "pantheon", viewpoint: "omniscient" | "limited
     memberships: [],
     timeline: {
       observerState: observer(viewpoint),
-      world: { mode },
+      world: { id: "world-1", mode, iconTheme: null },
     },
   };
 }
@@ -80,6 +82,7 @@ describe("GET /api/codex/[id] projections", () => {
     vi.clearAllMocks();
     mocks.entityFindUnique.mockResolvedValue(entity("creator", "omniscient"));
     mocks.entityRelationFindMany.mockResolvedValue([]);
+    mocks.iconAssignmentFindUnique.mockResolvedValue(null);
     mocks.chronicleFindMany.mockResolvedValue([{
       id: "chronicle-hidden",
       chapterIndex: 2,

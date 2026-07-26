@@ -1,5 +1,7 @@
 "use client";
 
+import type { SvgIconData } from "@/components/icons/WorldIcon";
+
 /**
  * 程序纹章：蜡封印章风格 SVG（docs/01 §9.2）。
  * 纯确定性——同 seed 同图；imageUrl 有则渲染圆形裁切图。
@@ -128,12 +130,14 @@ export function Emblem({
   type,
   size = 40,
   imageUrl,
+  motif,
   className,
 }: {
   seed: string;
   type: string;
   size?: number;
   imageUrl?: string | null;
+  motif?: SvgIconData | null;
   className?: string;
 }) {
   if (imageUrl) {
@@ -150,6 +154,20 @@ export function Emblem({
     );
   }
 
+  if (size < 30 && motif) {
+    return (
+      <svg
+        viewBox={`0 0 ${motif.width} ${motif.height}`}
+        width={size}
+        height={size}
+        className={className}
+        style={{ color: "var(--ink-soft)" }}
+        aria-hidden
+        dangerouslySetInnerHTML={{ __html: motif.body }}
+      />
+    );
+  }
+
   const rand = rng(seed + type);
   const rot = rand() * 360;
 
@@ -159,6 +177,7 @@ export function Emblem({
       width={size}
       height={size}
       className={className}
+      style={{ color: "var(--ink-soft)" }}
       aria-hidden
     >
       {/* 蜡封外圈 */}
@@ -173,7 +192,16 @@ export function Emblem({
         strokeDasharray={`${2 + rand() * 3} ${2 + rand() * 2}`}
         transform={`rotate(${rot.toFixed(0)} 24 24)`}
       />
-      {innerMotif(type, rand)}
+      {motif ? (
+        <svg
+          x="13"
+          y="13"
+          width="22"
+          height="22"
+          viewBox={`0 0 ${motif.width} ${motif.height}`}
+          dangerouslySetInnerHTML={{ __html: motif.body }}
+        />
+      ) : innerMotif(type, rand)}
     </svg>
   );
 }

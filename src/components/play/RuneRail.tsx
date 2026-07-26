@@ -3,6 +3,14 @@
 import Link from "next/link";
 import type { DrawerTab, WorldInfo } from "./types";
 import { drawerTabsForMode } from "./reality-tree-state";
+import { OperationIcon } from "@/components/icons/OperationIcon";
+import { WorldIcon, type SvgIconData } from "@/components/icons/WorldIcon";
+
+const FALLBACK_NAV_ICON: SvgIconData = {
+  body: "<circle cx=\"12\" cy=\"12\" r=\"7\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/><path d=\"M12 5v14M5 12h14\" stroke=\"currentColor\" stroke-width=\"1.5\"/>",
+  width: 24,
+  height: 24,
+};
 
 /**
  * 右缘符文列：五枚抽屉符文 + 香炉（Link → /settings）。
@@ -13,11 +21,13 @@ export function RuneRail({
   mode = "pantheon",
   active,
   unreadActivityCount = 0,
+  icons = {},
   onOpen,
 }: {
   mode?: WorldInfo["mode"];
   active: DrawerTab | null;
   unreadActivityCount?: number;
+  icons?: Partial<Record<DrawerTab, SvgIconData>>;
   onOpen: (tab: DrawerTab) => void;
 }) {
   const runes = drawerTabsForMode(mode);
@@ -36,8 +46,9 @@ export function RuneRail({
           }`}
           title={r.label}
           aria-label={r.label}
+          aria-current={active === r.tab ? "page" : undefined}
         >
-          <span>{r.glyph}</span>
+          <WorldIcon icon={icons[r.tab] ?? FALLBACK_NAV_ICON} />
           {r.tab === "activity" && unreadActivityCount > 0 ? (
             <span
               className="absolute right-0 top-0 min-w-3 rounded-full bg-gilt px-0.5 text-center text-[8px] leading-3 text-paper"
@@ -54,12 +65,12 @@ export function RuneRail({
       <Link
         href="/settings"
         className="group relative flex h-10 w-10 items-center justify-center text-lg text-ink-soft transition hover:text-gilt"
-        title="香炉 · 设置"
-        aria-label="香炉 · 设置"
+        title="设置"
+        aria-label="打开设置"
       >
-        <span>⚱</span>
+        <OperationIcon name="settings" size={20} />
         <span className="pointer-events-none absolute right-full mr-1 hidden whitespace-nowrap rounded border border-line bg-paper-raised px-1.5 py-0.5 text-xs text-ink-soft shadow-sm group-hover:block max-sm:group-hover:hidden">
-          香炉
+          设置
         </span>
       </Link>
     </nav>

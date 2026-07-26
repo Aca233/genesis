@@ -44,6 +44,7 @@ const data: WorldActivityResponse = {
       actorId: "entity-1",
       targetIds: [],
       subjectIds: ["entity-1"],
+      subjects: [{ id: "entity-1", name: "霜河军团", entityId: "entity-1", godId: null }],
       eraLabel: "星火纪元",
       timeLabel: "第七年·霜月",
       createdAt: "2026-07-23T03:00:00.000Z",
@@ -81,12 +82,36 @@ describe("WorldActivityPanelView", () => {
     expect(html).toContain("近期动态");
     expect(html).toContain("烬海 · 星火纪元 · 第七年·霜月");
     expect(html).toContain('data-entity-id="entity-1"');
+    expect(html).toContain("霜河军团");
+    expect(html).not.toContain("查看对象");
     expect(html).toContain('data-event-id="event-1"');
     expect(html).toContain('data-focus-event-id="event-1"');
     expect(html).toContain("取消追踪");
     expect(html).toContain("世界内尚未知晓");
     expect(html).not.toContain("/api/chat");
     expect(html).not.toContain("章节");
+  });
+
+  it("神明关联项可直接打开诸神详情", () => {
+    const onOpenGod = vi.fn();
+    const html = renderToStaticMarkup(createElement(WorldActivityPanelView, {
+      worldName: "烬海",
+      data: {
+        ...data,
+        recentActivities: [{
+          ...data.recentActivities[0],
+          subjectIds: ["god-1"],
+          subjects: [{ id: "god-1", name: "龙神 奥尔斯帝德", entityId: null, godId: "god-1" }],
+        }],
+      },
+      selectedEventId: null,
+      onOpenEntity: vi.fn(),
+      onOpenGod,
+      onSelectEvent: vi.fn(),
+    }));
+
+    expect(html).toContain('data-god-id="god-1"');
+    expect(html).toContain("龙神 奥尔斯帝德");
   });
 
   it("shows locally selected event details without requesting narration", () => {

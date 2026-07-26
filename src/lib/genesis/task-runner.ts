@@ -16,6 +16,7 @@ import { materialConstraintsPrompt } from "@/lib/materials/prompt";
 import { deriveStreamingStage, furthestStage, mergeCompletedKeys } from "./stages";
 import type { GenesisStageId, GenesisTaskStatus } from "./stages";
 import type { GenesisTopLevelKey } from "./json-progress";
+import { buildWorldIconTheme } from "@/lib/icons/theme";
 import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
 
 const USER_ID = "local";
@@ -337,6 +338,7 @@ export async function persistWorld(
         fusionAxiom: deck.fusionAxiom
           ? (deck.fusionAxiom as unknown as Prisma.InputJsonValue)
           : undefined,
+        iconTheme: buildWorldIconTheme(deck) as unknown as Prisma.InputJsonValue,
         lorebookEntries: {
           create: parsedEntries.map((entry) => ({
             keys: entry.keys,

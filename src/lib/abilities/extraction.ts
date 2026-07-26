@@ -63,6 +63,11 @@ export type RejectedAbilityExtraction = {
 export type AbilityExtractionResult = {
   applied: AppliedAbilityChange[];
   rejected: RejectedAbilityExtraction[];
+  createdAbilities: Array<{
+    inputIndex: number;
+    abilityId: string;
+    iconConcept?: string;
+  }>;
 };
 
 function normalizedEvidence(value: string): string {
@@ -642,6 +647,7 @@ export async function applyAbilityExtractionInTransaction(
   const messages = new Map(input.messages.map((message) => [message.index, message]));
   const applied: AppliedAbilityChange[] = [];
   const rejected: RejectedAbilityExtraction[] = [];
+  const createdAbilities: AbilityExtractionResult["createdAbilities"] = [];
 
   for (const [index, rawChange] of input.changes.entries()) {
     const parsed = AbilityExtractionChangeSchema.safeParse(rawChange);
@@ -701,6 +707,15 @@ export async function applyAbilityExtractionInTransaction(
         },
       });
       applied.push(result);
+      if (resolved.created) {
+        createdAbilities.push({
+          inputIndex: index,
+          abilityId: ability.id,
+          ...(effectiveChange.iconConcept
+            ? { iconConcept: effectiveChange.iconConcept }
+            : {}),
+        });
+      }
     } catch (error) {
       if (error instanceof AbilityValidationError || error instanceof AbilityOptimisticConflictError || error instanceof z.ZodError) {
         if (createdAbilityId !== null) await tx.ability.delete({ where: { id: createdAbilityId } });
@@ -710,7 +725,7 @@ export async function applyAbilityExtractionInTransaction(
       throw error;
     }
   }
-  return { applied, rejected };
+  return { applied, rejected, createdAbilities };
 }
 
 /** Public boundary retaining per-call transaction semantics for non-pipeline callers. */

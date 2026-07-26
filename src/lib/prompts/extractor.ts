@@ -41,6 +41,15 @@ export const EntityRelationChangeSchema = z.object({
   note: z.string().trim().min(1).max(1000),
 }).strict();
 
+export const IconConceptSchema = z.string()
+  .trim()
+  .min(1)
+  .max(80)
+  .refine(
+    (value) => !value.includes(":") && !/<\/?(?:svg|path)\b/iu.test(value),
+    "iconConcept 必须是语义令牌或简短自然语言，不得包含 Iconify ID 或 SVG",
+  );
+
 export const AbilityExtractionPatchSchema = z.object({
   mastery: AbilityMasterySchema.optional(),
   state: AbilityStateSchema.optional(),
@@ -65,6 +74,7 @@ export const AbilityExtractionChangeSchema = z.object({
   lockedFields: z.array(z.string().min(1)).optional(),
   visibility: AbilityVisibilitySchema.optional(),
   rumorText: z.string().nullable().optional(),
+  iconConcept: IconConceptSchema.optional(),
   type: AbilityEventTypeSchema,
   patch: AbilityExtractionPatchSchema,
   evidenceMessageIndex: z.number().int().nonnegative(),
@@ -112,6 +122,7 @@ export const ExtractionBaseSchema = z.object({
         isChosen: z.boolean().describe("是否玩家神选者（获赐印记）"),
         isMajorCharacter: z.boolean().optional().default(false).describe("仅人物且正文明确成为主线关键人物时为 true"),
         raceName: z.string().trim().min(1).optional().describe("新人物的主种族正名或别名；仅 character 可填"),
+        iconConcept: IconConceptSchema.optional().describe("优先使用目录语义令牌，也可使用简短中文视觉母题"),
       }),
     )
     .describe("值得入册的新实体——路人不入册：有名字且已影响或将影响剧情者才入"),
@@ -122,6 +133,7 @@ export const ExtractionBaseSchema = z.object({
     rank: z.enum(["fallen", "ember", "slumbering", "nascent", "ascended", "exalted", "sovereign"]),
     domains: z.array(z.string()),
     faithScope: z.string().nullish(),
+    iconConcept: IconConceptSchema.optional().describe("优先使用目录语义令牌，也可使用简短中文视觉母题"),
   })).optional().default([]).describe("本章首次明确出现、值得入册的新神；不得创建玩家神"),
   entityUpdates: z
     .array(
@@ -249,6 +261,7 @@ ${Object.entries(SECTION_TEMPLATES)
 - CHOSEN marks: if the player god granted a mark/blessing formally binding a mortal, set isChosen/becameChosen.
 - MAJOR CHARACTERS: set newEntities.isMajorCharacter only for a new character explicitly established as plot-critical. For an existing character, emit majorCharacterPromotions with verbatim message evidence; do not promote merely for appearing.
 - NEW OWNERS: a new character may set raceName only to an exact known race name/alias or a race created in the same extraction. Put newly introduced gods in newGods (never a player god). This lets an explicitly demonstrated new personal/divine/racial ability belong to its new owner in the same chapter.
+- ICON CONCEPTS: for each new entity, new god, or genuinely new ability, emit iconConcept when a concise visual motif is supported. Prefer a supplied semantic catalog token such as time.reverse; otherwise use a short natural-language concept. Never output an Iconify ID, SVG, XML, HTML, or path data.
 - Mortal lifespans: if the chapter spans years (era/epoch scale), reflect aging/succession in lifespan sections.
 - Rank changes require in-chapter justification (a god diminished by mass apostasy, exalted by a miracle witnessed by nations...).
 - scenePresent: true only for entities physically/narratively present at the chapter's end scene.

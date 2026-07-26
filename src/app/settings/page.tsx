@@ -346,7 +346,7 @@ export default function SettingsPage() {
           className="text-3xl text-ink"
           style={{ fontFamily: "var(--font-display)" }}
         >
-          ⚱ 香炉 · 设置
+          设置
         </h1>
         <p className="mt-2 text-sm text-ink-faint">
           你的 Key 以 AES-256-GCM 加密存于本地数据库，仅在请求时解密转发。
@@ -394,6 +394,20 @@ export default function SettingsPage() {
         )}
 
         <PromptCacheStats />
+
+        <section className="rounded-lg border border-line bg-paper-raised p-5" aria-labelledby="icon-license-title">
+          <h2 id="icon-license-title" className="text-lg text-ink" style={{ fontFamily: "var(--font-display)" }}>
+            图标与开源许可
+          </h2>
+          <ul className="mt-3 grid gap-2 text-sm text-ink-soft">
+            <li>Phosphor Icons — MIT</li>
+            <li>Tabler Icons — MIT</li>
+            <li>IconPark Outline — Apache 2.0</li>
+            <li>
+              Game Icons — <a className="text-gilt hover:underline" href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noreferrer">CC BY 3.0</a>；具体作者与来源按世界实际使用图标写入导出存档的 <code>iconCreditsMarkdown</code>。
+            </li>
+          </ul>
+        </section>
 
         <div className="flex items-center gap-4">
           <button

@@ -1,6 +1,7 @@
-import { createElement } from "react";
+import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import * as CodexModule from "./CodexPanel";
 import { CharacterRelations } from "./CodexPanel";
 import type { CharacterRelationsView } from "./types";
 
@@ -67,5 +68,39 @@ describe("CharacterRelations", () => {
 
     expect(html).toContain("人物关系");
     expect(html).toContain("尚无载入册中的人物关系");
+  });
+});
+
+describe("EntityChronicle", () => {
+  it("人物历史用世界时间显示揭示时刻，不暴露内部章节索引", () => {
+    const EntityChronicle = (CodexModule as unknown as {
+      EntityChronicle?: ComponentType<{ chronicle: Array<{
+        id: string;
+        chapterIndex: number;
+        yearLabel: string;
+        text: string;
+        revealedAtChapter: number | null;
+        revealedAtTimeLabel: string | null;
+        worldVisible: boolean;
+      }> }>;
+    }).EntityChronicle;
+    expect(EntityChronicle).toBeTypeOf("function");
+
+    const html = renderToStaticMarkup(createElement(EntityChronicle!, {
+      chronicle: [{
+        id: "chronicle-1",
+        chapterIndex: 1,
+        yearLabel: "甲龙历四二五年",
+        text: "鲁迪习得九六零新式穿甲弹。",
+        revealedAtChapter: 2,
+        revealedAtTimeLabel: "甲龙历四二六年·霜月",
+        worldVisible: true,
+      }],
+    }));
+
+    expect(html).toContain("甲龙历四二五年");
+    expect(html).toContain("甲龙历四二六年·霜月方揭");
+    expect(html).not.toContain("第2章");
+    expect(html).not.toContain("章节");
   });
 });

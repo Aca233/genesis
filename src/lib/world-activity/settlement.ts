@@ -2,6 +2,10 @@ import type {
   SettlementEventMutation,
   SettlementWorldActivity,
 } from "@/lib/prompts/settlement";
+import {
+  assignAutomaticIcon,
+  type IconAssignmentTx,
+} from "@/lib/icons/assignment";
 
 type IdentifierSet = readonly string[] | ReadonlySet<string>;
 
@@ -56,7 +60,7 @@ type TimelineRow = {
   entities: { id: string }[];
 };
 
-export type SettlementActivityTx = {
+export type SettlementActivityTx = IconAssignmentTx & {
   timeline: {
     findUnique(args: {
       where: { id: string };
@@ -116,10 +120,16 @@ export type SettlementActivityTx = {
 };
 
 export type ApplySettlementActivityInput = {
+  worldId?: string;
   timelineId: string;
   chapterId: string;
   sourceMessageId: string;
   worldActivity: SettlementWorldActivity | undefined;
+  chronicleEntries?: Array<{
+    yearLabel: string;
+    text: string;
+    subjectIds: string[];
+  }>;
 };
 
 function asSet(ids: IdentifierSet): ReadonlySet<string> {
@@ -266,6 +276,30 @@ export async function applySettlementActivity(
     ...timeline.gods.map((item) => item.id),
     ...timeline.entities.map((item) => item.id),
   ];
+  const participantIdSet = new Set(participantIds);
+  for (const [index, entry] of (input.chronicleEntries ?? []).entries()) {
+    if (!allKnown(entry.subjectIds, participantIdSet)) continue;
+    const id = `settlement:${input.chapterId}:chronicle:${index}`;
+    if (await tx.worldActivity.findUnique({ where: { id } })) continue;
+    const observer = record(timeline.observerState);
+    await tx.worldActivity.create({
+      data: {
+        id,
+        timelineId: input.timelineId,
+        eventId: null,
+        recordType: "activity",
+        kind: "discovery",
+        text: entry.text,
+        visibility: "public",
+        actorId: null,
+        targetIds: [],
+        subjectIds: entry.subjectIds,
+        sourceMessageId: input.sourceMessageId,
+        eraLabel: entry.yearLabel,
+        timeLabel: label(observer.timeLabel, "此刻"),
+      },
+    });
+  }
   const normalized = normalizeSettlementActivity(requested, {
     activityIds: activities.map((item) => item.id),
     eventIds: events.map((item) => item.id),
@@ -338,6 +372,13 @@ export async function applySettlementActivity(
           parentEventId: mutation.operation === "derive" ? mutation.parentEventId : null,
           resolvedAt: null,
         },
+      });
+      await assignAutomaticIcon(tx, {
+        worldId: input.worldId ?? input.timelineId,
+        timelineId: input.timelineId,
+        subjectType: "event",
+        subjectId: id,
+        iconConcept: mutation.iconConcept,
       });
       await createProgressOnce(
         tx,

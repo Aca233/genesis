@@ -17,6 +17,7 @@ const nodes: RealityNodeView[] = [
     branchName: "原初现实",
     branchSummary: null,
     forkChapter: null,
+    forkTimeLabel: null,
     rewriteId: null,
     rewriteDecree: null,
     childCount: 2,
@@ -29,6 +30,7 @@ const nodes: RealityNodeView[] = [
     branchName: "赤月现实",
     branchSummary: "赤月升起",
     forkChapter: 2,
+    forkTimeLabel: "甲龙历四二六年",
     rewriteId: "rewrite-b",
     rewriteDecree: "令赤月永悬",
     childCount: 0,
@@ -41,6 +43,7 @@ const nodes: RealityNodeView[] = [
     branchName: "倒悬星河",
     branchSummary: "群星倒悬",
     forkChapter: 1,
+    forkTimeLabel: "甲龙历四二五年",
     rewriteId: "rewrite-a",
     rewriteDecree: "令群星倒悬",
     childCount: 1,
@@ -53,6 +56,7 @@ const nodes: RealityNodeView[] = [
     branchName: "无王之世",
     branchSummary: null,
     forkChapter: 3,
+    forkTimeLabel: "甲龙历四二七年",
     rewriteId: "rewrite-leaf",
     rewriteDecree: "令王座空悬",
     childCount: 0,
@@ -80,11 +84,12 @@ describe("reality tree state", () => {
     expect(isRealityNavigationDisabled({ chat: false, settlement: false, rewrite: false })).toBe(false);
   });
 
-  it("uses creator tabs without 本尊神格 while keeping pantheon tabs unchanged", () => {
+  it("uses a creator-wide 诸神 entry instead of 本尊神格 while keeping pantheon tabs unchanged", () => {
     expect(creatorDrawerTabs.map((tab) => [tab.tab, tab.label])).toEqual([
       ["activity", "动态"],
       ["starmap", "星图"],
       ["chronicle", "编年史"],
+      ["god", "诸神"],
       ["creator", "天外视界"],
       ["realities", "现实树"],
       ["lore", "设定集"],
@@ -162,6 +167,9 @@ it("renders an accessible reality tree with current reality and busy-disabled na
   expect(html).toContain('aria-expanded="true"');
   expect(html).toContain("现实树");
   expect(html).toContain("叙事、结算或改写进行中时不可切换现实");
+  expect(html).toContain("分叉于 甲龙历四二五年");
+  expect(html).not.toContain("分叉于第");
+  expect(html).not.toContain("章");
 });
 
 it("RuneRail exposes the exact creator labels and the unchanged pantheon labels", async () => {
@@ -175,7 +183,7 @@ it("RuneRail exposes the exact creator labels and the unchanged pantheon labels"
     onOpen: () => undefined,
   }));
   const pantheon = renderToStaticMarkup(createElement(RuneRail, { mode: "pantheon", active: null, onOpen: () => undefined }));
-  for (const label of ["动态", "星图", "编年史", "天外视界", "现实树", "设定集", "众生录"]) {
+  for (const label of ["动态", "星图", "编年史", "诸神", "天外视界", "现实树", "设定集", "众生录"]) {
     expect(creator).toContain(`aria-label="${label}"`);
   }
   expect(creator).not.toContain("本尊神格");

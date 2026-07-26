@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { WorldMode } from "@/lib/world-mode";
 import { ActivityVisibilitySchema } from "@/lib/world-activity/contracts";
-import { StrictExtractionSchema, ChronicleSchema } from "./extractor";
+import { StrictExtractionSchema, ChronicleSchema, IconConceptSchema } from "./extractor";
 import { PantheonTurnSchema } from "./pantheon";
 
 export const SettlementPantheonTurnSchema = PantheonTurnSchema.extend({
@@ -83,6 +83,7 @@ export const SettlementEventMutationSchema = z.discriminatedUnion("operation", [
     phase: z.enum(["emerging", "escalating"]),
     participantIds: z.array(SettlementIdentifierSchema).min(1).max(30),
     visibility: ActivityVisibilitySchema,
+    iconConcept: IconConceptSchema.optional(),
   }).strict(),
   z.object({
     operation: z.literal("advance"),
@@ -101,6 +102,7 @@ export const SettlementEventMutationSchema = z.discriminatedUnion("operation", [
     summary: z.string().trim().min(1).max(2000),
     participantIds: z.array(SettlementIdentifierSchema).min(1).max(30),
     visibility: ActivityVisibilitySchema,
+    iconConcept: IconConceptSchema.optional(),
   }).strict(),
 ]);
 
@@ -174,6 +176,7 @@ Global rules:
 - Never guess an activity or event ID from its title. worldActivity may reference only exact IDs listed in CHECKPOINT WORLD ACTIVITY.
 - A create mutation must cite the exact related sourceActivityIds. An advance or derive mutation must cite an exact unresolved event ID.
 - Do not create unrelated news. Every worldActivity mutation must follow from the checkpoint messages, listed activities, or listed unresolved events.
+- For each create or derive worldActivity event, emit iconConcept as a semantic catalog token or short natural-language motif when possible. Never emit an Iconify ID, SVG, XML, HTML, or path data.
 - Respect player-locked sections and ability fields.
 - For an existing entity section, emit a whole section replacement only when the labelled prose explicitly changed it. Preserve still-valid supplied facts and Never invent missing details.
 - For a character relation, use relationChanges only on a character entityUpdate and target an exact known character name or alias. Relations are directional; never infer the reverse relation. Emit only relations explicitly changed or established by the labelled prose, and Never invent a relation from proximity.

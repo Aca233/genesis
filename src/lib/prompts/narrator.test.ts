@@ -21,12 +21,57 @@ describe("splitMetaBlock strict tail framing", () => {
     });
   });
 
+  it("兼容模型偶发输出的单行尾部 META 块", () => {
+    expect(splitMetaBlock(`正文\n<<<META ${meta} META>>>`)).toMatchObject({
+      prose: "正文",
+      meta: { suggestions: ["追问"] },
+    });
+  });
+
+  it("旧字段失效时仍剥离 META，并保留其余有效控制数据", () => {
+    const driftedMeta = JSON.stringify({
+      suggestions: ["观察重塑世界"],
+      operation: "continue",
+      temporal_state: { era: "时空崩毁之纪元", time: "两百年重置中" },
+      immediate_changes: [],
+      world_actions: [],
+      activity_entries: [{
+        actorId: "god-dragon",
+        action: "death",
+        targetIds: [],
+        consequence: "龙神死亡。",
+      }],
+      important_event_mutation: null,
+      significant_event: true,
+      settlement_reasons: ["important_death", "era_change"],
+      revealed_event_ids: [],
+      ability_reveals: [],
+    });
+
+    expect(splitMetaBlock(`正文\n<<<META ${driftedMeta} META>>>`)).toEqual({
+      prose: "正文",
+      meta: {
+        suggestions: ["观察重塑世界"],
+        operation: "continue",
+        temporalState: { era: "时空崩毁之纪元", time: "两百年重置中" },
+        immediateChanges: [],
+        worldActions: [],
+        activityEntries: [],
+        significantEvent: true,
+        settlementReasons: ["important_death", "era_change"],
+        revealedEventIds: [],
+      },
+    });
+  });
+
   it.each([
     `正文内联 <<<META\n${meta}\nMETA>>>`,
     `正文\n<<<META\n${meta}`,
     `正文\n<<<META trailing\n${meta}\nMETA>>>`,
     `正文\n<<<META\n${meta}\nMETA>>>\n后续正文`,
     `前段\n<<<META\n${meta}\nMETA>>>\n仍是正文\n`,
+    `正文内联 <<<META ${meta} META>>>`,
+    `正文\n<<<META ${meta} META>>>\n后续正文`,
   ])("不吞掉非完整尾部块：%s", (full) => {
     expect(splitMetaBlock(full)).toEqual({
       prose: full.trim(),

@@ -48,11 +48,15 @@ const CHRONICLE_KEYS = [
 ] as const;
 const OMEN_KEYS = ["id", "timelineId", "godId", "text", "consumed", "createdAt"] as const;
 const TIMELINE_KEYS = ["id", "worldId", "parentId", "forkChapter", "createdAt"] as const;
+const ICON_ASSIGNMENT_KEYS = [
+  "id", "timelineId", "subjectType", "subjectId", "token", "source", "playerLocked",
+  "createdAt", "updatedAt",
+] as const;
 const LOREBOOK_KEYS = ["id", "worldId", "keys", "content", "enabled", "stExtra", "source"] as const;
 const WORLD_KEYS = [
   "id", "userId", "name", "genesisInput", "mode", "status", "draftDeck", "lockedPaths", "themeCard",
   "styleCard", "cosmology", "fusionAxiom", "activeTimelineId", "materialArchiveStatus",
-  "materialArchiveError", "createdAt", "updatedAt",
+  "materialArchiveError", "iconTheme", "createdAt", "updatedAt",
 ] as const;
 
 function projectTimeline(value: unknown): UnknownRecord {
@@ -91,6 +95,8 @@ function projectTimeline(value: unknown): UnknownRecord {
     memberships: Array.from(memberships.values()),
     chronicles: list(timeline.chronicles).map((chronicle) => project(chronicle, CHRONICLE_KEYS)),
     omens: list(timeline.omens).map((omen) => project(omen, OMEN_KEYS)),
+    iconAssignments: list(timeline.iconAssignments).map((assignment) =>
+      project(assignment, ICON_ASSIGNMENT_KEYS)),
   };
 }
 

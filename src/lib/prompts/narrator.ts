@@ -1,10 +1,19 @@
 import type { Scale } from "@/lib/cards/schemas";
 import type { WorldMode } from "@/lib/world-mode";
 import {
+  AbilityRevealSchema,
   ContinuousNarratorMetaSchema,
+  ImmediateChangeSchema,
+  SettlementReasonSchema,
+  TemporalPatchSchema,
   emptyContinuousMeta,
   type ContinuousNarratorMeta,
 } from "@/lib/chat/continuous-meta";
+import {
+  ActivityEntrySchema,
+  ImportantEventMutationSchema,
+  WorldActionSchema,
+} from "@/lib/world-activity/contracts";
 import { findMetaTailFrame } from "./meta-framing";
 
 /**
@@ -20,6 +29,18 @@ export const META_END = "META>>>";
 /** 尾部结构化块 */
 export type NarratorMeta = ContinuousNarratorMeta;
 
+function validItems<T>(
+  value: unknown,
+  schema: { safeParse(item: unknown): { success: boolean; data?: T } },
+  max: number,
+): T[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const parsed = schema.safeParse(item);
+    return parsed.success && parsed.data !== undefined ? [parsed.data] : [];
+  }).slice(0, max);
+}
+
 /**
  * 从模型全量输出中剥离 META 块。
  * META 缺失/损坏一律容忍 → 回退空 meta（suggestions:[]）。
@@ -33,32 +54,42 @@ export function splitMetaBlock(full: string): { prose: string; meta: NarratorMet
 
   try {
     const json = JSON.parse(block) as Record<string, unknown>;
-    const abilityReveals = Array.isArray(json.ability_reveals)
-      ? json.ability_reveals.filter((item) => {
-          if (!item || typeof item !== "object") return false;
-          const reveal = item as Record<string, unknown>;
-          return typeof reveal.abilityId === "string"
-            && (reveal.visibility === "rumored" || reveal.visibility === "known")
-            && typeof reveal.evidence === "string"
-            && reveal.evidence.trim().length > 0;
-        })
+    const temporal = TemporalPatchSchema.safeParse(json.temporal_state);
+    const importantEvent = ImportantEventMutationSchema.safeParse(
+      json.important_event_mutation,
+    );
+    const suggestions = Array.isArray(json.suggestions)
+      ? json.suggestions
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 4)
+      : [];
+    const revealedEventIds = Array.isArray(json.revealed_event_ids)
+      ? json.revealed_event_ids.filter((item): item is string => typeof item === "string")
       : undefined;
-    const parsed = ContinuousNarratorMetaSchema.safeParse({
-      suggestions: json.suggestions,
-      operation: json.operation,
-      temporalState: json.temporal_state,
-      immediateChanges: json.immediate_changes,
-      worldActions: json.world_actions,
-      activityEntries: json.activity_entries,
-      importantEventMutation: json.important_event_mutation ?? undefined,
-      significantEvent: json.significant_event,
-      settlementReasons: json.settlement_reasons,
-      revealedEventIds: json.revealed_event_ids,
-      abilityReveals,
-    });
-    return parsed.success
-      ? { prose, meta: parsed.data }
-      : { prose: full.trim(), meta: emptyContinuousMeta() };
+    const abilityReveals = validItems(json.ability_reveals, AbilityRevealSchema, 12);
+    const candidate = {
+      suggestions,
+      operation: json.operation === "retroactive_rewrite"
+        ? "retroactive_rewrite" as const
+        : "continue" as const,
+      ...(temporal.success ? { temporalState: temporal.data } : {}),
+      immediateChanges: validItems(json.immediate_changes, ImmediateChangeSchema, 12),
+      worldActions: validItems(json.world_actions, WorldActionSchema, 3),
+      activityEntries: validItems(json.activity_entries, ActivityEntrySchema, 3),
+      ...(importantEvent.success ? { importantEventMutation: importantEvent.data } : {}),
+      significantEvent: json.significant_event === true,
+      settlementReasons: validItems(
+        json.settlement_reasons,
+        SettlementReasonSchema,
+        9,
+      ),
+      ...(revealedEventIds ? { revealedEventIds } : {}),
+      ...(abilityReveals.length ? { abilityReveals } : {}),
+    };
+    const parsed = ContinuousNarratorMetaSchema.parse(candidate);
+    return { prose, meta: parsed };
   } catch {
     return { prose: full.trim(), meta: emptyContinuousMeta() };
   }

@@ -40,7 +40,7 @@ export function SaveMaterialVersionButton({ sourceType, sourceId, compact = fals
           <section className="w-full max-w-md rounded-lg border border-gilt/40 bg-paper p-5 shadow-2xl" role="dialog" aria-modal="true" aria-label="保存素材版本">
             <h3 className="text-lg text-ink" style={{ fontFamily: "var(--font-display)" }}>留存剧情版本</h3>
             <label className="mt-4 grid gap-1 text-xs text-ink-faint">版本名称
-              <input autoFocus maxLength={80} value={state.versionName} onChange={(event) => setState((current) => ({ ...current, versionName: event.target.value, error: null }))} className="rounded border border-line bg-paper-raised px-3 py-2 text-sm text-ink outline-none focus:border-gilt/60" placeholder="例如：第七章后 · 神战余烬" />
+              <input autoFocus maxLength={80} value={state.versionName} onChange={(event) => setState((current) => ({ ...current, versionName: event.target.value, error: null }))} className="rounded border border-line bg-paper-raised px-3 py-2 text-sm text-ink outline-none focus:border-gilt/60" placeholder="例如：星历七年 · 神战余烬" />
             </label>
             <label className="mt-3 grid gap-1 text-xs text-ink-faint">备注（可选）
               <textarea maxLength={500} value={state.note} onChange={(event) => setState((current) => ({ ...current, note: event.target.value }))} className="min-h-20 rounded border border-line bg-paper-raised px-3 py-2 text-sm text-ink outline-none focus:border-gilt/60" />

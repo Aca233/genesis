@@ -99,15 +99,28 @@ function legacyArchive() {
 
 function versionTwoArchive() {
   const base = legacyArchive();
+  const deck = completeCreatorDeck();
   return {
     ...base,
-    version: 2,
+    version: 4,
     world: {
       ...base.world,
       name: "能力世界",
+      mode: "pantheon" as const,
+      draftDeck: deck,
+      themeCard: deck.theme,
+      styleCard: deck.style,
+      cosmology: deck.cosmology,
+      fusionAxiom: deck.fusionAxiom,
+      rewrites: [],
       timelines: [
         {
           ...base.world.timelines[0],
+          branchName: "原初现实",
+          branchSummary: "能力世界的根现实",
+          realityState: initialRealityState(deck),
+          observerState: initialObserverState(deck),
+          forkRewriteId: null,
           chapters: [
             {
               id: "chapter-old",
@@ -314,18 +327,41 @@ function versionTwoArchive() {
   };
 }
 
+function legacyVersionTwoArchive() {
+  const archive = versionTwoArchive() as ReturnType<typeof versionTwoArchive> & { version: 2 };
+  archive.version = 2;
+  return archive;
+}
+
 function twoTimelineArchive() {
   const archive = versionTwoArchive();
   const other = JSON.parse(
     JSON.stringify(archive.world.timelines[0]).replaceAll("-old", "-other"),
   );
   other.worldId = "world-old";
+  other.parentId = "timeline-old";
+  other.forkChapter = 1;
+  other.branchName = "能力分支现实";
+  other.branchSummary = "用于验证跨现实引用";
+  other.forkRewriteId = "rewrite-other";
+  (archive.world.rewrites as Array<Record<string, unknown>>).push({
+    id: "rewrite-other",
+    worldId: "world-old",
+    sourceTimelineId: "timeline-old",
+    resultTimelineId: "timeline-other",
+    sourceChapterId: "chapter-old",
+    decree: "分出另一条能力现实",
+    scope: "prospective",
+    status: "completed",
+    plan: null,
+    summary: "能力分支现实",
+  });
   archive.world.timelines.push(other);
   return archive;
 }
 
 
-function versionThreeArchive() {
+function realityTreeArchive() {
   const deck = completeCreatorDeck();
   const reality = initialRealityState(deck);
   const observer = initialObserverState(deck);
@@ -488,7 +524,7 @@ function versionThreeArchive() {
     }] : [],
   });
   return {
-    version: 3,
+    version: 4,
     exportedAt: "2026-07-22T00:00:00.000Z",
     world: {
       id: "world-v3",
@@ -537,11 +573,14 @@ function versionThreeArchive() {
   };
 }
 
+function legacyVersionThreeArchive() {
+  const archive = realityTreeArchive() as ReturnType<typeof realityTreeArchive> & { version: 3 };
+  archive.version = 3;
+  return archive;
+}
+
 function versionFourArchive() {
-  const archive = versionThreeArchive() as ReturnType<typeof versionThreeArchive> & {
-    version: 4;
-  };
-  archive.version = 4;
+  const archive = realityTreeArchive();
   const root = archive.world.timelines[0] as typeof archive.world.timelines[0] & {
     worldEvents: Array<Record<string, unknown>>;
     worldActivities: Array<Record<string, unknown>>;
@@ -657,19 +696,22 @@ describe("存档导入", () => {
     installSuccessfulTransaction();
   });
 
-  it("接受 version 1 并将能力、事件和成员关系默认为空集合", async () => {
-    const response = await importWorld(request(legacyArchive()));
+  it.each([
+    ["version 1", legacyArchive],
+    ["version 2", legacyVersionTwoArchive],
+    ["version 3", legacyVersionThreeArchive],
+  ])("拒绝旧存档 %s 且不启动写事务", async (_label, buildArchive) => {
+    const response = await importWorld(request(buildArchive()));
 
-    expect(response.status).toBe(200);
-    expect(mocks.prisma.world.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ mode: "pantheon" }),
-    }));
-    expect(lastCreateManyData(mocks.prisma.ability)).toEqual([]);
-    expect(lastCreateManyData(mocks.prisma.entityMembership)).toEqual([]);
-    expect(lastCreateManyData(mocks.prisma.abilityEvent)).toEqual([]);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "存档版本不受支持：仅接受 version 4",
+    });
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.prisma.world.create).not.toHaveBeenCalled();
   });
 
-  it("导入 version 2 时预生成新 ID 并重映射所有能力与关系外键", async () => {
+  it("导入 version 4 时预生成新 ID 并重映射所有能力与关系外键", async () => {
     const response = await importWorld(request(versionTwoArchive()));
 
     expect(response.status).toBe(200);
@@ -718,32 +760,6 @@ describe("存档导入", () => {
     expect(events[0].dedupeKey).not.toBe(
       "chapter-old:character-ability-old:improved:message-old",
     );
-  });
-
-  it("version 2 导入兼容为 pantheon mode", async () => {
-    const archive = versionTwoArchive();
-    (archive.world as typeof archive.world & { mode: "creator" }).mode = "creator";
-    (archive.world as unknown as { activeTimelineId: string | null }).activeTimelineId = null;
-    archive.world.timelines = [];
-
-    const response = await importWorld(request(archive));
-
-    expect(response.status).toBe(200);
-    expect(mocks.prisma.world.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ mode: "pantheon" }),
-    }));
-  });
-
-  it("version 2 自动补空世界动态图和 focusedEventId", async () => {
-    const response = await importWorld(request(versionTwoArchive()));
-
-    expect(response.status).toBe(200);
-    expect(lastCreateManyData(mocks.prisma.worldEvent)).toEqual([]);
-    expect(lastCreateManyData(mocks.prisma.worldActivity)).toEqual([]);
-    expect(lastCreateManyData(mocks.prisma.entityRelation)).toEqual([]);
-    expect(lastCreateManyData(mocks.prisma.timeline)[0].observerState).toMatchObject({
-      focusedEventId: null,
-    });
   });
 
   it("保留 embark 的 relations.player 并重映射真实神明 ID 关系键", async () => {
@@ -839,7 +855,7 @@ describe("存档导入", () => {
   });
 
   it("拒绝时间线与神明复用同一个旧存档 ID", async () => {
-    const archive = versionThreeArchive();
+    const archive = realityTreeArchive();
     archive.world.timelines[0].gods[0].id = archive.world.timelines[0].id;
 
     const response = await importWorld(request(archive));
@@ -853,7 +869,7 @@ describe("存档导入", () => {
   });
 
   it("拒绝章节与消息复用同一个旧存档 ID", async () => {
-    const archive = versionThreeArchive();
+    const archive = realityTreeArchive();
     const chapter = archive.world.timelines[0].chapters[0];
     (chapter.messages as unknown as Array<Record<string, unknown>>).push({
       id: chapter.id,
@@ -1103,8 +1119,8 @@ describe("存档导入", () => {
   });
 
 
-  it("导入 version 3 时重映射现实树、改写、观察焦点、化身和活动分支", async () => {
-    const response = await importWorld(request(versionThreeArchive()));
+  it("导入 version 4 时重映射现实树、改写、观察焦点、化身和活动分支", async () => {
+    const response = await importWorld(request(realityTreeArchive()));
 
     expect(response.status).toBe(200);
     const { worldId } = await response.json();
@@ -1191,22 +1207,6 @@ describe("存档导入", () => {
       where: { id: worldId },
       data: { activeTimelineId: branchB.id },
     });
-  });
-
-  it("version 3 自动补空世界动态图和 focusedEventId", async () => {
-    const archive = versionThreeArchive();
-    for (const timeline of archive.world.timelines) {
-      delete (timeline.observerState as Record<string, unknown>).focusedEventId;
-    }
-
-    const response = await importWorld(request(archive));
-
-    expect(response.status).toBe(200);
-    expect(lastCreateManyData(mocks.prisma.worldEvent)).toEqual([]);
-    expect(lastCreateManyData(mocks.prisma.worldActivity)).toEqual([]);
-    for (const timeline of lastCreateManyData(mocks.prisma.timeline)) {
-      expect(timeline.observerState).toMatchObject({ focusedEventId: null });
-    }
   });
 
   it("version 4 为事件链、动态和全部内部引用生成新 ID", async () => {
@@ -1356,24 +1356,24 @@ describe("存档导入", () => {
   });
 
   it.each([
-    ["cycle", (archive: ReturnType<typeof versionThreeArchive>) => {
+    ["cycle", (archive: ReturnType<typeof realityTreeArchive>) => {
       archive.world.timelines[0].parentId = "timeline-a";
     }],
-    ["cross-world parent", (archive: ReturnType<typeof versionThreeArchive>) => {
+    ["cross-world parent", (archive: ReturnType<typeof realityTreeArchive>) => {
       archive.world.timelines[1].worldId = "another-world";
     }],
-    ["missing active", (archive: ReturnType<typeof versionThreeArchive>) => {
+    ["missing active", (archive: ReturnType<typeof realityTreeArchive>) => {
       archive.world.activeTimelineId = "timeline-missing";
     }],
-    ["mismatched rewrite", (archive: ReturnType<typeof versionThreeArchive>) => {
+    ["mismatched rewrite", (archive: ReturnType<typeof realityTreeArchive>) => {
       archive.world.rewrites[0].resultTimelineId = "timeline-b";
     }],
-    ["creator player god", (archive: ReturnType<typeof versionThreeArchive>) => {
+    ["creator player god", (archive: ReturnType<typeof realityTreeArchive>) => {
       archive.world.timelines[0].gods[0].isPlayer = true;
       archive.world.timelines[0].gods[0].tier = "player";
     }],
-  ])("version 3 图校验拒绝 %s", async (_label, mutate) => {
-    const archive = versionThreeArchive();
+  ])("version 4 图校验拒绝 %s", async (_label, mutate) => {
+    const archive = realityTreeArchive();
     mutate(archive);
 
     const response = await importWorld(request(archive));
@@ -1384,10 +1384,10 @@ describe("存档导入", () => {
 
 
   it.each([
-    ["missing source chapter", (archive: ReturnType<typeof versionThreeArchive>) => {
+    ["missing source chapter", (archive: ReturnType<typeof realityTreeArchive>) => {
       archive.world.rewrites[0].sourceChapterId = "chapter-missing";
     }],
-    ["cross-reality source chapter", (archive: ReturnType<typeof versionThreeArchive>) => {
+    ["cross-reality source chapter", (archive: ReturnType<typeof realityTreeArchive>) => {
       (archive.world.timelines[1].chapters as Array<Record<string, unknown>>).push({
         id: "chapter-a",
         timelineId: "timeline-a",
@@ -1400,11 +1400,11 @@ describe("存档导入", () => {
       });
       archive.world.rewrites[0].sourceChapterId = "chapter-a";
     }],
-    ["dangling established-fact rewrite", (archive: ReturnType<typeof versionThreeArchive>) => {
+    ["dangling established-fact rewrite", (archive: ReturnType<typeof realityTreeArchive>) => {
       archive.world.timelines[1].realityState.establishedFacts[0]!
         .establishedByRewriteId = "rewrite-missing";
     }],
-    ["cross-reality observer avatar", (archive: ReturnType<typeof versionThreeArchive>) => {
+    ["cross-reality observer avatar", (archive: ReturnType<typeof realityTreeArchive>) => {
       archive.world.timelines[1].observerState = {
         focusType: "avatar",
         focusId: "avatar-b",
@@ -1413,8 +1413,8 @@ describe("存档导入", () => {
         activeAvatarId: "avatar-b",
       };
     }],
-  ])("version 3 语义引用校验拒绝 %s", async (_label, mutate) => {
-    const archive = versionThreeArchive();
+  ])("version 4 语义引用校验拒绝 %s", async (_label, mutate) => {
+    const archive = realityTreeArchive();
     mutate(archive);
 
     const response = await importWorld(request(archive));
@@ -1423,20 +1423,8 @@ describe("存档导入", () => {
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it("旧 version 2 即使携带 creator 字段也按 pantheon 兼容导入", async () => {
-    const archive = versionTwoArchive();
-    (archive.world as typeof archive.world & { mode: string }).mode = "creator";
-
-    const response = await importWorld(request(archive));
-
-    expect(response.status).toBe(200);
-    expect(mocks.prisma.world.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ mode: "pantheon" }),
-    }));
-  });
-
   it("严格拒绝未知字段与不支持的版本", async () => {
-    const archive = versionTwoArchive() as ReturnType<typeof versionTwoArchive> & {
+    const archive = versionFourArchive() as ReturnType<typeof versionFourArchive> & {
       unexpected?: boolean;
     };
     archive.unexpected = true;
@@ -1502,6 +1490,7 @@ describe("存档导出", () => {
           realityState: { hiddenFact: "天外真相" },
           observerState: { viewpoint: "omniscient" },
           forkRewriteId: null,
+          iconAssignments: [],
           abilities: [hiddenAbility],
           entities: [
             {

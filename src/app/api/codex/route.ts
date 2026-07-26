@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { WorldModeSchema } from "@/lib/world-mode";
 import { realityViewerFromPersistence } from "@/lib/reality/visibility";
+import { parseWorldIconTheme } from "@/lib/icons/theme";
+import { resolveIcon } from "@/lib/icons/resolver";
+import { loadLocalIcon } from "@/lib/icons/svg.server";
 
 /**
  * GET /api/codex?timelineId=xxx —— 众生录列表（轻量，无 sections）
@@ -19,7 +22,7 @@ export async function GET(request: Request) {
     where: { id: timelineId },
     select: {
       observerState: true,
-      world: { select: { mode: true } },
+      world: { select: { mode: true, iconTheme: true } },
     },
   });
   if (!timeline) {
@@ -51,5 +54,54 @@ export async function GET(request: Request) {
     orderBy: [{ starred: "desc" }, { heat: "asc" }, { name: "asc" }],
   });
 
-  return NextResponse.json({ entities });
+  const assignments = await prisma.iconAssignment.findMany({
+    where: {
+      timelineId,
+      subjectType: "entity",
+      subjectId: { in: entities.map((entity) => entity.id) },
+    },
+    select: {
+      subjectId: true,
+      token: true,
+      source: true,
+      playerLocked: true,
+    },
+  });
+  const assignmentByEntity = new Map(assignments.map((assignment) => [
+    assignment.subjectId,
+    assignment,
+  ]));
+  const iconTheme = parseWorldIconTheme(timeline.world.iconTheme);
+
+  return NextResponse.json({
+    entities: entities.map((entity) => {
+      const assignment = assignmentByEntity.get(entity.id);
+      const source = assignment && (["generated", "derived", "player"] as const).includes(
+        assignment.source as "generated" | "derived" | "player",
+      )
+        ? assignment.source as "generated" | "derived" | "player"
+        : "derived" as const;
+      const value = assignment
+        ? { token: assignment.token, source, playerLocked: assignment.playerLocked }
+        : null;
+      const resolved = resolveIcon({
+        theme: iconTheme,
+        token: assignment?.token
+          ?? iconTheme.assignments.entityTypes[entity.type]
+          ?? `entity.${entity.type}`,
+        subjectType: "entity",
+        subjectId: entity.id,
+        override: value,
+      });
+      return {
+        ...entity,
+        iconAssignment: {
+          token: resolved.token,
+          source,
+          playerLocked: assignment?.playerLocked ?? false,
+          icon: loadLocalIcon(resolved.id),
+        },
+      };
+    }),
+  });
 }

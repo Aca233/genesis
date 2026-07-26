@@ -39,7 +39,9 @@ export function PlayDrawer({
   recentRewrite = null,
   busyKinds = { chat: false, settlement: false, rewrite: false },
   initialEntityId,
+  initialGodId,
   onOpenEntity,
+  onOpenGod,
   onActivitiesLoaded,
   onStateChanged,
   onTimelineChanged,
@@ -56,7 +58,9 @@ export function PlayDrawer({
   onTimelineChanged?: (timelineId: string) => Promise<void>;
   /** 正文实体链接点开时的定位实体 */
   initialEntityId?: string | null;
+  initialGodId?: string | null;
   onOpenEntity?: (id: string) => void;
+  onOpenGod?: (id: string) => void;
   onActivitiesLoaded?: (data: WorldActivityResponse) => void;
   onClose: () => void;
 }) {
@@ -120,10 +124,19 @@ export function PlayDrawer({
                   timelineId={timeline.id}
                   worldName={world.name}
                   onOpenEntity={onOpenEntity ?? (() => undefined)}
+                  onOpenGod={onOpenGod}
                   onLoaded={onActivitiesLoaded}
                 />
               ) : tab === "god" ? (
-                <GodPanel gods={gods} theme={world.themeCard} />
+                <GodPanel
+                  key={`${timeline.id}:${initialGodId ?? "all"}`}
+                  gods={gods}
+                  theme={world.themeCard}
+                  mode={world.mode}
+                  initialGodId={initialGodId}
+                  worldId={world.id}
+                  timelineId={timeline.id}
+                />
               ) : tab === "lore" ? (
                 <LorePanel world={world} />
               ) : tab === "codex" ? (

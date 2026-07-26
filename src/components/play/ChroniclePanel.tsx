@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 /**
- * 编年史：按章分组的年表 + 诸神/实体过滤（docs/01 §9.3）。
- * 补录条目（revealedAtChapter 晚于 chapterIndex）以朱批小注标识——
+ * 编年史：按世界时间分组的年表 + 诸神/实体过滤（docs/01 §9.3）。
+ * 后世补录条目以朱批小注标识——
  * 「后世方知」的迷雾揭示感。
  */
 
@@ -15,12 +15,76 @@ type EntryRow = {
   text: string;
   entityIds: string[];
   godIds: string[];
+  gods: NameRow[];
   revealedAtChapter: number | null;
+  revealedAtTimeLabel?: string | null;
   source: string;
   worldVisible?: boolean;
 };
 
 type NameRow = { id: string; name: string };
+
+export function ChronicleTimeline({ entries }: { entries: readonly EntryRow[] }) {
+  const groups = useMemo(() => {
+    const map = new Map<string, EntryRow[]>();
+    for (const entry of entries) {
+      const timeLabel = entry.yearLabel.trim() || "时间未载";
+      const group = map.get(timeLabel);
+      if (group) group.push(entry);
+      else map.set(timeLabel, [entry]);
+    }
+    return [...map.entries()];
+  }, [entries]);
+
+  return (
+    <ol className="relative grid gap-6 border-l border-gilt/30 pl-5">
+      {groups.map(([timeLabel, list]) => (
+        <li key={timeLabel} className="relative">
+          <span className="absolute -left-[26px] top-1 h-2.5 w-2.5 rounded-full border border-gilt bg-paper" />
+          <h3
+            className="mb-2 text-sm text-gilt"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            {timeLabel}
+          </h3>
+          <ul className="grid gap-2.5">
+            {list.map((entry) => {
+              const backfilled =
+                entry.revealedAtChapter != null &&
+                entry.revealedAtChapter > entry.chapterIndex;
+              return (
+                <li key={entry.id} className="text-sm leading-relaxed">
+                  <span className={backfilled ? "text-ink-soft" : "text-ink"}>
+                    {entry.text}
+                  </span>
+                  {entry.gods.length > 0 && (
+                    <span className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-gilt/80">
+                      <span className="text-ink-faint">涉事诸神</span>
+                      {entry.gods.map((god) => (
+                        <span key={god.id}>〔{god.name}〕</span>
+                      ))}
+                    </span>
+                  )}
+                  {entry.worldVisible === false && (
+                    <span className="ml-1.5 text-xs text-cinnabar/80">〔天外批注 · 世界内不可见〕</span>
+                  )}
+                  {backfilled && (
+                    <span
+                      className="ml-1.5 text-xs text-cinnabar/80"
+                      title="此事当时隐于帷幕，后来方为人知"
+                    >
+                      〔{entry.revealedAtTimeLabel ? `${entry.revealedAtTimeLabel}方揭` : "后世方揭"}〕
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 export function ChroniclePanel({ timelineId }: { timelineId: string }) {
   const [entries, setEntries] = useState<EntryRow[] | null>(null);
@@ -60,18 +124,6 @@ export function ChroniclePanel({ timelineId }: { timelineId: string }) {
       cancelled = true;
     };
   }, [timelineId, godId, entityId]);
-
-  // 按章分组（保持后端章序）
-  const groups = useMemo(() => {
-    if (!entries) return [];
-    const map = new Map<number, EntryRow[]>();
-    for (const e of entries) {
-      const g = map.get(e.chapterIndex);
-      if (g) g.push(e);
-      else map.set(e.chapterIndex, [e]);
-    }
-    return [...map.entries()];
-  }, [entries]);
 
   if (error) return <p className="text-sm text-cinnabar">{error}</p>;
   if (!entries) return <p className="fog-text text-sm">展卷中…</p>;
@@ -119,57 +171,15 @@ export function ChroniclePanel({ timelineId }: { timelineId: string }) {
         </div>
       )}
 
-      {groups.length === 0 && (
+      {entries.length === 0 && (
         <p className="fog-text text-sm">
           {godId || entityId
             ? "此间无史可稽。"
-            : "史册尚白——首章结算后，岁月方留痕。"}
+            : "史册尚白——世界有所变化后，岁月方留痕。"}
         </p>
       )}
 
-      {/* 竖向年表 */}
-      <ol className="relative grid gap-6 border-l border-gilt/30 pl-5">
-        {groups.map(([chapterIndex, list]) => (
-          <li key={chapterIndex} className="relative">
-            {/* 章节节点 */}
-            <span className="absolute -left-[26px] top-1 h-2.5 w-2.5 rounded-full border border-gilt bg-paper" />
-            <h3
-              className="mb-2 text-sm text-gilt"
-              style={{ fontFamily: "var(--font-display)" }}
-            >
-              第{chapterIndex}章
-            </h3>
-            <ul className="grid gap-2.5">
-              {list.map((e) => {
-                const backfilled =
-                  e.revealedAtChapter != null &&
-                  e.revealedAtChapter > e.chapterIndex;
-                return (
-                  <li key={e.id} className="text-sm leading-relaxed">
-                    <span className="mr-2 text-xs text-ink-faint">
-                      {e.yearLabel}
-                    </span>
-                    <span className={backfilled ? "text-ink-soft" : "text-ink"}>
-                      {e.text}
-                    </span>
-                    {e.worldVisible === false && (
-                      <span className="ml-1.5 text-xs text-cinnabar/80">〔天外批注 · 世界内不可见〕</span>
-                    )}
-                    {backfilled && (
-                      <span
-                        className="ml-1.5 text-xs text-cinnabar/80"
-                        title="此事当时隐于帷幕，后世方为人知"
-                      >
-                        〔第{e.revealedAtChapter}章方揭〕
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </li>
-        ))}
-      </ol>
+      <ChronicleTimeline entries={entries} />
     </div>
   );
 }

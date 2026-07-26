@@ -11,10 +11,18 @@ export type WorldActivityEventView = {
   phase: string;
   visibility: "public" | "player_known" | "hidden";
   participantIds: string[];
+  participants?: WorldActivitySubjectView[];
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;
   knowledgeLabel?: "世界内尚未知晓";
+};
+
+export type WorldActivitySubjectView = {
+  id: string;
+  name: string;
+  entityId: string | null;
+  godId: string | null;
 };
 
 export type WorldActivityItemView = {
@@ -27,6 +35,7 @@ export type WorldActivityItemView = {
   actorId: string | null;
   targetIds: string[];
   subjectIds: string[];
+  subjects?: WorldActivitySubjectView[];
   eraLabel: string;
   timeLabel: string;
   createdAt: string;
@@ -40,27 +49,46 @@ export type WorldActivityResponse = {
   nextCursor: string | null;
 };
 
-function SubjectButtons({
-  ids,
+function SubjectLinks({
+  subjects,
   onOpenEntity,
+  onOpenGod,
 }: {
-  ids: readonly string[];
+  subjects: readonly WorldActivitySubjectView[];
   onOpenEntity: (id: string) => void;
+  onOpenGod: (id: string) => void;
 }) {
-  if (ids.length === 0) return null;
+  if (subjects.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
-      {ids.map((id) => (
-        <button
-          key={id}
-          type="button"
-          data-entity-id={id}
-          onClick={() => onOpenEntity(id)}
-          className="rounded border border-line px-2 py-0.5 text-xs text-ink-soft transition hover:border-gilt hover:text-gilt"
-        >
-          查看对象
-        </button>
-      ))}
+      {subjects.map((subject) => subject.godId ? (
+          <button
+            key={subject.id}
+            type="button"
+            data-god-id={subject.godId}
+            onClick={() => onOpenGod(subject.godId!)}
+            className="rounded border border-line px-2 py-0.5 text-xs text-ink-soft transition hover:border-gilt hover:text-gilt"
+          >
+            {subject.name}
+          </button>
+        ) : subject.entityId ? (
+          <button
+            key={subject.id}
+            type="button"
+            data-entity-id={subject.entityId}
+            onClick={() => onOpenEntity(subject.entityId!)}
+            className="rounded border border-line px-2 py-0.5 text-xs text-ink-soft transition hover:border-gilt hover:text-gilt"
+          >
+            {subject.name}
+          </button>
+        ) : (
+          <span
+            key={subject.id}
+            className="rounded border border-line/70 px-2 py-0.5 text-xs text-ink-faint"
+          >
+            {subject.name}
+          </span>
+        ))}
     </div>
   );
 }
@@ -70,6 +98,7 @@ function EventCard({
   focused,
   focusBusy,
   onOpenEntity,
+  onOpenGod,
   onSelectEvent,
   onToggleFocus,
 }: {
@@ -77,6 +106,7 @@ function EventCard({
   focused: boolean;
   focusBusy: boolean;
   onOpenEntity: (id: string) => void;
+  onOpenGod: (id: string) => void;
   onSelectEvent: (id: string) => void;
   onToggleFocus: (id: string) => void;
 }) {
@@ -106,7 +136,7 @@ function EventCard({
           {focused ? "取消追踪" : "追踪事件"}
         </button>
       ) : null}
-      <SubjectButtons ids={event.participantIds} onOpenEntity={onOpenEntity} />
+      <SubjectLinks subjects={event.participants ?? []} onOpenEntity={onOpenEntity} onOpenGod={onOpenGod} />
     </article>
   );
 }
@@ -117,6 +147,7 @@ export function WorldActivityPanelView({
   selectedEventId,
   focusBusy = false,
   onOpenEntity,
+  onOpenGod = () => undefined,
   onSelectEvent,
   onToggleFocus = () => undefined,
 }: {
@@ -125,6 +156,7 @@ export function WorldActivityPanelView({
   selectedEventId: string | null;
   focusBusy?: boolean;
   onOpenEntity: (id: string) => void;
+  onOpenGod?: (id: string) => void;
   onSelectEvent: (id: string) => void;
   onToggleFocus?: (id: string) => void;
 }) {
@@ -145,6 +177,7 @@ export function WorldActivityPanelView({
             focused={data.focusedEvent?.id === selectedEvent.id}
             focusBusy={focusBusy}
             onOpenEntity={onOpenEntity}
+            onOpenGod={onOpenGod}
             onSelectEvent={onSelectEvent}
             onToggleFocus={onToggleFocus}
           />
@@ -161,6 +194,7 @@ export function WorldActivityPanelView({
             focused
             focusBusy={focusBusy}
             onOpenEntity={onOpenEntity}
+            onOpenGod={onOpenGod}
             onSelectEvent={onSelectEvent}
             onToggleFocus={onToggleFocus}
           />
@@ -181,6 +215,7 @@ export function WorldActivityPanelView({
               focused={data.focusedEvent?.id === event.id}
               focusBusy={focusBusy}
               onOpenEntity={onOpenEntity}
+              onOpenGod={onOpenGod}
               onSelectEvent={onSelectEvent}
               onToggleFocus={onToggleFocus}
             />
@@ -212,7 +247,7 @@ export function WorldActivityPanelView({
                   查看关联事件
                 </button>
               ) : null}
-              <SubjectButtons ids={activity.subjectIds} onOpenEntity={onOpenEntity} />
+              <SubjectLinks subjects={activity.subjects ?? []} onOpenEntity={onOpenEntity} onOpenGod={onOpenGod} />
             </article>
           )) : <p className="text-sm text-ink-faint">世界仍在酝酿新的动向</p>}
         </div>
@@ -233,12 +268,14 @@ export function WorldActivityPanel({
   timelineId,
   worldName,
   onOpenEntity,
+  onOpenGod,
   onLoaded,
 }: {
   worldId: string;
   timelineId: string;
   worldName: string;
   onOpenEntity: (id: string) => void;
+  onOpenGod?: (id: string) => void;
   onLoaded?: (data: WorldActivityResponse) => void;
 }) {
   const [data, setData] = useState<WorldActivityResponse>(EMPTY_ACTIVITY);
@@ -336,6 +373,7 @@ export function WorldActivityPanel({
       selectedEventId={selectedEventId}
       focusBusy={focusBusy}
       onOpenEntity={onOpenEntity}
+      onOpenGod={onOpenGod}
       onSelectEvent={setSelectedEventId}
       onToggleFocus={(eventId) => { void toggleFocus(eventId); }}
     />

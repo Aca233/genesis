@@ -20,6 +20,9 @@ import {
   projectSectionsForViewer,
   realityViewerFromPersistence,
 } from "@/lib/reality/visibility";
+import { parseWorldIconTheme } from "@/lib/icons/theme";
+import { resolveIcon } from "@/lib/icons/resolver";
+import { loadLocalIcon } from "@/lib/icons/svg.server";
 
 /**
  * GET   /api/codex/[id] —— 实体详情（sections + 专属编年史）
@@ -229,7 +232,7 @@ export async function GET(
       timeline: {
         select: {
           observerState: true,
-          world: { select: { mode: true } },
+          world: { select: { id: true, mode: true, iconTheme: true } },
         },
       },
     },
@@ -242,24 +245,68 @@ export async function GET(
   );
   const omniscient = isOmniscientViewer(viewer);
   const relations = await projectCharacterRelations(entity, viewer);
-
-  // 专属编年史：涉及该实体且已揭示
-  const chronicle = await prisma.chronicleEntry.findMany({
+  const iconAssignment = await prisma.iconAssignment.findUnique({
     where: {
-      timelineId: entity.timelineId,
-      ...(omniscient ? {} : { revealed: true }),
-      entityIds: { has: entity.id },
-    },
-    orderBy: [{ chapterIndex: "asc" }, { createdAt: "asc" }],
-    select: {
-      id: true,
-      chapterIndex: true,
-      yearLabel: true,
-      text: true,
-      revealed: true,
-      revealedAtChapter: true,
+      timelineId_subjectType_subjectId: {
+        timelineId: entity.timelineId,
+        subjectType: "entity",
+        subjectId: entity.id,
+      },
     },
   });
+  const iconTheme = parseWorldIconTheme(entity.timeline.world.iconTheme);
+  const normalizedIconAssignment = iconAssignment
+    ? {
+        token: iconAssignment.token,
+        source: (["generated", "derived", "player"] as const).includes(
+          iconAssignment.source as "generated" | "derived" | "player",
+        )
+          ? iconAssignment.source as "generated" | "derived" | "player"
+          : "derived" as const,
+        playerLocked: iconAssignment.playerLocked,
+      }
+    : null;
+  const iconToken = iconAssignment?.token
+    ?? iconTheme.assignments.entityTypes[entity.type]
+    ?? `entity.${entity.type}`;
+  const resolvedIcon = resolveIcon({
+    theme: iconTheme,
+    token: iconToken,
+    subjectType: "entity",
+    subjectId: entity.id,
+    override: normalizedIconAssignment,
+  });
+
+  // 专属编年史：涉及该实体且已揭示
+  const [chronicle, chronicleTimeRows] = await Promise.all([
+    prisma.chronicleEntry.findMany({
+      where: {
+        timelineId: entity.timelineId,
+        ...(omniscient ? {} : { revealed: true }),
+        entityIds: { has: entity.id },
+      },
+      orderBy: [{ chapterIndex: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        chapterIndex: true,
+        yearLabel: true,
+        text: true,
+        revealed: true,
+        revealedAtChapter: true,
+      },
+    }),
+    prisma.chronicleEntry.findMany({
+      where: { timelineId: entity.timelineId },
+      orderBy: [{ chapterIndex: "asc" }, { createdAt: "asc" }],
+      select: { chapterIndex: true, yearLabel: true },
+    }),
+  ]);
+  const timeByInternalIndex = new Map<number, string>();
+  for (const row of chronicleTimeRows) {
+    if (!timeByInternalIndex.has(row.chapterIndex) && row.yearLabel.trim()) {
+      timeByInternalIndex.set(row.chapterIndex, row.yearLabel);
+    }
+  }
 
   const { abilities, race, memberships, timeline: _timeline, ...entityFields } = entity;
   void _timeline;
@@ -283,6 +330,14 @@ export async function GET(
   return NextResponse.json({
     entity: {
       ...entityFields,
+      worldId: entity.timeline.world.id,
+      timelineId: entity.timelineId,
+      iconAssignment: {
+        token: resolvedIcon.token,
+        source: normalizedIconAssignment?.source ?? "derived",
+        playerLocked: iconAssignment?.playerLocked ?? false,
+        icon: loadLocalIcon(resolvedIcon.id),
+      },
       sections: projectSectionsForViewer(entity.sections, viewer),
       abilities: omniscient
         ? projectAbilitiesForOmniscient(characterAbilities)
@@ -308,7 +363,15 @@ export async function GET(
     },
     chronicle: chronicle.flatMap((entry) => {
       const projection = projectChronicleForViewer(entry, viewer);
-      return projection === null ? [] : [projection];
+      return projection === null ? [] : [{
+        ...projection,
+        yearLabel: entry.yearLabel.trim()
+          || timeByInternalIndex.get(entry.chapterIndex)
+          || "时间未载",
+        revealedAtTimeLabel: entry.revealedAtChapter === null
+          ? null
+          : timeByInternalIndex.get(entry.revealedAtChapter) ?? null,
+      }];
     }),
   });
 }

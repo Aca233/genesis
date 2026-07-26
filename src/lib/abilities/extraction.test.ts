@@ -706,6 +706,7 @@ it("无 ID 时可按 owner 类型创建证据支持的新能力，重复执行�
     fixture.messages.push({ id: `message-create-${offset}`, index: 40 + offset, scale: "scene", content: `${candidate.evidence}。` });
     const change = {
       ...candidate,
+      iconConcept: "ability.unknown",
       effect: "以掌劲或仪式改变岩层",
       trigger: "主动施展",
       cost: "消耗体力",
@@ -722,9 +723,15 @@ it("无 ID 时可按 owner 类型创建证据支持的新能力，重复执行�
       timelineId: "timeline-1", chapterId: "chapter-1", owners: fixture.owners, messages: fixture.messages,
       changes: [change],
     });
-    expect(first.applied).toHaveLength(1);
-    expect(second.applied[0]?.applied).toBe(false);
     const created = [...fixture.abilities.values()].filter((ability) => ability.name === candidate.name);
+    expect(first.applied).toHaveLength(1);
+    expect(first.createdAbilities).toEqual([{
+      inputIndex: 0,
+      abilityId: created[0]?.id,
+      iconConcept: "ability.unknown",
+    }]);
+    expect(second.createdAbilities).toEqual([]);
+    expect(second.applied[0]?.applied).toBe(false);
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject({ kind: candidate.kind, mastery: "novice", visibility: "known", lockedFields: [] });
   }

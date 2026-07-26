@@ -9,8 +9,9 @@ export default defineConfig({
     clearMocks: true,
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "src"),
-    },
+    alias: [
+      { find: "server-only", replacement: path.resolve(__dirname, "src/test/server-only.ts") },
+      { find: "@", replacement: path.resolve(__dirname, "src") },
+    ],
   },
 });

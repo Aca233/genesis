@@ -20,6 +20,26 @@ type ActivityPersistence = {
   worldActivity: {
     findMany(args: unknown): Promise<WorldActivityProjectionRow[]>;
   };
+  chronicleEntry: {
+    findMany(args: unknown): Promise<Array<{
+      id: string;
+      yearLabel: string;
+      text: string;
+      entityIds: string[];
+      godIds: string[];
+      createdAt: Date;
+    }>>;
+  };
+  entity: {
+    findMany(args: unknown): Promise<Array<{ id: string; name: string }>>;
+  };
+  god: {
+    findMany(args: unknown): Promise<Array<{
+      id: string;
+      name: string;
+      codexEntityId: string | null;
+    }>>;
+  };
 };
 
 function focusedEventIdFromPersistence(value: unknown): string | null {
@@ -92,7 +112,7 @@ export async function GET(
     ? {}
     : { visibility: { in: ["public", "player_known"] } };
   const db = prisma as unknown as ActivityPersistence;
-  const [events, rows] = await Promise.all([
+  const [events, rows, legacyChronicle] = await Promise.all([
     db.worldEvent.findMany({
       where: {
         timelineId: timeline.id,
@@ -123,13 +143,43 @@ export async function GET(
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: page.limit + 1,
     }),
+    page.before === null
+      ? db.chronicleEntry.findMany({
+          where: {
+            timelineId: timeline.id,
+            source: "narrative",
+            revealed: true,
+          },
+          orderBy: [{ chapterIndex: "desc" }, { createdAt: "desc" }],
+          take: page.limit + 1,
+        })
+      : Promise.resolve([]),
   ]);
 
   const focusedEventId = focusedEventIdFromPersistence(timeline.observerState);
+  const legacyRows: WorldActivityProjectionRow[] = rows.length === 0
+    ? legacyChronicle
+    .map((entry) => ({
+      id: `chronicle:${entry.id}`,
+      eventId: null,
+      recordType: "activity",
+      kind: "discovery",
+      text: entry.text,
+      visibility: "public",
+      actorId: null,
+      targetIds: [],
+      subjectIds: [...entry.entityIds, ...entry.godIds],
+      eraLabel: entry.yearLabel,
+      timeLabel: entry.yearLabel,
+      createdAt: entry.createdAt,
+    }))
+    : [];
   const projected = projectWorldActivity({
     focusedEventId,
     events,
-    activities: rows,
+    activities: [...rows, ...legacyRows].sort((left, right) =>
+      new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+      || right.id.localeCompare(left.id)),
   }, viewer);
   const recentActivities = projected.activities.slice(0, page.limit);
   const hasNextPage = projected.activities.length > page.limit;
@@ -144,11 +194,59 @@ export async function GET(
     if (right.id === focusedEventId) return 1;
     return right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id);
   });
+  const subjectIds = [...new Set([
+    ...importantEvents.flatMap((event) => event.participantIds),
+    ...recentActivities.flatMap((activity) => activity.subjectIds),
+  ])];
+  const [entities, gods] = subjectIds.length > 0
+    ? await Promise.all([
+        db.entity.findMany({
+          where: { timelineId: timeline.id, id: { in: subjectIds } },
+          select: { id: true, name: true },
+        }),
+        db.god.findMany({
+          where: { timelineId: timeline.id, id: { in: subjectIds } },
+          select: { id: true, name: true, codexEntityId: true },
+        }),
+      ])
+    : [[], []];
+  type ResolvedSubject = {
+    id: string;
+    name: string;
+    entityId: string | null;
+    godId: string | null;
+  };
+  const subjectById = new Map<string, ResolvedSubject>([
+    ...entities.map((entity) => [
+      entity.id,
+      { id: entity.id, name: entity.name, entityId: entity.id, godId: null },
+    ] as const),
+    ...gods.map((god) => [
+      god.id,
+      { id: god.id, name: god.name, entityId: god.codexEntityId, godId: god.id },
+    ] as const),
+  ]);
+  const resolveSubjects = (ids: string[]) =>
+    ids.flatMap((subjectId) => {
+      const subject = subjectById.get(subjectId);
+      return subject ? [subject] : [];
+    });
 
   return NextResponse.json({
-    focusedEvent: projected.focusedEvent,
-    importantEvents,
-    recentActivities,
+    focusedEvent: projected.focusedEvent
+      ? {
+          ...projected.focusedEvent,
+          participants: resolveSubjects(projected.focusedEvent.participantIds),
+        }
+      : null,
+    importantEvents: importantEvents.map((event) => ({
+      ...event,
+      participants: resolveSubjects(event.participantIds),
+    })),
+    recentActivities: recentActivities.map((activity) => ({
+      ...activity,
+      subjects: resolveSubjects(activity.subjectIds),
+    })),
     nextCursor,
   });
 }

@@ -136,7 +136,15 @@ export function RealityTreePanel({
                   <div className="min-w-0">
                     <p className="font-medium text-ink">{node.branchName} {current && <span className="text-xs text-gilt">· 当前</span>}</p>
                     {node.branchSummary && <p className="mt-1 text-xs leading-relaxed text-ink-soft">{node.branchSummary}</p>}
-                    <p className="mt-1 text-[11px] text-ink-faint">{node.parentId === null ? "根现实" : `分叉于第 ${node.forkChapter ?? "?"} 章`} · {node.childCount} 个子现实</p>
+                    <p className="mt-1 text-[11px] text-ink-faint">
+                      {node.parentId === null
+                        ? "根现实"
+                        : node.forkTimeLabel
+                          ? `分叉于 ${node.forkTimeLabel}`
+                          : "由旧现实分叉"}
+                      {" · "}
+                      {node.childCount} 个子现实
+                    </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap justify-end gap-x-2 gap-y-1 text-xs">
                     {!current && <button disabled={navigationDisabled} onClick={() => void request("POST", { action: "switch", targetTimelineId: node.id, expectedActiveId: currentId }, node.id)} className="text-gilt disabled:opacity-40">进入</button>}

@@ -6,6 +6,7 @@ import {
   type SettlementActivityTx,
   type SettlementEventRow,
 } from "./settlement";
+import type { IconAssignmentRecord } from "@/lib/icons/assignment";
 
 const knownIds = {
   activityIds: ["activity-a", "activity-b", "activity-c"],
@@ -86,6 +87,7 @@ function fixture() {
       resolvedAt: null,
     }],
   ]);
+  const iconAssignments = new Map<string, IconAssignmentRecord>();
   let currentObserver: Record<string, unknown> = observerState;
 
   const tx: SettlementActivityTx = {
@@ -175,11 +177,30 @@ function fixture() {
         return { count };
       }),
     },
+    iconAssignment: {
+      findUnique: vi.fn(async ({ where }) => {
+        const key = where.timelineId_subjectType_subjectId;
+        return iconAssignments.get(`${key.timelineId}:${key.subjectType}:${key.subjectId}`) ?? null;
+      }),
+      create: vi.fn(async ({ data }) => {
+        const row = { id: `icon-${iconAssignments.size + 1}`, ...data };
+        iconAssignments.set(`${data.timelineId}:${data.subjectType}:${data.subjectId}`, row);
+        return row;
+      }),
+      update: vi.fn(async ({ where, data }) => {
+        const entry = [...iconAssignments.entries()].find(([, row]) => row.id === where.id);
+        if (!entry) throw new Error("missing icon assignment");
+        const row = { ...entry[1], ...data };
+        iconAssignments.set(entry[0], row);
+        return row;
+      }),
+    },
   };
   return {
     tx,
     activityRows,
     eventRows,
+    iconAssignments,
     observer: () => currentObserver,
   };
 }
@@ -218,8 +239,38 @@ describe("normalizeSettlementActivity", () => {
 });
 
 describe("applySettlementActivity", () => {
+  it("将本轮公开编年史同步为可见的世界动态", async () => {
+    const { tx, activityRows } = fixture();
+
+    await applySettlementActivity(tx, {
+      timelineId: "timeline-1",
+      chapterId: "chapter-1",
+      sourceMessageId: "message-current",
+      worldActivity: {
+        mergeActivityIds: [],
+        eventMutations: [],
+      },
+      chronicleEntries: [{
+        yearLabel: "潮汐纪元七年",
+        text: "北港守军封锁盐路，商队被迫改道。",
+        subjectIds: ["god-tide", "entity-port"],
+      }],
+    });
+
+    expect(activityRows.get("settlement:chapter-1:chronicle:0")).toMatchObject({
+      recordType: "activity",
+      kind: "discovery",
+      text: "北港守军封锁盐路，商队被迫改道。",
+      visibility: "public",
+      subjectIds: ["god-tide", "entity-port"],
+      sourceMessageId: "message-current",
+      eraLabel: "潮汐纪元七年",
+      timeLabel: "第七码头日",
+    });
+  });
+
   it("将相关普通动态升级成事件，合并重复项且断点重放不重复派生记录", async () => {
-    const { tx, activityRows, eventRows } = fixture();
+    const { tx, activityRows, eventRows, iconAssignments } = fixture();
     const worldActivity = {
       mergeActivityIds: ["activity-a", "activity-b"],
       eventMutations: [{
@@ -231,10 +282,12 @@ describe("applySettlementActivity", () => {
         phase: "escalating" as const,
         participantIds: ["god-tide", "entity-port"],
         visibility: "public" as const,
+        iconConcept: "event.conflict",
       }],
     };
     const input = {
       timelineId: "timeline-1",
+      worldId: "world-1",
       chapterId: "chapter-1",
       sourceMessageId: "message-current",
       worldActivity,
@@ -258,6 +311,11 @@ describe("applySettlementActivity", () => {
     });
     expect(tx.worldEvent.create).toHaveBeenCalledTimes(1);
     expect(tx.worldActivity.create).toHaveBeenCalledTimes(1);
+    expect(iconAssignments.get("timeline-1:event:settlement:chapter-1:0")).toMatchObject({
+      token: "event.conflict",
+      source: "generated",
+      playerLocked: false,
+    });
   });
 
   it("事件解决时清空 ObserverState 的当前关注", async () => {

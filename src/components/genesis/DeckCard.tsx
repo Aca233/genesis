@@ -2,20 +2,11 @@
 
 import { motion } from "motion/react";
 import type { DeckCardKey } from "@/lib/cards/schemas";
-import { useState } from "react";
+import { memo, useState } from "react";
 
 /** 卡片墙：古籍笺卡片 + 组头（重掷控制） */
 
-/** 单张古籍笺（卡名 + 关键摘要，点开进入全文编辑） */
-export function DeckCard({
-  title,
-  subtitle,
-  lines,
-  lockedCount,
-  sealed,
-  rerolling,
-  onOpen,
-}: {
+type DeckCardProps = {
   title: string;
   subtitle?: string;
   lines: string[];
@@ -25,8 +16,21 @@ export function DeckCard({
   sealed?: boolean;
   /** 所属组重掷中：覆盖墨迹旋转动效 */
   rerolling: boolean;
+  /** onOpen 闭包捕获的列表下标，仅用于 memo 比较；组件体内不使用 */
+  openIndex?: number;
   onOpen: () => void;
-}) {
+};
+
+/** 单张古籍笺（卡名 + 关键摘要，点开进入全文编辑） */
+function DeckCardBase({
+  title,
+  subtitle,
+  lines,
+  lockedCount,
+  sealed,
+  rerolling,
+  onOpen,
+}: DeckCardProps) {
   return (
     <motion.button
       type="button"
@@ -95,6 +99,22 @@ export function DeckCard({
     </motion.button>
   );
 }
+
+/** memo 比较：onOpen 刻意排除——各调用点闭包只捕获常量 kind 与列表下标，下标由 openIndex 覆盖 */
+function areDeckCardPropsEqual(prev: DeckCardProps, next: DeckCardProps): boolean {
+  return (
+    prev.title === next.title &&
+    prev.subtitle === next.subtitle &&
+    prev.lockedCount === next.lockedCount &&
+    prev.sealed === next.sealed &&
+    prev.rerolling === next.rerolling &&
+    prev.openIndex === next.openIndex &&
+    prev.lines.length === next.lines.length &&
+    prev.lines.every((line, i) => line === next.lines[i])
+  );
+}
+
+export const DeckCard = memo(DeckCardBase, areDeckCardPropsEqual);
 
 /** 组头：组名 + 骰形重掷印章（可附一句重掷要求，整组粒度） */
 export function GroupHeader({

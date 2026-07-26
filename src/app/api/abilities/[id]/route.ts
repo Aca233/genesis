@@ -66,6 +66,11 @@ type DeleteAbilityTx = AbilityMutationTx & {
   abilityEvent: AbilityMutationTx["abilityEvent"] & {
     count(args: { where: { abilityId: string } }): Promise<number>;
   };
+  iconAssignment: {
+    deleteMany(args: {
+      where: { timelineId: string; subjectType: "ability"; subjectId: string };
+    }): Promise<{ count: number }>;
+  };
 };
 
 type DeleteAbilityClient = {
@@ -146,6 +151,13 @@ async function deleteAbilityInSerializableTransaction(
     }
 
     if (eventCount === 0 && descendant === null) {
+      await tx.iconAssignment.deleteMany({
+        where: {
+          timelineId: stored.timelineId,
+          subjectType: "ability",
+          subjectId: id,
+        },
+      });
       const deleted = await tx.ability.deleteMany({
         where: { id, version: expectedVersion },
       });

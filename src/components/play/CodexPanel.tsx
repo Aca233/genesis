@@ -10,6 +10,7 @@ import type {
   ThemeCard,
 } from "./types";
 import { Emblem } from "./Emblem";
+import { IconPicker, type IconAssignmentView } from "@/components/icons/IconPicker";
 import { AbilityList } from "./AbilityList";
 import { SaveMaterialVersionButton } from "@/components/materials/SaveMaterialVersionButton";
 import { entityTypeName, ENTITY_TYPE_ORDER, sectionName } from "./lexicon";
@@ -38,6 +39,7 @@ type EntityLite = {
   heat: string;
   summary: string;
   scenePresence: boolean;
+  iconAssignment: IconAssignmentView;
 };
 
 type SectionRow = {
@@ -52,6 +54,9 @@ type SectionRow = {
 };
 
 type EntityDetail = EntityLite & {
+  worldId: string;
+  timelineId: string;
+  iconAssignment: IconAssignmentView;
   sections: SectionRow[];
   abilities: AbilityView[];
   race?: { id: string; name: string; summary: string } | null;
@@ -66,6 +71,7 @@ type ChronicleRow = {
   yearLabel: string;
   text: string;
   revealedAtChapter: number | null;
+  revealedAtTimeLabel?: string | null;
   worldVisible?: boolean;
 };
 
@@ -95,6 +101,7 @@ function EntityRow({
         type={entity.type}
         size={38}
         imageUrl={entity.imageUrl}
+        motif={entity.iconAssignment.icon}
       />
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 text-sm text-ink">
@@ -234,6 +241,33 @@ export function CharacterRelations({
   );
 }
 
+export function EntityChronicle({ chronicle }: { chronicle: readonly ChronicleRow[] }) {
+  if (chronicle.length === 0) return null;
+  return (
+    <div className="border-t border-line pt-3">
+      <h4 className="mb-2 text-xs tracking-widest text-ink-faint">其史</h4>
+      <ul className="grid gap-2">
+        {chronicle.map((entry) => (
+          <li key={entry.id} className="flex gap-3 text-sm">
+            <span className="shrink-0 text-xs text-gilt/70">{entry.yearLabel}</span>
+            <span className="text-ink-soft">
+              {entry.text}
+              {entry.worldVisible === false && (
+                <span className="ml-1 text-xs text-cinnabar/80">〔天外批注 · 世界内不可见〕</span>
+              )}
+              {entry.revealedAtChapter != null && (
+                <span className="ml-1 text-xs text-ink-faint">
+                  （{entry.revealedAtTimeLabel ? `${entry.revealedAtTimeLabel}方揭` : "后世方揭"}）
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function EntityDetailView({
   entityId,
   theme,
@@ -251,6 +285,7 @@ function EntityDetailView({
     emptyCodexDetailState<EntityDetail, ChronicleRow>(),
   );
   const { detail, chronicle, abilityHistory, error, loading } = loadState;
+  const [iconAssignment, setIconAssignment] = useState<IconAssignmentView | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -275,6 +310,7 @@ function EntityDetailView({
             json.entity!.abilityEvents ?? [],
           ),
         );
+        setIconAssignment(json.entity!.iconAssignment);
       } catch (err) {
         if (!cancelled) {
           setLoadState(
@@ -324,6 +360,7 @@ function EntityDetailView({
           type={detail.type}
           size={56}
           imageUrl={detail.imageUrl}
+          motif={iconAssignment?.icon ?? detail.iconAssignment.icon}
         />
         <div className="min-w-0 flex-1">
           <h3
@@ -354,6 +391,16 @@ function EntityDetailView({
             )}
           </p>
           <div className="mt-2"><SaveMaterialVersionButton sourceType="entity" sourceId={detail.id} compact /></div>
+          <div className="mt-2">
+            <IconPicker
+              worldId={detail.worldId}
+              timelineId={detail.timelineId}
+              subjectType="entity"
+              subjectId={detail.id}
+              value={iconAssignment ?? detail.iconAssignment}
+              onChange={setIconAssignment}
+            />
+          </div>
         </div>
       </header>
 
@@ -439,29 +486,7 @@ function EntityDetailView({
         </section>
       )}
 
-      {chronicle.length > 0 && (
-        <div className="border-t border-line pt-3">
-          <h4 className="mb-2 text-xs tracking-widest text-ink-faint">其史</h4>
-          <ul className="grid gap-2">
-            {chronicle.map((c) => (
-              <li key={c.id} className="flex gap-3 text-sm">
-                <span className="shrink-0 text-xs text-gilt/70">{c.yearLabel}</span>
-                <span className="text-ink-soft">
-                  {c.text}
-                  {c.worldVisible === false && (
-                    <span className="ml-1 text-xs text-cinnabar/80">〔天外批注 · 世界内不可见〕</span>
-                  )}
-                  {c.revealedAtChapter != null && (
-                    <span className="ml-1 text-xs text-ink-faint">
-                      （第{c.revealedAtChapter}章方揭）
-                    </span>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <EntityChronicle chronicle={chronicle} />
     </div>
   );
 }
@@ -530,7 +555,7 @@ export function CodexPanel({
 
   if (!entities) return <p className="fog-text text-sm">展卷中…</p>;
   if (entities.length === 0) {
-    return <p className="fog-text text-sm">众生尚未入册——史官将在章末清点。</p>;
+    return <p className="fog-text text-sm">众生尚未入册——史官将在世界变化后清点。</p>;
   }
 
   const q = filter.trim();

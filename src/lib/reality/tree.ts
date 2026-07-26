@@ -12,6 +12,7 @@ export type RealityNodeDto = {
   branchName: string;
   branchSummary: string | null;
   forkChapter: number | null;
+  forkTimeLabel: string | null;
   rewriteId: string | null;
   rewriteDecree: string | null;
   childCount: number;
@@ -31,6 +32,7 @@ export type RealityTreeTimeline = {
   branchName: string;
   branchSummary: string | null;
   forkChapter: number | null;
+  forkTimeLabel?: string | null;
   forkRewriteId: string | null;
   updatedAt: Date;
 };
@@ -71,7 +73,7 @@ export class RealityConflictError extends Error {
   }
 }
 
-type TreeReader = Pick<PrismaClient, "world" | "timeline" | "realityRewrite">;
+type TreeReader = Pick<PrismaClient, "world" | "timeline" | "realityRewrite" | "chronicleEntry">;
 type SwitchClient = Pick<
   PrismaClient,
   "world" | "timeline" | "chapter" | "generationRequest"
@@ -170,6 +172,7 @@ export function buildRealityTree(input: RealityTreeInput): RealityTreeDto {
         branchName: timeline.branchName,
         branchSummary: timeline.branchSummary,
         forkChapter: timeline.forkChapter,
+        forkTimeLabel: timeline.forkTimeLabel ?? null,
         rewriteId: rewrite?.id ?? null,
         rewriteDecree: rewrite?.decree ?? null,
         childCount: childCounts.get(timeline.id) ?? 0,
@@ -187,7 +190,7 @@ async function readRealityTreeInput(db: TreeReader, worldId: string): Promise<Re
   });
   if (world === null) throw new RealityNotFoundError("世界不存在");
 
-  const [timelines, rewrites] = await Promise.all([
+  const [timelineRows, rewrites, chronicleRows] = await Promise.all([
     db.timeline.findMany({
       where: { worldId },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -213,7 +216,25 @@ async function readRealityTreeInput(db: TreeReader, worldId: string): Promise<Re
         decree: true,
       },
     }),
+    db.chronicleEntry.findMany({
+      where: { timeline: { worldId } },
+      orderBy: [{ chapterIndex: "asc" }, { createdAt: "asc" }],
+      select: { timelineId: true, chapterIndex: true, yearLabel: true },
+    }),
   ]);
+  const timeByTimelineAndInternalIndex = new Map<string, string>();
+  for (const row of chronicleRows) {
+    const key = `${row.timelineId}:${row.chapterIndex}`;
+    if (!timeByTimelineAndInternalIndex.has(key) && row.yearLabel.trim()) {
+      timeByTimelineAndInternalIndex.set(key, row.yearLabel);
+    }
+  }
+  const timelines = timelineRows.map((timeline) => ({
+    ...timeline,
+    forkTimeLabel: timeline.parentId === null || timeline.forkChapter === null
+      ? null
+      : timeByTimelineAndInternalIndex.get(`${timeline.parentId}:${timeline.forkChapter}`) ?? null,
+  }));
   return { worldId, activeTimelineId: world.activeTimelineId, timelines, rewrites };
 }
 

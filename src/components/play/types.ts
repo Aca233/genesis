@@ -65,6 +65,7 @@ export type KnownAbilityView = {
   version: number;
   /** 人物有效能力由种族模板默认继承时，详情接口附带。 */
   inherited?: boolean;
+  iconAssignment?: import("@/components/icons/IconPicker").IconAssignmentView;
 };
 
 export type RumoredAbilityView = {
@@ -74,6 +75,7 @@ export type RumoredAbilityView = {
   visibility: "rumored";
   rumorText: string | null;
   state: AbilityState;
+  iconAssignment?: import("@/components/icons/IconPicker").IconAssignmentView;
 };
 
 export type OmniscientAbilityView = Omit<KnownAbilityView, "visibility"> & {
@@ -175,6 +177,7 @@ export type GodRow = {
   agendaRevealed: boolean;
   agendaWorldVisible?: boolean;
   abilities: AbilityView[];
+  iconAssignment?: import("@/components/icons/IconPicker").IconAssignmentView;
 };
 
 // ── 世界核心卡（Json 宽松结构） ──
@@ -220,6 +223,16 @@ export type WorldInfo = {
   styleCard: StyleCard | null;
   cosmology: Cosmology | null;
   fusionAxiom: FusionAxiom | null;
+  iconTheme: {
+    version: 1;
+    catalogVersion: 1;
+    primaryFamily: "phosphor" | "tabler" | "iconPark";
+    emblemFamily: "gameIcons" | "phosphor" | "iconPark";
+    visualTone: string[];
+    motifTags: string[];
+  };
+  iconThemeRevision: number;
+  navigationIcons: Partial<Record<DrawerTab, import("@/components/icons/WorldIcon").SvgIconData>>;
   /** 后端 state 暂未下发此卡（M1）；防御性预留，缺省时设定集页显示残卷占位 */
   epochConflict?: EpochConflict | null;
 };

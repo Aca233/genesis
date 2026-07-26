@@ -13,6 +13,11 @@ const mocks = vi.hoisted(() => ({
     entityRelation: { findMany: vi.fn() },
     ability: { findUnique: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn(), create: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
     abilityEvent: { findUnique: vi.fn(), create: vi.fn(), findMany: vi.fn(), count: vi.fn() },
+    iconAssignment: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
     $transaction: vi.fn(),
     chronicleEntry: { findMany: vi.fn() },
   },
@@ -634,6 +639,13 @@ describe("能力 API 可见性", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ deleted: true, deprecated: false });
+    expect(mocks.prisma.iconAssignment.deleteMany).toHaveBeenCalledWith({
+      where: {
+        timelineId: "timeline-1",
+        subjectType: "ability",
+        subjectId: "ability-known",
+      },
+    });
   });
 
   it("DELETE 隐藏能力返回 404 且不写入、计数或删除", async () => {

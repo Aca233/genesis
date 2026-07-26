@@ -16,9 +16,11 @@ import {
   RealityStateSchema,
 } from "@/lib/reality/schemas";
 import { buildRealityTree } from "@/lib/reality/tree";
+import { ICON_CATALOG_BY_TOKEN } from "@/lib/icons/catalog";
+import { parseWorldIconTheme } from "@/lib/icons/theme";
 
 /**
- * POST /api/worlds/import —— 导入 version 1、2、3 或 4 存档。
+ * POST /api/worlds/import —— 导入 version 4 存档。
  * 所有记录在单个事务中用新 ID 重建，任何失败都会回滚整个新世界。
  */
 
@@ -242,6 +244,18 @@ const OmenSchema = z
   })
   .strict();
 
+const IconAssignmentSchema = z.object({
+  id: OptionalIdSchema,
+  timelineId: OptionalIdSchema,
+  subjectType: z.enum(["entity", "god", "ability", "event"]),
+  subjectId: IdSchema,
+  token: ShortStringSchema,
+  source: z.enum(["generated", "derived", "player"]),
+  playerLocked: z.boolean().default(false),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+}).strict();
+
 const WorldEventSchema = z
   .object({
     id: IdSchema,
@@ -335,6 +349,7 @@ const TimelineSchema = z
     worldEvents: z.array(WorldEventSchema).max(MAX_COLLECTION_ITEMS).default([]),
     worldActivities: z.array(WorldActivitySchema).max(MAX_COLLECTION_ITEMS).default([]),
     entityRelations: z.array(EntityRelationSchema).max(MAX_COLLECTION_ITEMS).default([]),
+    iconAssignments: z.array(IconAssignmentSchema).max(MAX_COLLECTION_ITEMS).default([]),
     createdAt: z.coerce.date().optional(),
     updatedAt: z.coerce.date().optional(),
   })
@@ -383,6 +398,7 @@ const WorldSchema = z
     styleCard: BoundedJsonSchema.optional(),
     cosmology: BoundedJsonSchema.optional(),
     fusionAxiom: BoundedJsonSchema.optional(),
+    iconTheme: BoundedJsonSchema.optional(),
     activeTimelineId: NullableIdSchema,
     materialArchiveStatus: ShortStringSchema.optional(),
     materialArchiveError: TextSchema.nullish(),
@@ -396,7 +412,7 @@ const WorldSchema = z
 
 const ImportSchema = z
   .object({
-    version: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+    version: z.literal(4),
     exportedAt: z.string().datetime().max(64).optional(),
     world: WorldSchema,
   })
@@ -839,28 +855,6 @@ function remapArchivedJson(
   return visit(value) ?? Prisma.DbNull;
 }
 
-function derivedRealityState(world: ImportedWorld): Prisma.InputJsonValue {
-  return {
-    theme: world.themeCard ?? {},
-    style: world.styleCard ?? {},
-    cosmology: world.cosmology ?? {},
-    fusionAxiom: world.fusionAxiom ?? null,
-    currentEra: "",
-    establishedFacts: [],
-  } as Prisma.InputJsonObject;
-}
-
-function defaultObserverState(): Prisma.InputJsonValue {
-  return {
-    focusType: "world",
-    focusId: null,
-    timeLabel: "",
-    viewpoint: "omniscient",
-    activeAvatarId: null,
-    focusedEventId: null,
-  } as Prisma.InputJsonObject;
-}
-
 function normalizedObserverState(value: unknown): unknown {
   const observer = typeof value === "object" && value !== null
     ? value as Record<string, unknown>
@@ -871,7 +865,7 @@ function normalizedObserverState(value: unknown): unknown {
   };
 }
 
-function validateVersionThreeArchive(world: ImportedWorld) {
+function validateCurrentArchive(world: ImportedWorld) {
   if (world.timelines.length === 0) {
     if (world.activeTimelineId !== null && world.activeTimelineId !== undefined) {
       throw new Error("空白世界不得指定活动现实");
@@ -1027,9 +1021,9 @@ export async function POST(request: Request) {
     typeof raw === "object" && raw !== null
       ? (raw as { version?: unknown }).version
       : undefined;
-  if (rawVersion !== 1 && rawVersion !== 2 && rawVersion !== 3 && rawVersion !== 4) {
+  if (rawVersion !== 4) {
     return NextResponse.json(
-      { error: "存档版本不受支持：仅接受 version 1、version 2、version 3 或 version 4" },
+      { error: "存档版本不受支持：仅接受 version 4" },
       { status: 400 },
     );
   }
@@ -1041,22 +1035,7 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const archiveVersion = parsed.data.version;
   const w = parsed.data.world;
-  if (archiveVersion < 4) {
-    for (const timeline of w.timelines) {
-      timeline.worldEvents = [];
-      timeline.worldActivities = [];
-      timeline.entityRelations = [];
-      timeline.observerState = {
-        ...(typeof timeline.observerState === "object" && timeline.observerState !== null
-          ? timeline.observerState as Record<string, unknown>
-          : {}),
-        focusedEventId: null,
-      };
-    }
-  }
-  const importedMode = archiveVersion >= 3 ? w.mode : "pantheon";
 
   const newWorldId = crypto.randomUUID();
   const archiveIds = new Map<string, string>();
@@ -1127,7 +1106,7 @@ export async function POST(request: Request) {
       if (lorebook.id !== undefined) addMapping(lorebookMap, archiveIds, lorebook.id, "世界书条目");
     }
 
-    if (archiveVersion >= 3) validateVersionThreeArchive(w);
+    validateCurrentArchive(w);
 
     const referenceIndexes = buildReferenceIndexes(w);
     for (const timeline of w.timelines) {
@@ -1149,6 +1128,7 @@ export async function POST(request: Request) {
     const worldEventRows: Prisma.WorldEventCreateManyInput[] = [];
     const worldActivityRows: Prisma.WorldActivityCreateManyInput[] = [];
     const entityRelationRows: Prisma.EntityRelationCreateManyInput[] = [];
+    const iconAssignmentRows: Prisma.IconAssignmentCreateManyInput[] = [];
     const allIdMap = new Map<string, string>([
       ...timelineMap,
       ...chapterMap,
@@ -1170,12 +1150,8 @@ export async function POST(request: Request) {
 
     for (const tl of w.timelines) {
       const newTlId = remapRequired(timelineMap, tl.id, "时间线");
-      const realityState = archiveVersion >= 3
-        ? remapArchivedJson(tl.realityState, allIdMap)
-        : derivedRealityState(w);
-      const observerState = archiveVersion >= 3
-        ? remapArchivedJson(normalizedObserverState(tl.observerState), allIdMap)
-        : defaultObserverState();
+      const realityState = remapArchivedJson(tl.realityState, allIdMap);
+      const observerState = remapArchivedJson(normalizedObserverState(tl.observerState), allIdMap);
       timelineRows.push({
         id: newTlId,
         worldId: newWorldId,
@@ -1183,15 +1159,11 @@ export async function POST(request: Request) {
           ? remapRequired(timelineMap, tl.parentId, "父时间线")
           : null,
         forkChapter: tl.forkChapter ?? null,
-        branchName: archiveVersion >= 3
-          ? tl.branchName
-          : tl.parentId === null
-            ? "原初现实"
-            : `旧现实·${tl.forkChapter ?? 0}`,
+        branchName: tl.branchName,
         branchSummary: tl.branchSummary ?? null,
         realityState,
         observerState,
-        forkRewriteId: archiveVersion >= 3 && tl.forkRewriteId != null
+        forkRewriteId: tl.forkRewriteId != null
           ? remapRequired(rewriteMap, tl.forkRewriteId, "分叉改写")
           : null,
         createdAt: tl.createdAt,
@@ -1238,7 +1210,7 @@ export async function POST(request: Request) {
           starred: entity.starred,
           isChosen: entity.isChosen,
           isMajorCharacter: entity.isMajorCharacter,
-          isCreatorAvatar: archiveVersion >= 3 ? entity.isCreatorAvatar : false,
+          isCreatorAvatar: entity.isCreatorAvatar,
           raceId: entity.raceId != null
             ? remapRequired(entityMap, entity.raceId, "人物种族")
             : null,
@@ -1487,6 +1459,36 @@ export async function POST(request: Request) {
           createdAt: activity.createdAt,
         });
       }
+
+      const iconSubjectMaps = {
+        entity: entityMap,
+        god: godMap,
+        ability: abilityMap,
+        event: worldEventMap,
+      } as const;
+      const localSubjects = {
+        entity: new Set(tl.entities.map((item) => item.id)),
+        god: new Set(tl.gods.map((item) => item.id)),
+        ability: new Set(tl.abilities.map((item) => item.id)),
+        event: new Set(tl.worldEvents.map((item) => item.id)),
+      } as const;
+      for (const assignment of tl.iconAssignments) {
+        if (!ICON_CATALOG_BY_TOKEN.has(assignment.token)) continue;
+        if (!localSubjects[assignment.subjectType].has(assignment.subjectId)) continue;
+        const subjectId = iconSubjectMaps[assignment.subjectType].get(assignment.subjectId);
+        if (subjectId === undefined) continue;
+        iconAssignmentRows.push({
+          id: crypto.randomUUID(),
+          timelineId: newTlId,
+          subjectType: assignment.subjectType,
+          subjectId,
+          token: assignment.token,
+          source: assignment.source,
+          playerLocked: assignment.playerLocked,
+          createdAt: assignment.createdAt,
+          updatedAt: assignment.updatedAt,
+        });
+      }
     }
 
     for (const rewrite of w.rewrites) {
@@ -1526,7 +1528,7 @@ export async function POST(request: Request) {
           id: newWorldId,
           name: w.name,
           genesisInput: w.genesisInput,
-          mode: importedMode,
+          mode: w.mode,
           status: w.status,
           draftDeck: json(w.draftDeck),
           lockedPaths: w.lockedPaths,
@@ -1534,6 +1536,9 @@ export async function POST(request: Request) {
           styleCard: json(w.styleCard),
           cosmology: json(w.cosmology),
           fusionAxiom: json(w.fusionAxiom),
+          iconTheme: w.iconTheme !== undefined
+            ? parseWorldIconTheme(w.iconTheme) as unknown as Prisma.InputJsonValue
+            : undefined,
           materialArchiveStatus: w.materialArchiveStatus ?? "pending",
           materialArchiveError: null,
           activeTimelineId: null,
@@ -1572,6 +1577,9 @@ export async function POST(request: Request) {
       }));
       await tx.worldEvent.createMany({ data: deferredEventRows });
       await tx.worldActivity.createMany({ data: worldActivityRows });
+      if (iconAssignmentRows.length > 0) {
+        await tx.iconAssignment.createMany({ data: iconAssignmentRows });
+      }
       for (const row of worldEventRows) {
         if (
           row.parentEventId !== null

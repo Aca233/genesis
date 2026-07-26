@@ -415,6 +415,19 @@ it("同章新人物的非法能力逐项拒绝，其他实体、能力与状态�
 
 it("即使有多位主要神，一次结束章节也只发起一个结构化模型调用", async () => {
   const data = await fixture();
+  await prisma.timeline.update({
+    where: { id: data.timeline.id },
+    data: {
+      observerState: {
+        focusType: "world",
+        focusId: null,
+        focusedEventId: null,
+        timeLabel: "元年",
+        viewpoint: "limited",
+        activeAvatarId: null,
+      },
+    },
+  });
   await prisma.god.createMany({ data: [
     { timelineId: data.timeline.id, name: "山岳神", aliases: [], tier: "major", rank: "ascended", domains: ["山岳"] },
     { timelineId: data.timeline.id, name: "长风神", aliases: [], tier: "major", rank: "nascent", domains: ["长风"] },
@@ -437,6 +450,13 @@ it("即使有多位主要神，一次结束章节也只发起一个结构化模�
     expect(await prisma.chronicleEntry.count({
       where: { timelineId: data.timeline.id, chapterIndex: 1, source: "pantheon" },
     })).toBe(2);
+    expect(await prisma.chronicleEntry.findMany({
+      where: { timelineId: data.timeline.id, chapterIndex: 1, source: "pantheon" },
+      select: { yearLabel: true },
+    })).toEqual([
+      { yearLabel: "元年" },
+      { yearLabel: "元年" },
+    ]);
   } finally {
     await prisma.world.delete({ where: { id: data.world.id } });
   }

@@ -4,6 +4,7 @@ export type RealityNodeView = {
   branchName: string;
   branchSummary: string | null;
   forkChapter: number | null;
+  forkTimeLabel: string | null;
   rewriteId: string | null;
   rewriteDecree: string | null;
   childCount: number;
@@ -30,28 +31,29 @@ export type BusyKinds = {
 export type ModeDrawerTab = "activity" | "starmap" | "chronicle" | "god" | "creator" | "realities" | "lore" | "codex";
 export type DrawerTabDefinition = {
   tab: ModeDrawerTab;
-  glyph: string;
+  iconToken: string;
   label: string;
   title: string;
 };
 
 export const pantheonDrawerTabs: readonly DrawerTabDefinition[] = [
-  { tab: "activity", glyph: "◌", label: "动态", title: "◌ 世界动态" },
-  { tab: "starmap", glyph: "✦", label: "星图", title: "✦ 星图" },
-  { tab: "chronicle", glyph: "📜", label: "年表", title: "📜 编年史" },
-  { tab: "god", glyph: "◈", label: "神格", title: "◈ 本尊神格" },
-  { tab: "lore", glyph: "📖", label: "设定集", title: "📖 世界设定集" },
-  { tab: "codex", glyph: "👥", label: "众生录", title: "👥 众生录" },
+  { tab: "activity", iconToken: "world.activity", label: "动态", title: "世界动态" },
+  { tab: "starmap", iconToken: "cosmos.constellation", label: "星图", title: "星图" },
+  { tab: "chronicle", iconToken: "chronicle.archive", label: "年表", title: "编年史" },
+  { tab: "god", iconToken: "divinity.pantheon", label: "神格", title: "本尊神格" },
+  { tab: "lore", iconToken: "knowledge.codex", label: "设定集", title: "世界设定集" },
+  { tab: "codex", iconToken: "people.collective", label: "众生录", title: "众生录" },
 ] as const;
 
 export const creatorDrawerTabs: readonly DrawerTabDefinition[] = [
-  { tab: "activity", glyph: "◌", label: "动态", title: "◌ 世界动态" },
-  { tab: "starmap", glyph: "✦", label: "星图", title: "✦ 星图" },
-  { tab: "chronicle", glyph: "📜", label: "编年史", title: "📜 编年史" },
-  { tab: "creator", glyph: "◉", label: "天外视界", title: "◉ 天外视界" },
-  { tab: "realities", glyph: "⌘", label: "现实树", title: "⌘ 现实树" },
-  { tab: "lore", glyph: "📖", label: "设定集", title: "📖 世界设定集" },
-  { tab: "codex", glyph: "👥", label: "众生录", title: "👥 众生录" },
+  { tab: "activity", iconToken: "world.activity", label: "动态", title: "世界动态" },
+  { tab: "starmap", iconToken: "cosmos.constellation", label: "星图", title: "星图" },
+  { tab: "chronicle", iconToken: "chronicle.archive", label: "编年史", title: "编年史" },
+  { tab: "god", iconToken: "divinity.pantheon", label: "诸神", title: "诸神录" },
+  { tab: "creator", iconToken: "observer.transcendent", label: "天外视界", title: "天外视界" },
+  { tab: "realities", iconToken: "reality.branch", label: "现实树", title: "现实树" },
+  { tab: "lore", iconToken: "knowledge.codex", label: "设定集", title: "世界设定集" },
+  { tab: "codex", iconToken: "people.collective", label: "众生录", title: "众生录" },
 ] as const;
 
 export function drawerTabsForMode(mode: "pantheon" | "creator") {
