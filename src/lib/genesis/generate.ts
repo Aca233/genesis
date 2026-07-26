@@ -15,6 +15,9 @@ import {
 } from "./json-progress";
 import { mergeCompletedKeys, type GenesisStageId } from "./stages";
 
+/** 定向修复轮数上限:第二轮可解决第一轮修复稿的残余语义错误。 */
+const MAX_REPAIR_ROUNDS = 2;
+
 type SharedRepairInput = {
   decree: string;
   lorebookExcerpts?: string;
@@ -102,25 +105,37 @@ export async function generateGenesisDeck(
   try {
     return parseAndValidate(rawOutput, mode, options.materialSnapshot ?? null);
   } catch (error) {
-    const validationError = describeValidationError(error);
-    await options.onStage("repair");
-    const sharedRepairInput = {
-      decree: options.decree,
-      lorebookExcerpts: options.lorebookExcerpts,
-      invalidOutput: rawOutput,
-      validationError,
-    };
-    const repaired = mode === "pantheon"
-      ? await options.repairCompletion({
-        ...sharedRepairInput,
-        mode,
-        schema: PantheonWorldDeckSchema,
-      })
-      : await options.repairCompletion({
-        ...sharedRepairInput,
-        mode,
-        schema: CreatorWorldDeckSchema,
-      });
-    return validateParsedDeck(repaired, mode, options.materialSnapshot ?? null);
+    // 最多两轮定向修复:第一轮针对流式原文,第二轮针对上一轮修复稿的残余问题。
+    let invalidOutput = rawOutput;
+    let validationError = describeValidationError(error);
+    let lastError: unknown = error;
+    for (let round = 0; round < MAX_REPAIR_ROUNDS; round += 1) {
+      await options.onStage("repair");
+      const sharedRepairInput = {
+        decree: options.decree,
+        lorebookExcerpts: options.lorebookExcerpts,
+        invalidOutput,
+        validationError,
+      };
+      const repaired = mode === "pantheon"
+        ? await options.repairCompletion({
+          ...sharedRepairInput,
+          mode,
+          schema: PantheonWorldDeckSchema,
+        })
+        : await options.repairCompletion({
+          ...sharedRepairInput,
+          mode,
+          schema: CreatorWorldDeckSchema,
+        });
+      try {
+        return validateParsedDeck(repaired, mode, options.materialSnapshot ?? null);
+      } catch (repairError) {
+        lastError = repairError;
+        invalidOutput = JSON.stringify(repaired);
+        validationError = describeValidationError(repairError);
+      }
+    }
+    throw lastError;
   }
 }

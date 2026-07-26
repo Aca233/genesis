@@ -205,7 +205,7 @@ describe("generateGenesisDeck", () => {
     }));
   });
 
-  it("修补输出仍违反素材约束时直接失败且不发起第三次调用", async () => {
+  it("两轮修补仍违反素材约束时失败且不发起第三轮修补", async () => {
     const deck = completeDeck();
     const material = extractDeckMaterials(deck).find((item) => item.kind === "major_god")!;
     const snapshot = {
@@ -224,7 +224,7 @@ describe("generateGenesisDeck", () => {
       streamCompletion: () => chunksOf(JSON.stringify(invalid)), repairCompletion,
       onProgress: vi.fn(), onChunk: vi.fn(), onStage: vi.fn(),
     })).rejects.toThrow("素材继承约束验证失败");
-    expect(repairCompletion).toHaveBeenCalledTimes(1);
+    expect(repairCompletion).toHaveBeenCalledTimes(2);
   });
 
 
