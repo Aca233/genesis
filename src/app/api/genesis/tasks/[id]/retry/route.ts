@@ -15,6 +15,8 @@ export async function POST(
       error: null,
       leaseToken: null,
       leaseExpiresAt: null,
+      // 手动重试给全新的瞬断自愈配额
+      attempt: 0,
     },
   });
   if (updated.count !== 1) {

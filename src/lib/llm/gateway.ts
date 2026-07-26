@@ -147,6 +147,8 @@ async function collectStream(
 
 /** 单次请求最多接力续写的轮数（12 轮 × ~4k ≈ 48k，覆盖含将临之事的完整创世卡组并留余量）。 */
 const MAX_CONTINUATION_ROUNDS = 12;
+/** 流式接力途中允许的瞬时网络错误断点续传次数（独立于接力轮数预算）。 */
+const STREAM_NETWORK_RETRIES = 4;
 
 const CONTINUE_NUDGE =
   "你的上一条输出因长度上限被截断。从被截断的确切位置继续输出剩余内容：不要重复任何已输出的字符，不要添加任何解释、前言、省略号或代码围栏，直接接着写。";
@@ -357,13 +359,33 @@ export async function* stream(
       await logCall({ ...baseLog, ok: true, usage, cacheRequested, cacheFallback });
     };
 
-    yield* runRound(req, "");
+    // 断点续传:接力途中的瞬时网络错误不废弃整条流,以已累积文本为基础改走续写。
+    let networkRetries = 0;
+    const runResilient = async function* (roundReq: CompletionRequest, overlapBase: string) {
+      for (;;) {
+        try {
+          yield* runRound(roundReq, overlapBase);
+          return;
+        } catch (error) {
+          const resumable = req.failOnTruncation && isRetryable(error)
+            && accumulated.length > 0 && networkRetries < STREAM_NETWORK_RETRIES
+            && !options?.signal?.aborted;
+          if (!resumable) throw error;
+          networkRetries += 1;
+          await backoff(networkRetries - 1);
+          roundReq = continuationRequest(req, accumulated);
+          overlapBase = accumulated;
+        }
+      }
+    };
+
+    yield* runResilient(req, "");
     if (req.failOnTruncation) {
       for (let round = 0;
         needsContinuation(req, truncated, accumulated) && !options?.signal?.aborted;
         round += 1) {
         if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
-        yield* runRound(continuationRequest(req, accumulated), accumulated);
+        yield* runResilient(continuationRequest(req, accumulated), accumulated);
       }
     }
   } catch (error) {

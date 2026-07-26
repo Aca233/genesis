@@ -230,6 +230,37 @@ describe("输出上限续写接力", () => {
     expect(mocks.stream).toHaveBeenCalledTimes(1);
   });
 
+  it("stream: 接力途中瞬时网络错误断点续传,不废弃已产出文本", async () => {
+    mocks.stream
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: '{"chapter":"上卷' };
+        yield usageChunk(true);
+        yield { type: "done" };
+      })
+      .mockImplementationOnce(async function* () {
+        // 本轮在接缝缓冲尚未吐出时断线:未交付的片段应被丢弃,由下一轮重写
+        yield { type: "text", text: "中卷片段" };
+        throw new Error("fetch failed");
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: '下卷"}' };
+        yield usageChunk(false);
+        yield { type: "done" };
+      });
+
+    let text = "";
+    for await (const chunk of stream("narrative", {
+      task: "genesis",
+      failOnTruncation: true,
+      messages: [{ role: "user", content: "create" }],
+    })) {
+      if (chunk.type === "text") text += chunk.text;
+    }
+    // 断线轮的未交付片段不进入结果(消费者从未收到),续传轮从已确认文本接续
+    expect(text).toBe('{"chapter":"上卷下卷"}');
+    expect(mocks.stream).toHaveBeenCalledTimes(3);
+  });
+
   it("stream: 连续截断超过轮数上限时报可操作错误", async () => {
     mocks.stream.mockImplementation(async function* () {
       yield { type: "text", text: "片段" };
