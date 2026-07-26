@@ -1,4 +1,4 @@
-import type { CacheAggregate } from "@/lib/llm/cache-stats";
+import type { CacheAggregate, ExpectedHitStats } from "@/lib/llm/cache-stats";
 
 const tokenFormatter = new Intl.NumberFormat("zh-CN", {
   notation: "compact",
@@ -27,4 +27,20 @@ export function summarizeCacheAvailability(
       : [`${aggregate.callsWithUsage}/${aggregate.calls} 次调用返回用量`];
   if (aggregate.fallbackCalls > 0) parts.push(`自动兼容回退 ${aggregate.fallbackCalls} 次`);
   return parts.join(" · ");
+}
+
+/** 「应命中 vs 实际命中」摘要:同前缀 5 分钟内的第 2+ 次调用应当命中缓存。 */
+export function formatExpectedHits(stats: ExpectedHitStats): string {
+  if (stats.expectedCalls === 0) return "尚无同前缀的短窗口重复调用,无法判定应命中率";
+  const parts = [`应命中 ${stats.expectedCalls} 次`, `实际命中 ${stats.hitCalls} 次`];
+  if (stats.missedCalls > 0) parts.push(`未命中 ${stats.missedCalls} 次`);
+  if (stats.rate !== null) parts.push(`应命中达成率 ${(stats.rate * 100).toFixed(0)}%`);
+  if (stats.unknownCalls > 0) parts.push(`${stats.unknownCalls} 次无用量不可判定`);
+  return parts.join(" · ");
+}
+
+/** 运行内轮号展示:0 = 首轮;旧记录无轮号返回空串。 */
+export function roundLabel(index: number | null): string {
+  if (index === null || index < 0) return "";
+  return index === 0 ? "" : `第${index + 1}轮`;
 }

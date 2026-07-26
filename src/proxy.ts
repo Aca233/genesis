@@ -29,5 +29,7 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   // 排除:/api(API 自带 401 语义,设计文档 §2.2)、Next 静态资源、favicon、所有带扩展名的静态文件(public/ 字体与图片)
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)"],
+  // 注:「带扩展名」用 [.] 而非 \\. —— Next 的 matcher 编译(path-to-regexp)会剥掉 \. 的反斜杠,
+  // 使 .*\\..* 退化为 .*..*(匹配一切非空路径,整个 matcher 只剩 /);字符类无转义歧义,两种编译器语义一致。
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*[.].*).*)"],
 };

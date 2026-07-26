@@ -13,6 +13,11 @@ import { fallbackLorebookExcerpts, parseStWorldbook } from "@/lib/lorebook/st-im
 import { classifyLoreEntries } from "@/lib/lore-index/classifier";
 import { LORE_GENESIS_BUDGET_CHARS, selectLoreForGenesis } from "@/lib/lore-index/selection";
 import { generateGenesisDeck } from "./generate";
+import {
+  auditTemporalSemantics,
+  TemporalAuditResultSchema,
+  type TemporalAuditResult,
+} from "./temporal-audit";
 import { GenesisMaterialSnapshotSchema, type GenesisMaterialSnapshot } from "@/lib/materials/types";
 import { materialConstraintsPrompt } from "@/lib/materials/prompt";
 import { deriveStreamingStage, furthestStage, mergeCompletedKeys } from "./stages";
@@ -38,14 +43,21 @@ export type GenesisTaskDto = {
   worldId: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * 报告型 AI 语义审计结果（时间一致设计稿 §10.4）。仅 IP 世界产出；
+   * 原创世界、旧任务或审计调用失败为 null。确认页只读展示，不阻断。
+   */
+  auditReport: TemporalAuditResult | null;
 };
 
 type PublicTask = Pick<
   GenesisTask,
   "id" | "mode" | "status" | "stage" | "completedKeys" | "error" | "worldId" | "createdAt" | "updatedAt"
->;
+> & Partial<Pick<GenesisTask, "auditReport">>;
 
 export function toGenesisTaskDto(task: PublicTask): GenesisTaskDto {
+  // 持久化 Json 不可尽信：形状不符（历史脏数据）一律按无审计处理，DTO 永不抛错。
+  const audit = TemporalAuditResultSchema.safeParse(task.auditReport);
   return {
     id: task.id,
     mode: WorldModeSchema.parse(task.mode),
@@ -56,6 +68,7 @@ export function toGenesisTaskDto(task: PublicTask): GenesisTaskDto {
     worldId: task.worldId,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
+    auditReport: audit.success ? audit.data : null,
   };
 }
 
@@ -234,6 +247,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
       streamCompletion: async function* () {
         for await (const chunk of stream("narrative", {
           task: "genesis",
+          userId: USER_ID,
           maxTokens: 16000,
           failOnTruncation: true,
           cache: { namespace: `genesis:v1:${mode}` },
@@ -256,6 +270,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
         });
         const request = {
           task: "genesis" as const,
+          userId: USER_ID,
           system: genesisSystem(input.mode),
           user: repairPrompt,
           maxTokens: 16000,
@@ -298,11 +313,19 @@ async function runGenesisTask(taskId: string): Promise<void> {
       },
     });
 
+    // 报告型 AI 语义审计（§10.4）：校验通过后、落库前执行一次；仅 IP 世界
+    // （temporalAnchor 存在 ∧ basis≠original）触发模型调用。审计失败返回 null
+    // → 不落任何报告，静默跳过——绝不阻断创世。租约心跳仍在运行，覆盖调用时长。
+    const auditReport = await auditTemporalSemantics(deck, { lorebookExcerpts: excerpts });
+
     persistedStage = furthestStage(persistedStage, "saving");
     await updateOwnedTask({
       stage: persistedStage,
       status: "running",
       rawOutput: latestRaw,
+      ...(auditReport === null
+        ? {}
+        : { auditReport: auditReport as unknown as Prisma.InputJsonValue }),
       leaseExpiresAt: new Date(Date.now() + LEASE_MS),
     });
     clearInterval(leaseHeartbeat);

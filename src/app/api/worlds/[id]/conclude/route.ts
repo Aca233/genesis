@@ -140,6 +140,7 @@ export async function POST(
 
     const finale = await completeStructured("backstage", {
       task: "finale",
+      userId: "local", // Phase A 单用户;后续波换真实会话用户
       system: finaleSystem(),
       user: finaleUserPrompt({
         worldName: world.name,

@@ -10,5 +10,6 @@ describe("LlmCall prompt cache schema", () => {
     expect(schema).toContain("cacheWriteTokens Int?");
     expect(schema).toContain("cacheRequested   Boolean");
     expect(schema).toContain("cacheFallback    Boolean");
+    expect(schema).toContain("cacheCapability  String?");
   });
 });

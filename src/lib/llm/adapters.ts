@@ -39,17 +39,17 @@ function joinUrl(base: string, path: string): string {
 
 const DEFAULT_MAX_TOKENS = 8192;
 
-function publicMessages(messages: ChatMessage[]) {
-  return messages.map(({ role, content }) => ({ role, content }));
-}
-
-
 async function errorBody(res: Response): Promise<string> {
   return (await res.text().catch(() => "")).slice(0, 500);
 }
 
 function httpError(status: number, body: string): Error {
   return new Error(`HTTP ${status}: ${body}`);
+}
+
+/** 能力降级原因(F8 可观测):随降级记录进内存并由网关落库。 */
+function downgradeReason(status: number, body: string): string {
+  return `HTTP ${status}: ${body.slice(0, 160)}`;
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -126,27 +126,60 @@ type OpenAiAttempt = {
   cacheFallback: boolean;
 };
 
+type OpenAiTextPart = {
+  type: "text";
+  text: string;
+  cache_control: { type: "ephemeral" };
+};
+
+/**
+ * Strip internal cache scopes; wrap the messages at explicit cache breakpoints
+ * into content-part arrays carrying anthropic-style cache_control markers.
+ * Byte-identical text — only the envelope shape changes for marked messages.
+ */
+function openAiMessages(messages: ChatMessage[], breakpoints: ReadonlySet<number>) {
+  return messages.map(
+    ({ role, content }, index): { role: ChatMessage["role"]; content: string | OpenAiTextPart[] } =>
+      breakpoints.has(index)
+        ? {
+          role,
+          content: [{ type: "text", text: content, cache_control: { type: "ephemeral" } }],
+        }
+        : { role, content },
+  );
+}
+
 function openAiPayload(
   slot: ModelSlot,
   req: CompletionRequest,
   stream: boolean,
   useCacheKey: boolean,
   useStreamUsage: boolean,
+  useCacheControl: boolean,
 ) {
   const plan = buildPromptCachePlan(slot, req);
+  // 系统块断点 + 续写接力断点(原请求末条 user + 回填 assistant partial)。
+  // plan 已按 4 断点预算裁剪,二者合计不超限。
+  const marked = new Set(plan.enabled && useCacheControl
+    ? [...plan.breakpoints, ...plan.messageBreakpoints]
+    : []);
+  const cacheKeyRequested = plan.enabled && useCacheKey && plan.key !== null;
+  const cacheControlRequested = marked.size > 0;
   return {
     payload: {
       model: slot.model,
-      messages: publicMessages(req.messages),
+      messages: openAiMessages(req.messages, marked),
       temperature: req.temperature ?? slot.temperature,
       max_tokens: req.maxTokens ?? slot.maxTokens ?? DEFAULT_MAX_TOKENS,
       stream,
-      ...(plan.enabled && useCacheKey && plan.key ? { prompt_cache_key: plan.key } : {}),
+      ...(cacheKeyRequested ? { prompt_cache_key: plan.key } : {}),
       ...(stream && plan.enabled && useStreamUsage
         ? { stream_options: { include_usage: true } }
         : {}),
     },
-    cacheRequested: plan.enabled && useCacheKey,
+    cacheKeyRequested,
+    cacheControlRequested,
+    cacheRequested: cacheKeyRequested || cacheControlRequested,
     hasUsageHint: stream && plan.enabled && useStreamUsage,
   };
 }
@@ -162,7 +195,8 @@ async function openAiAttempt(
   const capabilities = cacheCapabilities(endpoint);
   let useCacheKey = capabilities.cacheKey;
   let useStreamUsage = capabilities.usageStream;
-  let built = openAiPayload(slot, req, stream, useCacheKey, useStreamUsage);
+  let useCacheControl = capabilities.cacheControl;
+  let built = openAiPayload(slot, req, stream, useCacheKey, useStreamUsage, useCacheControl);
   let response = await openaiFetch(slot, apiKey, built.payload, signal);
   if (response.ok) {
     return { response, cacheRequested: built.cacheRequested, cacheFallback: false };
@@ -175,20 +209,26 @@ async function openAiAttempt(
     throw httpError(response.status, body);
   }
 
+  const reason = downgradeReason(response.status, body);
   if (/stream_options/i.test(body) && built.hasUsageHint) {
-    downgradeCacheCapability(endpoint, "usageStream");
+    downgradeCacheCapability(endpoint, "usageStream", reason);
     useStreamUsage = false;
-  } else if (/prompt_cache_key/i.test(body) && built.cacheRequested) {
-    downgradeCacheCapability(endpoint, "cacheKey");
+  } else if (/prompt_cache_key/i.test(body) && built.cacheKeyRequested) {
+    downgradeCacheCapability(endpoint, "cacheKey", reason);
     useCacheKey = false;
+  } else if (/cache_control|\bcontent\b/i.test(body) && built.cacheControlRequested) {
+    downgradeCacheCapability(endpoint, "cacheControl", reason);
+    useCacheControl = false;
   } else {
-    if (built.hasUsageHint) downgradeCacheCapability(endpoint, "usageStream");
-    if (built.cacheRequested) downgradeCacheCapability(endpoint, "cacheKey");
+    if (built.hasUsageHint) downgradeCacheCapability(endpoint, "usageStream", reason);
+    if (built.cacheKeyRequested) downgradeCacheCapability(endpoint, "cacheKey", reason);
+    if (built.cacheControlRequested) downgradeCacheCapability(endpoint, "cacheControl", reason);
     useStreamUsage = false;
     useCacheKey = false;
+    useCacheControl = false;
   }
 
-  built = openAiPayload(slot, req, stream, useCacheKey, useStreamUsage);
+  built = openAiPayload(slot, req, stream, useCacheKey, useStreamUsage, useCacheControl);
   response = await openaiFetch(slot, apiKey, built.payload, signal);
   if (!response.ok) throw httpError(response.status, await errorBody(response));
   return { response, cacheRequested: built.cacheRequested, cacheFallback: true };
@@ -306,13 +346,30 @@ function anthropicBody(
   } else {
     system = groups.map((group) => group.text).join("\n\n") || undefined;
   }
+  // 续写接力断点(F2):原请求末条 user 消息与回填的 assistant partial 是逐字节
+  // 重发的稳定前缀末尾,以内容块形式携带 cache_control,使第 2+ 轮接力与网络
+  // 断点续传近乎全前缀命中。文本字节不变,仅包装形式变化;plan 已按 Anthropic
+  // 4 断点上限预算裁剪(系统块 + 消息块合计)。
+  const messageMarks = cacheControl && plan.enabled
+    ? new Set(plan.messageBreakpoints)
+    : new Set<number>();
   return {
     body: {
       model: slot.model,
       system,
       messages: req.messages
-        .filter((message) => message.role !== "system")
-        .map(({ role, content }) => ({ role, content })),
+        .map((message, index) => ({ message, index }))
+        .filter(({ message }) => message.role !== "system")
+        .map(({ message, index }) => (messageMarks.has(index)
+          ? {
+            role: message.role,
+            content: [{
+              type: "text" as const,
+              text: message.content,
+              cache_control: { type: "ephemeral" as const },
+            }],
+          }
+          : { role: message.role, content: message.content })),
       temperature: req.temperature ?? slot.temperature,
       max_tokens: req.maxTokens ?? slot.maxTokens ?? DEFAULT_MAX_TOKENS,
       stream,
@@ -349,7 +406,7 @@ async function anthropicFetch(
   if (!built.cacheRequested || !isCacheCompatibilityError(response.status, body)) {
     throw httpError(response.status, body);
   }
-  downgradeCacheCapability(endpoint, "cacheControl");
+  downgradeCacheCapability(endpoint, "cacheControl", downgradeReason(response.status, body));
   cacheControl = false;
   built = anthropicBody(slot, req, stream, cacheControl);
   response = await send(built.body);

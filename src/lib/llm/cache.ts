@@ -3,10 +3,20 @@ import type { CompletionRequest, ModelSlot } from "./types";
 
 export const MIN_ACTIVE_CACHE_CHARS = 4000;
 
+/** Anthropic 每请求最多 4 个 cache_control 断点(global/world 系统块 + 续写断点共用预算)。 */
+export const MAX_PROVIDER_BREAKPOINTS = 4;
+
 export type PromptCachePlan = {
   enabled: boolean;
   key: string | null;
   breakpoints: number[];
+  /**
+   * 续写接力断点:req.messages(完整列表)中被 prefixStable 标记的消息索引——
+   * 原请求末条 user 消息与回填的 assistant partial。与 breakpoints(系统块断点)
+   * 共用 MAX_PROVIDER_BREAKPOINTS 预算,超限时保留最靠后的动态断点。
+   * key 不受影响(稳定前缀未变)。
+   */
+  messageBreakpoints: number[];
   stablePrefixEnd: number;
 };
 
@@ -36,13 +46,22 @@ export function buildPromptCachePlan(
 
   const breakpoints = [...new Set([lastGlobal, lastWorld].filter((index) => index >= 0))]
     .sort((left, right) => left - right);
+
+  // 续写接力断点:prefixStable 标记的消息索引(相对 req.messages 完整列表)。
+  // 与系统块断点共用 4 个断点预算,超限时保留最靠后的动态断点。
+  const stableMarks = req.messages
+    .map((message, index) => (message.prefixStable ? index : -1))
+    .filter((index) => index >= 0);
+  const messageBreakpoints = stableMarks
+    .slice(-Math.max(0, MAX_PROVIDER_BREAKPOINTS - breakpoints.length));
+
   const eligible = Boolean(req.cache)
     && CACHEABLE_TASKS.has(req.task)
     && stableChars >= MIN_ACTIVE_CACHE_CHARS
     && stablePrefixEnd >= 0;
 
   if (!eligible || !req.cache) {
-    return { enabled: false, key: null, breakpoints, stablePrefixEnd };
+    return { enabled: false, key: null, breakpoints, messageBreakpoints, stablePrefixEnd };
   }
 
   const digest = createHash("sha256")
@@ -62,13 +81,14 @@ export function buildPromptCachePlan(
     enabled: true,
     key: `genesis:${digest}`,
     breakpoints,
+    messageBreakpoints,
     stablePrefixEnd,
   };
 }
 
 export function isCacheCompatibilityError(status: number, body: string): boolean {
   if (status !== 400 && status !== 422) return false;
-  const mentionsExtension = /prompt_cache_key|stream_options|cache_control|system(?:\s+must\s+be\s+(?:a\s+)?string|\s+array)/i.test(body);
+  const mentionsExtension = /prompt_cache_key|stream_options|cache_control|(?:system|content)(?:\s+must\s+be\s+(?:a\s+)?string|\s+array)/i.test(body);
   const rejectsField = /unknown|unsupported|unrecognized|unexpected|invalid\s+(?:parameter|field)|extra(?:_forbidden|\s+inputs?)|not\s+permitted|must\s+be/i.test(body);
   return mentionsExtension && rejectsField;
 }

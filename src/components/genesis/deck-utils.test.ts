@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { completeCreatorDeck } from "@/lib/abilities/embark.test-fixtures";
+import { DECK_CARD_KEYS } from "@/lib/cards/schemas";
 import {
+  CARD_KEY_LABELS,
   abilityRefsInDeck,
   availableRacialInnateAbilityRefs,
   canAddAbility,
@@ -174,6 +176,14 @@ describe("Creator 卡墙顺序", () => {
     const deck = completeCreatorDeck();
     expect(deckCardOrder(deck).slice(0, 2)).toEqual(["cosmology", "majorGods"]);
     expect(deckCardOrder(deck)).not.toContain("playerGod");
+  });
+});
+
+describe("卡片键中文标签", () => {
+  it("CARD_KEY_LABELS 覆盖全部 DECK_CARD_KEYS（含时间锚点与锚点关系）", () => {
+    expect(Object.keys(CARD_KEY_LABELS).sort()).toEqual([...DECK_CARD_KEYS].sort());
+    expect(CARD_KEY_LABELS.temporalAnchor).toBe("时间锚点");
+    expect(CARD_KEY_LABELS.relationsAtAnchor).toBe("锚点关系");
   });
 });
 

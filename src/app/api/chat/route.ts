@@ -290,6 +290,7 @@ export async function POST(request: Request) {
   ]);
   const internal = narratorSSE({
     messages,
+    userId: "local", // Phase A 单用户;后续波换真实会话用户
     cacheNamespace: `narrative:${chapter.timeline.worldId}:v1`,
     heartbeatMs: OPERATION_LEASE_RENEW_MS,
     onHeartbeat: async () => {

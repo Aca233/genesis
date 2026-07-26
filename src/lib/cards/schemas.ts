@@ -1071,11 +1071,8 @@ export const DECK_CARD_KEYS = [
   "theme",
 ] as const;
 /**
- * 编辑器 UI 消费的卡片键。时间校准卡与锚点关系卡 UI（确认页只读卡 + 重掷入口）交付前，
- * temporalAnchor/relationsAtAnchor 暂不进入 DeckCardKey，以免 CARD_KEY_LABELS 等穷举映射
- * 被迫提前变更；UI 落地时应把本类型改回 (typeof DECK_CARD_KEYS)[number] 并补齐中文标签。
+ * 编辑器 UI 消费的卡片键：与 DECK_CARD_KEYS 同宽（阶段 1 只读时间校准卡落地后恢复全量）。
+ * temporalAnchor/relationsAtAnchor 已进入 CARD_KEY_LABELS 等穷举映射；
+ * 二者在确认页均无编辑/重掷入口——修改时间锚点 = 以同一神谕重新创世（设计稿 §13）。
  */
-export type DeckCardKey = Exclude<
-  (typeof DECK_CARD_KEYS)[number],
-  "temporalAnchor" | "relationsAtAnchor"
->;
+export type DeckCardKey = (typeof DECK_CARD_KEYS)[number];

@@ -21,6 +21,7 @@ export async function GET(
       worldId: true,
       createdAt: true,
       updatedAt: true,
+      auditReport: true,
     },
   });
   if (!task) return NextResponse.json({ error: "创世任务不存在" }, { status: 404 });

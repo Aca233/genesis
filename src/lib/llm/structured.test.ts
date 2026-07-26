@@ -12,6 +12,7 @@ describe("completeStructured attempts", () => {
 
     await expect(completeStructured("backstage", {
       task: "extract",
+      userId: "test-user",
       system: "system",
       user: "user",
       schema: z.object({ ok: z.boolean() }),
@@ -25,6 +26,7 @@ describe("completeStructured attempts", () => {
 
     await completeStructured("backstage", {
       task: "settlement",
+      userId: "test-user",
       system: "system",
       user: "user",
       schema: z.object({ ok: z.boolean() }),
@@ -36,7 +38,8 @@ describe("completeStructured attempts", () => {
     expect(mocks.complete).toHaveBeenCalledTimes(1);
     expect(mocks.complete).toHaveBeenCalledWith(
       "backstage",
-      expect.objectContaining({ task: "settlement" }),
+      // 归因:userId 转发进网关请求
+      expect.objectContaining({ task: "settlement", userId: "test-user" }),
       { maxAttempts: 1, allowFallback: false },
     );
   });

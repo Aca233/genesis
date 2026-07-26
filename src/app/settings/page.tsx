@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CelestialPageShell } from "@/components/layout/CelestialPageShell";
+import { IdentitySection } from "@/components/settings/IdentitySection";
 import { PromptCacheStats } from "@/components/settings/PromptCacheStats";
 
 type SlotForm = {
@@ -474,6 +475,8 @@ export default function SettingsPage() {
         </section>
 
         <PromptCacheStats />
+
+        <IdentitySection />
 
         <section className="tome-plate p-5 sm:p-6" aria-labelledby="icon-license-title">
           <h2 id="icon-license-title" className="illuminated-header display-md">

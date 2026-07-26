@@ -135,6 +135,7 @@ export async function classifyLoreEntries(
 
       const result = await completeStructured(slot, {
         task: "extract",
+        userId,
         system: LORE_CLASSIFIER_SYSTEM,
         user: loreClassifierUserPrompt(batch),
         schema: LoreClassificationResultSchema,

@@ -32,6 +32,7 @@ import {
   ThemeEditor,
 } from "@/components/genesis/card-editors";
 import { MajorCharacterEditor } from "@/components/genesis/MajorCharacterEditor";
+import { TemporalCalibrationCard } from "@/components/genesis/TemporalCalibrationCard";
 import { GenesisCeremony } from "@/components/genesis/GenesisCeremony";
 import { canEmbarkMode } from "@/components/genesis/embark-policy";
 import {
@@ -414,6 +415,14 @@ export default function GenesisEditorPage({
             initialRevision={iconThemeRevision}
           />
         </div>
+      )}
+
+      {/* ── 时间校准（只读；仅新契约卡组携带 temporalAnchor 时展示） ── */}
+      {deck.temporalAnchor && (
+        <TemporalCalibrationCard
+          card={deck.temporalAnchor}
+          canonEventCount={deck.canonEvents?.length ?? 0}
+        />
       )}
 
       {/* ── 宇宙论 ── */}

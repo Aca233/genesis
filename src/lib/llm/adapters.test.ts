@@ -22,6 +22,7 @@ const geminiSlot: ModelSlot = {
 function cacheableRequest(): CompletionRequest {
   return {
     task: "narrative",
+    userId: "test-user",
     cache: { namespace: "narrative:world-1:v1" },
     messages: [
       { role: "system", content: "G".repeat(4100), cacheScope: "global" },
@@ -41,7 +42,7 @@ beforeEach(clearCacheCapabilitiesForTests);
 afterEach(() => vi.unstubAllGlobals());
 
 describe("OpenAI-compatible prompt cache", () => {
-  it("sends a hashed cache key, strips internal scopes and emits streamed usage", async () => {
+  it("sends a hashed cache key, marks cache_control breakpoints and emits streamed usage", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response([
       'data: {"choices":[{"delta":{"content":"正文"}}]}',
       'data: {"choices":[],"usage":{"prompt_tokens":12000,"completion_tokens":300,"prompt_tokens_details":{"cached_tokens":8000}}}',
@@ -56,13 +57,68 @@ describe("OpenAI-compatible prompt cache", () => {
     const payload = JSON.parse(fetchMock.mock.calls[0]![1].body);
     expect(payload.prompt_cache_key).toMatch(/^genesis:[a-f0-9]{64}$/);
     expect(payload.stream_options).toEqual({ include_usage: true });
-    expect(payload.messages[0]).toEqual({ role: "system", content: "G".repeat(4100) });
+    // 稳定前缀断点（lastGlobal / lastWorld）以 content-part 数组显式携带 cache_control；
+    // 文本字节不变，仅包装形式变化。
+    expect(payload.messages[0]).toEqual({
+      role: "system",
+      content: [{ type: "text", text: "G".repeat(4100), cache_control: { type: "ephemeral" } }],
+    });
+    expect(payload.messages[1]).toEqual({
+      role: "system",
+      content: [{ type: "text", text: "WORLD", cache_control: { type: "ephemeral" } }],
+    });
+    expect(payload.messages[2]).toEqual({ role: "user", content: "继续" });
+    expect(JSON.stringify(payload)).not.toContain("cacheScope");
     expect(chunks).toContainEqual(expect.objectContaining({
       type: "usage",
       usage: expect.objectContaining({ cacheReadTokens: 8000 }),
       cacheRequested: true,
       cacheFallback: false,
     }));
+  });
+
+  it("keeps every message a plain string when the request is not cacheable", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: "完成" } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await adapters["openai-compatible"].complete(openAiSlot, {
+      task: "narrative",
+      userId: "test-user",
+      messages: [{ role: "user", content: "继续", cacheScope: "dynamic" }],
+    }, "key");
+    const payload = JSON.parse(fetchMock.mock.calls[0]![1].body);
+    expect(payload.messages).toEqual([{ role: "user", content: "继续" }]);
+    expect(payload.prompt_cache_key).toBeUndefined();
+  });
+
+  it("downgrades only cache_control on content-shape rejection and reverts to plain strings", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("unknown parameter: cache_control", { status: 400 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: "完成" } }],
+        usage: { prompt_tokens: 5000, completion_tokens: 20 },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: "再来" } }],
+        usage: { prompt_tokens: 5000, completion_tokens: 20 },
+      }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await adapters["openai-compatible"].complete(openAiSlot, cacheableRequest(), "key");
+    await adapters["openai-compatible"].complete(openAiSlot, cacheableRequest(), "key");
+
+    const retry = JSON.parse(fetchMock.mock.calls[1]![1].body);
+    const next = JSON.parse(fetchMock.mock.calls[2]![1].body);
+    for (const payload of [retry, next]) {
+      expect(payload.messages.every(
+        (message: { content: unknown }) => typeof message.content === "string",
+      )).toBe(true);
+      // prompt_cache_key 双发保留：只降级被拒的 cache_control 能力位
+      expect(payload.prompt_cache_key).toMatch(/^genesis:[a-f0-9]{64}$/);
+    }
+    expect(first).toMatchObject({ text: "完成", cacheRequested: true, cacheFallback: true });
   });
 
   it("removes only rejected stream usage fields and remembers the downgrade", async () => {
@@ -93,7 +149,8 @@ describe("OpenAI-compatible prompt cache", () => {
     const result = await adapters["openai-compatible"].complete(openAiSlot, cacheableRequest(), "key");
     expect(cacheFetch).toHaveBeenCalledTimes(2);
     expect(JSON.parse(cacheFetch.mock.calls[1]![1].body).prompt_cache_key).toBeUndefined();
-    expect(result).toMatchObject({ text: "完成", cacheRequested: false, cacheFallback: true });
+    // cache_control 断点未被拒,重试仍在请求缓存:cacheRequested 保持 true
+    expect(result).toMatchObject({ text: "完成", cacheRequested: true, cacheFallback: true });
 
     clearCacheCapabilitiesForTests();
     const authFetch = vi.fn().mockResolvedValue(new Response("invalid api key", { status: 401 }));
@@ -115,6 +172,36 @@ describe("OpenAI-compatible prompt cache", () => {
     ))).rejects.toThrow();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]![1]).toEqual(expect.objectContaining({ signal: abort.signal }));
+  });
+
+  it("续写接力断点以 cache_control 内容块透传且缓存键不变", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: "后半" } }],
+      usage: { prompt_tokens: 6000, completion_tokens: 10 },
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const base = cacheableRequest();
+    const continuation: CompletionRequest = {
+      ...base,
+      messages: [
+        ...base.messages.map((message, index) =>
+          (index === base.messages.length - 1 ? { ...message, prefixStable: true } : message)),
+        { role: "assistant", content: "已产出的前半部分", prefixStable: true },
+        { role: "user", content: "从断点继续" },
+      ],
+    };
+    await adapters["openai-compatible"].complete(openAiSlot, continuation, "key");
+    const payload = JSON.parse(fetchMock.mock.calls[0]![1].body);
+    // 稳定前缀未变,prompt_cache_key 与原请求一致
+    expect(payload.prompt_cache_key).toMatch(/^genesis:[a-f0-9]{64}$/);
+    const marked = payload.messages
+      .map((message: { content: unknown }, index: number) =>
+        (Array.isArray(message.content) ? index : -1))
+      .filter((index: number) => index >= 0);
+    // 系统块断点(0,1) + 续写断点(原请求末条 user=2、assistant partial=3)
+    expect(marked).toEqual([0, 1, 2, 3]);
+    expect(JSON.stringify(payload)).not.toContain("prefixStable");
   });
 });
 
@@ -151,6 +238,42 @@ describe("Anthropic prompt cache", () => {
     expect(first.cacheFallback).toBe(true);
     expect(JSON.parse(fetchMock.mock.calls[1]![1].body).system).toBeTypeOf("string");
     expect(JSON.parse(fetchMock.mock.calls[2]![1].body).system).toBeTypeOf("string");
+  });
+
+  it("续写接力:在原请求末条 user 与回填 assistant partial 上放 messages 内断点", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      content: [{ type: "text", text: "后半" }],
+      usage: {},
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const base = cacheableRequest();
+    const continuation: CompletionRequest = {
+      ...base,
+      messages: [
+        ...base.messages.map((message, index) =>
+          (index === base.messages.length - 1 ? { ...message, prefixStable: true } : message)),
+        { role: "assistant", content: "已产出的前半部分", prefixStable: true },
+        { role: "user", content: "从断点继续" },
+      ],
+    };
+    await adapters.anthropic.complete(anthropicSlot, continuation, "key");
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body);
+    const markedMessages = body.messages.filter(
+      (message: { content: unknown }) => Array.isArray(message.content));
+    expect(markedMessages.map((message: { role: string }) => message.role))
+      .toEqual(["user", "assistant"]);
+    for (const message of markedMessages) {
+      expect(message.content).toHaveLength(1);
+      expect(message.content[0].cache_control).toEqual({ type: "ephemeral" });
+    }
+    // 系统块断点 + messages 内断点合计不超过 Anthropic 上限 4
+    const systemBreakpoints = body.system.filter(
+      (block: { cache_control?: unknown }) => block.cache_control).length;
+    expect(systemBreakpoints + markedMessages.length).toBeLessThanOrEqual(4);
+    // 末条续写提示保持原始字符串形态;内部标记不外漏
+    expect(body.messages.at(-1)).toEqual({ role: "user", content: "从断点继续" });
+    expect(JSON.stringify(body)).not.toContain("prefixStable");
   });
 });
 

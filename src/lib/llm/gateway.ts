@@ -1,6 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { decryptSecret } from "@/lib/crypto";
 import { adapters } from "./adapters";
+import { buildPromptCachePlan, normalizedEndpointKey } from "./cache";
+import { cacheCapabilitySnapshot } from "./cache-capabilities";
 import {
   ModelSlotSchema,
   type CompletionRequest,
@@ -28,11 +31,12 @@ class SlotNotConfiguredError extends Error {
   }
 }
 
-/** Resolve a model slot; backstage falls back to narrative. */
+/** Resolve a model slot for a user; backstage falls back to narrative. */
 export async function resolveSlot(
   name: SlotName,
+  userId: string,
 ): Promise<{ slot: ModelSlot; apiKey: string; slotName: SlotName }> {
-  const settings = await prisma.settings.findUnique({ where: { userId: "local" } });
+  const settings = await prisma.settings.findUnique({ where: { userId } });
   const raw = name === "backstage"
     ? (settings?.backstageSlot ?? settings?.narrativeSlot)
     : settings?.narrativeSlot;
@@ -79,6 +83,16 @@ type CallLog = {
   slot: SlotName;
   provider: string;
   model: string;
+  /** 归因:发起调用的用户(多租户 Phase A)。 */
+  userId: string;
+  /** normalizedEndpointKey(slot);落库时读取该端点的能力降级快照(F8 可观测)。 */
+  endpoint?: string;
+  /** buildPromptCachePlan().key:缓存前缀指纹;同 hash 短窗口内第 2+ 次调用「应命中」(F5 可观测)。 */
+  stablePrefixHash?: string | null;
+  /** 一条业务请求(含全部续写接力/断点续传/非流式回退轮)共享的运行 ID(F5 可观测)。 */
+  agentRunId?: string;
+  /** 运行内轮号:0 = 首轮请求,1+ = 后续轮,按落库顺序递增(F5 可观测)。 */
+  agentCallIndex?: number;
   startedAt: number;
   ok: boolean;
   error?: string;
@@ -95,6 +109,7 @@ async function logCall(log: CallLog) {
         slot: log.slot,
         provider: log.provider,
         model: log.model,
+        userId: log.userId,
         durationMs: Date.now() - log.startedAt,
         ok: log.ok,
         error: log.error?.slice(0, 1000),
@@ -104,11 +119,29 @@ async function logCall(log: CallLog) {
         cacheWriteTokens: log.usage?.cacheWriteTokens ?? null,
         cacheRequested: log.cacheRequested ?? false,
         cacheFallback: log.cacheFallback ?? false,
+        // 该次调用运行时端点的降级状态(含最近一次降级原因);全部完好为 null。
+        cacheCapability: log.endpoint ? cacheCapabilitySnapshot(log.endpoint) : null,
+        stablePrefixHash: log.stablePrefixHash ?? null,
+        agentRunId: log.agentRunId ?? null,
+        agentCallIndex: log.agentCallIndex ?? null,
       },
     });
   } catch {
     // Logging failure must not block model output.
   }
+}
+
+type RunLogBase = Omit<CallLog, "ok" | "error" | "usage" | "cacheRequested" | "cacheFallback" | "agentRunId" | "agentCallIndex">;
+type RunLogEntry = Pick<CallLog, "ok" | "error" | "usage" | "cacheRequested" | "cacheFallback">;
+
+/**
+ * 一条业务请求(含全部续写接力/断点续传/非流式回退轮)共享同一 agentRunId;
+ * agentCallIndex 按落库顺序从 0 递增,使「一次请求发了几轮、每轮读/写了多少缓存」可归因。
+ */
+function createRunLogger(base: RunLogBase): (entry: RunLogEntry) => Promise<void> {
+  const agentRunId = randomUUID();
+  let agentCallIndex = 0;
+  return (entry) => logCall({ ...base, agentRunId, agentCallIndex: agentCallIndex++, ...entry });
 }
 
 type CollectedStream = {
@@ -153,13 +186,20 @@ const STREAM_NETWORK_RETRIES = 4;
 const CONTINUE_NUDGE =
   "你的上一条输出因长度上限被截断。从被截断的确切位置继续输出剩余内容：不要重复任何已输出的字符，不要添加任何解释、前言、省略号或代码围栏，直接接着写。";
 
-/** 续写请求:把已产出文本作为 assistant 消息回填,请求从断点继续。 */
+/**
+ * 续写请求:把已产出文本作为 assistant 消息回填,请求从断点继续。
+ * 原请求末条 user 消息与回填的 assistant partial 标记 prefixStable——它们是
+ * 逐字节重发的稳定前缀末尾,适配器据此加缓存断点,使第 2+ 轮接力与流式断点
+ * 续传(runResilient)近乎全前缀命中。标记为内部字段,适配器发送前会剥除。
+ */
 function continuationRequest(req: CompletionRequest, partial: string): CompletionRequest {
+  const lastUser = req.messages.findLastIndex((message) => message.role === "user");
   return {
     ...req,
     messages: [
-      ...req.messages,
-      { role: "assistant", content: partial },
+      ...req.messages.map((message, index) =>
+        (index === lastUser ? { ...message, prefixStable: true } : message)),
+      { role: "assistant", content: partial, prefixStable: true },
       { role: "user", content: CONTINUE_NUDGE },
     ],
   };
@@ -224,28 +264,32 @@ export async function complete(
   req: CompletionRequest,
   options?: CompleteOptions,
 ): Promise<string> {
-  const { slot, apiKey, slotName: used } = await resolveSlot(slotName);
+  const { slot, apiKey, slotName: used } = await resolveSlot(slotName, req.userId);
   const adapter = adapters[slot.provider];
   const startedAt = Date.now();
-  const baseLog = {
+  const plan = buildPromptCachePlan(slot, req);
+  const logRound = createRunLogger({
     task: req.task,
     slot: used,
     provider: slot.provider,
     model: slot.model,
+    userId: req.userId,
+    endpoint: normalizedEndpointKey(slot),
+    stablePrefixHash: plan.key,
     startedAt,
-  };
+  });
 
   /** 需要完整输出时,对截断结果做续写接力;超过轮数上限才判失败。 */
   const stitchStreamed = async (): Promise<string> => {
     let result = await collectStream(adapter, slot, req, apiKey);
-    await logCall({ ...baseLog, ok: true, usage: result.usage,
+    await logRound({ ok: true, usage: result.usage,
       cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
     if (!req.failOnTruncation) return result.text;
     let text = result.text;
     for (let round = 0; needsContinuation(req, result.truncated, text); round += 1) {
       if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
       result = await collectStream(adapter, slot, continuationRequest(req, text), apiKey);
-      await logCall({ ...baseLog, ok: true, usage: result.usage,
+      await logRound({ ok: true, usage: result.usage,
         cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
       text += trimOverlap(text, result.text);
     }
@@ -254,14 +298,14 @@ export async function complete(
 
   const stitchCompleted = async (): Promise<string> => {
     let result = await adapter.complete(slot, req, apiKey);
-    await logCall({ ...baseLog, ok: true, usage: result.usage,
+    await logRound({ ok: true, usage: result.usage,
       cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
     if (!req.failOnTruncation) return result.text;
     let text = result.text;
     for (let round = 0; needsContinuation(req, result.truncated, text); round += 1) {
       if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
       result = await adapter.complete(slot, continuationRequest(req, text), apiKey);
-      await logCall({ ...baseLog, ok: true, usage: result.usage,
+      await logRound({ ok: true, usage: result.usage,
         cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
       text += trimOverlap(text, result.text);
     }
@@ -287,13 +331,14 @@ export async function complete(
     } catch (fallbackError) {
       const finalError = lastError ?? fallbackError;
       const message = finalError instanceof Error ? finalError.message : String(finalError);
-      await logCall({ ...baseLog, ok: false, error: message });
+      // 失败轮也记录缓存意图:plan.enabled 即该请求本会携带缓存标记
+      await logRound({ ok: false, error: message, cacheRequested: plan.enabled });
       throw describeError(finalError);
     }
   }
 
   const message = lastError instanceof Error ? lastError.message : String(lastError);
-  await logCall({ ...baseLog, ok: false, error: message });
+  await logRound({ ok: false, error: message, cacheRequested: plan.enabled });
   throw describeError(lastError);
 }
 
@@ -303,16 +348,20 @@ export async function* stream(
   req: CompletionRequest,
   options?: { signal?: AbortSignal },
 ): AsyncGenerator<StreamChunk> {
-  const { slot, apiKey, slotName: used } = await resolveSlot(slotName);
+  const { slot, apiKey, slotName: used } = await resolveSlot(slotName, req.userId);
   const adapter = adapters[slot.provider];
   const startedAt = Date.now();
-  const baseLog = {
+  const plan = buildPromptCachePlan(slot, req);
+  const logRound = createRunLogger({
     task: req.task,
     slot: used,
     provider: slot.provider,
     model: slot.model,
+    userId: req.userId,
+    endpoint: normalizedEndpointKey(slot),
+    stablePrefixHash: plan.key,
     startedAt,
-  };
+  });
 
   try {
     let accumulated = "";
@@ -356,7 +405,7 @@ export async function* stream(
           yield { type: "text", text: deduped } as StreamChunk;
         }
       }
-      await logCall({ ...baseLog, ok: true, usage, cacheRequested, cacheFallback });
+      await logRound({ ok: true, usage, cacheRequested, cacheFallback });
     };
 
     // 断点续传:接力途中的瞬时网络错误不废弃整条流,以已累积文本为基础改走续写。
@@ -391,40 +440,48 @@ export async function* stream(
   } catch (error) {
     if (options?.signal?.aborted) return;
     const message = error instanceof Error ? error.message : String(error);
-    await logCall({ ...baseLog, ok: false, error: message });
+    // 失败轮也记录缓存意图:plan.enabled 即该请求本会携带缓存标记
+    await logRound({ ok: false, error: message, cacheRequested: plan.enabled });
     throw error;
   }
 }
 
-/** Connection test against an unsaved slot. */
-export async function testSlot(slot: ModelSlot, apiKey: string): Promise<string> {
+/**
+ * Connection test against an unsaved slot.
+ * 不经 resolveSlot(收到的是未保存的 slot+key);userId 纯为 LlmCall 归因。
+ */
+export async function testSlot(slot: ModelSlot, apiKey: string, userId: string): Promise<string> {
   const adapter = adapters[slot.provider];
   const startedAt = Date.now();
   const req: CompletionRequest = {
     task: "test",
+    userId,
     maxTokens: 64,
     messages: [{ role: "user", content: "请只回答四个字：试炼已过" }],
   };
-  const baseLog = {
+  const logRound = createRunLogger({
     task: "test",
     slot: "narrative" as const,
     provider: slot.provider,
     model: slot.model,
+    userId,
+    endpoint: normalizedEndpointKey(slot),
+    stablePrefixHash: null,
     startedAt,
-  };
+  });
   try {
     try {
       const result = await collectStream(adapter, slot, req, apiKey);
-      await logCall({ ...baseLog, ok: true, usage: result.usage });
+      await logRound({ ok: true, usage: result.usage });
       return result.text;
     } catch {
       const result = await adapter.complete(slot, req, apiKey);
-      await logCall({ ...baseLog, ok: true, usage: result.usage });
+      await logRound({ ok: true, usage: result.usage });
       return result.text;
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await logCall({ ...baseLog, ok: false, error: message });
+    await logRound({ ok: false, error: message });
     throw error;
   }
 }

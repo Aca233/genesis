@@ -82,6 +82,7 @@ export async function POST(
           worldId: chapter.timeline.worldId,
           token,
           claimed: true,
+          userId: "local", // Phase A 单用户;第 4 波 iso-07 换真实会话用户
         })) {
           const stage = stepMap[p.step];
           emit(progressEvent(

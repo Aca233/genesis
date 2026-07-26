@@ -130,9 +130,27 @@ describe("genesis task runner", () => {
       worldId: null,
       createdAt: "2026-07-21T00:00:00.000Z",
       updatedAt: "2026-07-21T00:00:10.000Z",
+      auditReport: null,
     });
     expect(dto).not.toHaveProperty("rawOutput");
     expect(dto).not.toHaveProperty("decree");
+  });
+
+  it("DTO 暴露报告型审计结果；形状不符的历史脏数据按无审计处理（§10.4）", () => {
+    const report = {
+      verdict: "warnings",
+      issues: [{
+        severity: "warning",
+        path: "majorCharacters.0.background",
+        type: "future_identity_leak",
+        explanation: "把截止点之后才获得的圣剑写成了现状",
+        evidenceRefs: ["char:hero"],
+      }],
+    };
+    expect(toGenesisTaskDto(task({ auditReport: report }) as never).auditReport).toEqual(report);
+    expect(toGenesisTaskDto(task({ auditReport: { verdict: "block" } }) as never).auditReport)
+      .toBeNull();
+    expect(toGenesisTaskDto(task() as never).auditReport).toBeNull();
   });
 
   it("DTO 通过世界模式 schema 解析持久化值", () => {

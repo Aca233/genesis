@@ -23,7 +23,7 @@ describe("narratorSSE", () => {
     });
     const onDone = vi.fn().mockResolvedValue({ messageId: "message-1", meta: emptyContinuousMeta(), followUp: { kind: "none" } });
 
-    const output = await events(narratorSSE({ messages: [], onDone }));
+    const output = await events(narratorSSE({ messages: [], userId: "test-user", onDone }));
     const streamed = output
       .filter((event) => event.type === "text")
       .map((event) => event.text)
@@ -34,6 +34,12 @@ describe("narratorSSE", () => {
       prose: streamed,
       meta: emptyContinuousMeta(),
     }));
+    // 归因:narratorSSE 把 userId 转发进网关请求
+    expect(mocks.stream).toHaveBeenCalledWith(
+      "narrative",
+      expect.objectContaining({ task: "narrative", userId: "test-user" }),
+      expect.anything(),
+    );
   });
 
   it("不会因正文中的 inline/早期 META marker 提前抑制内容", async () => {
@@ -44,7 +50,7 @@ describe("narratorSSE", () => {
     });
     const onDone = vi.fn().mockResolvedValue({ messageId: "message-1", meta: emptyContinuousMeta(), followUp: { kind: "none" } });
 
-    const output = await events(narratorSSE({ messages: [], onDone }));
+    const output = await events(narratorSSE({ messages: [], userId: "test-user", onDone }));
 
     expect(output.filter((event) => event.type === "text").map((event) => event.text).join(""))
       .toBe("正文 <<<META 仍是正文\n下一段");
@@ -66,6 +72,7 @@ describe("narratorSSE", () => {
       const onHeartbeat = vi.fn().mockResolvedValue(undefined);
       const response = narratorSSE({
         messages: [],
+        userId: "test-user",
         onDone: vi.fn().mockResolvedValue({ messageId: "message-1", meta: emptyContinuousMeta(), followUp: { kind: "none" } }),
         onHeartbeat,
         heartbeatMs: 100,
@@ -97,6 +104,7 @@ describe("narratorSSE", () => {
       const onFailure = vi.fn(() => new Promise<void>((resolve) => { finishFailure = resolve; }));
       const response = narratorSSE({
         messages: [],
+        userId: "test-user",
         onDone: vi.fn().mockResolvedValue({ messageId: "message-1", meta: emptyContinuousMeta(), followUp: { kind: "none" } }),
         onFailure,
         onHeartbeat: vi.fn().mockRejectedValue(new Error("世界操作租约已失效")),
@@ -132,7 +140,7 @@ describe("narratorSSE", () => {
     });
     const onDone = vi.fn().mockResolvedValue({ messageId: "message-1", meta: emptyContinuousMeta(), followUp: { kind: "none" } });
     const onFailure = vi.fn().mockResolvedValue(undefined);
-    const response = narratorSSE({ messages: [], onDone, onFailure });
+    const response = narratorSSE({ messages: [], userId: "test-user", onDone, onFailure });
     const reader = response.body!.getReader();
 
     await reader.read();
@@ -183,6 +191,7 @@ it.each([
   });
   const output = await events(narratorSSE({
     messages: [],
+    userId: "test-user",
     onDone: vi.fn().mockResolvedValue({ messageId: "message-1", meta: emptyContinuousMeta(), followUp: { kind: "none" } }),
   }));
   const text = output.filter((event) => event.type === "text").map((event) => event.text).join("");

@@ -39,6 +39,8 @@ export async function completeStructured<T>(
   slotName: SlotName,
   opts: {
     task: LlmTask;
+    /** 发起调用的用户(多租户 Phase A 归因;槽位解析亦按此用户)。 */
+    userId: string;
     system: string;
     user: string;
     schema: z.ZodType<T>;
@@ -68,6 +70,7 @@ export async function completeStructured<T>(
 
     const text = await complete(slotName, {
       task: opts.task,
+      userId: opts.userId,
       temperature: opts.temperature,
       maxTokens: opts.maxTokens,
       // 结构化输出必须完整:截断的 JSON 只会在校验层莫名失败

@@ -158,6 +158,11 @@ export type SettlementOperationLease = {
   worldId: string;
   token: string;
   claimed: true;
+  /**
+   * 发起结算的用户(多租户 Phase A 归因;槽位解析亦按此用户)。
+   * 未传时回退 "local"(单用户遗留;第 4 波 iso-07 由路由传真实值)。
+   */
+  userId?: string;
   /** Test-only override; production uses OPERATION_LEASE_RENEW_MS. */
   heartbeatMs?: number;
 };
@@ -254,7 +259,7 @@ export async function* settleChapter(
       );
       await leaseGuard.assertOwned();
     }
-    yield* settleChapterWithLease(chapterId, worldId, token, leaseGuard.assertOwned);
+    yield* settleChapterWithLease(chapterId, worldId, token, leaseGuard.assertOwned, lease?.userId ?? "local");
   } finally {
     leaseGuard?.stop();
     if (ownsLease && worldId) {
@@ -269,6 +274,7 @@ async function* settleChapterWithLease(
   worldId: string,
   token: string,
   assertLeaseOwned: () => Promise<void>,
+  userId: string,
 ): AsyncGenerator<SettleProgress> {
   const chapter = await prisma.chapter.findUnique({
     where: { id: chapterId },
@@ -337,6 +343,7 @@ async function* settleChapterWithLease(
         );
         settlement = await completeStructured("backstage", {
           task: "settlement",
+          userId,
           system: settlementSystem(mode),
           user: settlementUserPrompt(context),
           schema: chapterSettlementSchema(mode),

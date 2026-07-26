@@ -24,11 +24,22 @@ export function emptyUsage(): NormalizedUsage {
 export function normalizeOpenAiUsage(raw: unknown): NormalizedUsage {
   const value = record(raw);
   const details = record(value.prompt_tokens_details);
+  // 兼容中转站在 OpenAI envelope 里透传的异构缓存字段:
+  // - anthropic 风格顶层 cache_read_input_tokens / cache_creation_input_tokens(实测常见)
+  // - DeepSeek 风格顶层 prompt_cache_hit_tokens
+  // details.cached_tokens 为 0 时可能是中转站的死字段占位,此时也看顶层兜底;
+  // 顶层同样缺失才保留 0/null 原值,以免把"真未命中"误报成"无用量"。
+  const cachedDetail = token(details.cached_tokens);
+  const cacheReadTokens = cachedDetail !== null && cachedDetail > 0
+    ? cachedDetail
+    : token(value.prompt_cache_hit_tokens)
+      ?? token(value.cache_read_input_tokens)
+      ?? cachedDetail;
   return {
     inputTokens: token(value.prompt_tokens),
     outputTokens: token(value.completion_tokens),
-    cacheReadTokens: token(details.cached_tokens),
-    cacheWriteTokens: null,
+    cacheReadTokens,
+    cacheWriteTokens: token(value.cache_creation_input_tokens),
   };
 }
 

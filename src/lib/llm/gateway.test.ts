@@ -59,18 +59,26 @@ describe("prompt cache call logging", () => {
 
     await expect(complete("narrative", {
       task: "narrative",
+      userId: "test-user",
       messages: [{ role: "user", content: "continue" }],
     }, { maxAttempts: 1, allowFallback: false })).resolves.toBe("answer");
 
+    // 归因:请求 userId 落库,且槽位解析按同一用户读取 Settings
+    expect(mocks.settingsFindUnique).toHaveBeenCalledWith({ where: { userId: "test-user" } });
     expect(mocks.llmCallCreate).toHaveBeenCalledWith({ data: expect.objectContaining({
       provider: "openai-compatible",
       model: "test-model",
+      userId: "test-user",
       inputTokens: 12000,
       outputTokens: 500,
       cacheReadTokens: 8000,
       cacheWriteTokens: null,
       cacheRequested: true,
       cacheFallback: false,
+      // 非缓存请求也带 runId/轮号;前缀 hash 仅在缓存计划启用时非空
+      stablePrefixHash: null,
+      agentRunId: expect.any(String),
+      agentCallIndex: 0,
     }) });
   });
 
@@ -88,6 +96,7 @@ describe("prompt cache call logging", () => {
     const chunks = [];
     for await (const chunk of stream("narrative", {
       task: "narrative",
+      userId: "test-user",
       messages: [{ role: "user", content: "continue" }],
     })) chunks.push(chunk);
     expect(chunks).toEqual([{ type: "text", text: "answer" }, { type: "done" }]);
@@ -95,6 +104,72 @@ describe("prompt cache call logging", () => {
       inputTokens: null,
       cacheReadTokens: null,
       cacheFallback: true,
+    }) });
+  });
+
+  it("shares one run id across continuation rounds with ascending round indexes", async () => {
+    const roundUsage = (truncated: boolean) => ({
+      type: "usage",
+      usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: null, cacheWriteTokens: null },
+      cacheRequested: true,
+      cacheFallback: false,
+      truncated,
+    });
+    mocks.stream
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: '{"name":"星' };
+        yield roundUsage(true);
+        yield { type: "done" };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: '海"}' };
+        yield roundUsage(false);
+        yield { type: "done" };
+      });
+
+    await complete("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      cache: { namespace: "genesis:test" },
+      failOnTruncation: true,
+      messages: [
+        { role: "system", content: "G".repeat(4100), cacheScope: "global" },
+        { role: "user", content: "create" },
+      ],
+    }, { maxAttempts: 1, allowFallback: false });
+
+    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(2);
+    const first = mocks.llmCallCreate.mock.calls[0][0].data;
+    const second = mocks.llmCallCreate.mock.calls[1][0].data;
+    expect(first.stablePrefixHash).toMatch(/^genesis:[a-f0-9]{64}$/);
+    // 续写轮的稳定前缀未变:同 hash,可据此检测「应命中却未命中」
+    expect(second.stablePrefixHash).toBe(first.stablePrefixHash);
+    expect(second.agentRunId).toBe(first.agentRunId);
+    expect(first.agentCallIndex).toBe(0);
+    expect(second.agentCallIndex).toBe(1);
+  });
+
+  it("records cache intent and run metadata on failed rounds", async () => {
+    mocks.stream.mockImplementation(async function* () {
+      throw new Error("HTTP 401: bad key");
+    });
+
+    await expect(complete("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      cache: { namespace: "genesis:test" },
+      messages: [
+        { role: "system", content: "G".repeat(4100), cacheScope: "global" },
+        { role: "user", content: "create" },
+      ],
+    }, { maxAttempts: 1, allowFallback: false })).rejects.toThrow("HTTP 401");
+
+    expect(mocks.llmCallCreate).toHaveBeenCalledWith({ data: expect.objectContaining({
+      ok: false,
+      cacheRequested: true,
+      stablePrefixHash: expect.stringMatching(/^genesis:/),
+      agentRunId: expect.any(String),
+      agentCallIndex: 0,
     }) });
   });
 });
@@ -108,6 +183,7 @@ describe("complete transport attempts", () => {
 
     await expect(complete("backstage", {
       task: "settlement",
+      userId: "test-user",
       messages: [{ role: "user", content: "settle" }],
     }, {
       maxAttempts: 1,
@@ -144,6 +220,7 @@ describe("输出上限续写接力", () => {
 
     await expect(complete("narrative", {
       task: "genesis",
+      userId: "test-user",
       failOnTruncation: true,
       messages: [{ role: "user", content: "create" }],
     }, { maxAttempts: 1, allowFallback: false })).resolves.toBe('{"name":"星海纪元"}');
@@ -152,6 +229,12 @@ describe("输出上限续写接力", () => {
     const continuation = mocks.stream.mock.calls[1][1];
     expect(continuation.messages.at(-2)).toMatchObject({ role: "assistant", content: '{"name":"星海' });
     expect(continuation.messages.at(-1).content).toContain("从被截断的确切位置继续");
+    // F2: 稳定前缀末尾(原请求末条 user + 回填 assistant partial)携带内部断点标记
+    expect(continuation.messages.at(-3)).toMatchObject({
+      role: "user", content: "create", prefixStable: true,
+    });
+    expect(continuation.messages.at(-2).prefixStable).toBe(true);
+    expect(continuation.messages.at(-1).prefixStable).toBeUndefined();
   });
 
   it("complete: 未要求完整输出时截断按原样返回,不追加请求", async () => {
@@ -163,6 +246,7 @@ describe("输出上限续写接力", () => {
 
     await expect(complete("narrative", {
       task: "narrative",
+      userId: "test-user",
       messages: [{ role: "user", content: "tell" }],
     }, { maxAttempts: 1, allowFallback: false })).resolves.toBe("partial prose");
     expect(mocks.stream).toHaveBeenCalledTimes(1);
@@ -184,6 +268,7 @@ describe("输出上限续写接力", () => {
     let text = "";
     for await (const chunk of stream("narrative", {
       task: "genesis",
+      userId: "test-user",
       failOnTruncation: true,
       messages: [{ role: "user", content: "create" }],
     })) {
@@ -209,6 +294,7 @@ describe("输出上限续写接力", () => {
 
     await expect(complete("narrative", {
       task: "genesis",
+      userId: "test-user",
       failOnTruncation: true,
       messages: [{ role: "user", content: "create" }],
     }, { maxAttempts: 1, allowFallback: false })).resolves.toBe('{"deck":{"name":"残卷世界"}}');
@@ -224,6 +310,7 @@ describe("输出上限续写接力", () => {
 
     await expect(complete("narrative", {
       task: "genesis",
+      userId: "test-user",
       failOnTruncation: true,
       messages: [{ role: "user", content: "create" }],
     }, { maxAttempts: 1, allowFallback: false })).resolves.toBe('{"ok":true}');
@@ -251,6 +338,7 @@ describe("输出上限续写接力", () => {
     let text = "";
     for await (const chunk of stream("narrative", {
       task: "genesis",
+      userId: "test-user",
       failOnTruncation: true,
       messages: [{ role: "user", content: "create" }],
     })) {
@@ -271,6 +359,7 @@ describe("输出上限续写接力", () => {
     const consume = async () => {
       for await (const chunk of stream("narrative", {
         task: "genesis",
+        userId: "test-user",
         failOnTruncation: true,
         messages: [{ role: "user", content: "create" }],
       })) void chunk;

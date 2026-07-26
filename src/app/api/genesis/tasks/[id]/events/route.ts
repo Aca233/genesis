@@ -41,6 +41,7 @@ export async function GET(
               worldId: true,
               createdAt: true,
               updatedAt: true,
+              auditReport: true,
             },
           });
           if (!task) {

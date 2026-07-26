@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const reply = await testSlot(slot, apiKey);
+    const reply = await testSlot(slot, apiKey, "local");
     return NextResponse.json({ ok: true, reply: reply.slice(0, 200) });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

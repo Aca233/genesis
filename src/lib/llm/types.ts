@@ -23,6 +23,13 @@ export type ChatMessage = {
   content: string;
   /** Internal-only cache stability marker; adapters must strip it from provider payloads. */
   cacheScope?: PromptCacheScope;
+  /**
+   * Internal-only continuation breakpoint marker: this message ends a byte-stable
+   * re-sent prefix (续写接力回填的 assistant partial / 原请求末条 user 消息)。
+   * Adapters must strip it from provider payloads; the Anthropic adapter may place
+   * a cache_control breakpoint on the marked message.
+   */
+  prefixStable?: boolean;
 };
 
 export type PromptCacheRequest = {
@@ -64,6 +71,11 @@ export type CompletionRequest = {
   maxTokens?: number;
   /** 打日志用 */
   task: LlmTask;
+  /**
+   * 发起调用的用户（多租户 Phase A 归因；槽位解析亦按此用户读取 Settings）。
+   * 适配器忽略该字段。Phase A 入口一律传 "local"，后续波换真实会话用户。
+   */
+  userId: string;
   /** Enables provider prompt-cache hints when the stable prefix is large enough. */
   cache?: PromptCacheRequest;
   /**

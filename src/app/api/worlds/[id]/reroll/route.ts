@@ -128,6 +128,7 @@ export async function POST(
   try {
     const requestOptions = {
       task: "reroll" as const,
+      userId: "local", // Phase A 单用户;后续波换真实会话用户
       system: genesisSystem(mode),
       user: rerollUserPrompt({
         mode,
@@ -166,6 +167,7 @@ export async function POST(
     try {
       const repairOptions = {
         task: "reroll" as const,
+        userId: "local", // Phase A 单用户;后续波换真实会话用户
         system: genesisSystem(mode),
         user: rerollReferenceRepairPrompt({
           mode,

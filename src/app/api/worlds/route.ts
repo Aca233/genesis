@@ -60,6 +60,7 @@ export async function POST(request: Request) {
   try {
     const request = {
       task: "genesis" as const,
+      userId: "local", // Phase A 单用户;后续波换真实会话用户
       system: genesisSystem(body.mode),
       user: genesisUserPrompt({
         mode: body.mode,

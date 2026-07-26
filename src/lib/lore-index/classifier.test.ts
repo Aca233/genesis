@@ -125,6 +125,7 @@ describe("classifyLoreEntries", () => {
     const [slot, opts] = mocks.completeStructured.mock.calls[0];
     expect(slot).toBe("backstage");
     expect(opts.task).toBe("extract");
+    expect(opts.userId).toBe("local"); // 归因:默认单用户,后续波换真值
     expect(opts.user).toContain("内容二");
     expect(opts.user).not.toContain("内容一");
 

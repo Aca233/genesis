@@ -393,6 +393,7 @@ const defaultDependencies: RealityRewriteRunnerDependencies = {
   async plan(task, context) {
     return completeStructured("backstage", {
       task: "extract",
+      userId: USER_ID,
       system: rewritePlannerSystem(),
       user: rewritePlannerUserPrompt({
         decree: task.decree,
@@ -407,6 +408,7 @@ const defaultDependencies: RealityRewriteRunnerDependencies = {
   async narrate(task, plan, input) {
     return complete("narrative", {
       task: "narrative",
+      userId: USER_ID,
       maxTokens: 4000,
       cache: { namespace: `reality-rewrite-result:v1:${task.worldId}` },
       messages: [

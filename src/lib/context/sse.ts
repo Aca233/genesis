@@ -8,6 +8,8 @@ const TAIL_WINDOW = 10;
 
 export function narratorSSE(opts: {
   messages: ChatMessage[];
+  /** 发起叙事生成的用户(多租户 Phase A 归因;槽位解析亦按此用户)。 */
+  userId: string;
   cacheNamespace?: string;
   signal?: AbortSignal;
   onDone: (result: {
@@ -90,7 +92,7 @@ export function narratorSSE(opts: {
       try {
         for await (const chunk of llmStream(
           "narrative",
-          { task: "narrative", messages: opts.messages, ...(opts.cacheNamespace ? { cache: { namespace: opts.cacheNamespace } } : {}) },
+          { task: "narrative", userId: opts.userId, messages: opts.messages, ...(opts.cacheNamespace ? { cache: { namespace: opts.cacheNamespace } } : {}) },
           { signal: upstream.signal },
         )) {
           if (closed || upstream.signal.aborted) return;

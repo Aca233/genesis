@@ -98,6 +98,7 @@ export async function POST(
 
   return narratorSSE({
     messages,
+    userId: "local", // Phase A 单用户;后续波换真实会话用户
     cacheNamespace: `narrative:${message.chapter.timeline.worldId}:v1`,
     signal: request.signal,
     onDone: async ({ prose, meta }) => {

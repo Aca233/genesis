@@ -41,8 +41,9 @@ export const STYLE_PRESET_LABELS: Record<string, string> = {
   canon: "原著贴合",
 };
 
-/** 重掷组的中文名（提示文案用） */
+/** 卡片键的中文名（重掷提示等文案用；temporalAnchor/relationsAtAnchor 无重掷入口，仅展示） */
 export const CARD_KEY_LABELS: Record<DeckCardKey, string> = {
+  temporalAnchor: "时间锚点",
   cosmology: "宇宙论",
   fusionAxiom: "融合公理",
   playerGod: "玩家神",
@@ -51,6 +52,7 @@ export const CARD_KEY_LABELS: Record<DeckCardKey, string> = {
   factions: "势力",
   races: "种族",
   majorCharacters: "主要人物",
+  relationsAtAnchor: "锚点关系",
   places: "地理",
   epochConflict: "纪元冲突",
   style: "叙事风格",
