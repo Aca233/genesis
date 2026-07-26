@@ -65,6 +65,34 @@ describe("genesis mode prompts", () => {
     }
   });
 
+  it("两种模式都注入阶段 2 快照/关系/溯源规则并把 relationsAtAnchor 排在 majorCharacters 之后", () => {
+    for (const mode of ["pantheon", "creator"] as const) {
+      const prompt = genesisSystem(mode);
+      expect(prompt).toContain("ANCHOR SNAPSHOTS");
+      expect(prompt).toContain("stateAtAnchor");
+      expect(prompt).toContain("BOUNDED RELATIONS");
+      expect(prompt).toContain("1-4 anchor-relevant relations PER active major character");
+      expect(prompt).toContain("MUST set memorial: true");
+      expect(prompt).toContain("PROVENANCE (IP worlds only)");
+      expect(prompt).toContain('When basis is "original", omit provenance everywhere');
+      expect(prompt).toContain("majorCharacters, relationsAtAnchor, epochConflict");
+    }
+  });
+
+  it("两种模式都注入卡组自身的反套话纪律", () => {
+    for (const mode of ["pantheon", "creator"] as const) {
+      const prompt = genesisSystem(mode);
+      expect(prompt).toContain("may appear at most 6 times combined");
+      expect(prompt).toContain("may appear at most ONCE per deck");
+      expect(prompt).toContain("『神力消耗』 may be used as a cost at most twice per deck");
+      expect(prompt).toContain("META-LANGUAGE BOUNDARY");
+      expect(prompt).toContain("must use in-world designations instead");
+    }
+    expect(genesisSystem("pantheon")).toContain(
+      "a plain speakable line in that god's daily register",
+    );
+  });
+
   it("用户与修补提示词显式冻结模式", () => {
     expect(genesisUserPrompt({ mode: "creator", decree: "造一个世界" })).toContain('mode="creator"');
     const repair = genesisRepairPrompt({

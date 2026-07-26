@@ -278,6 +278,7 @@ describe("narrator discipline pack", () => {
     const prompt = narratorGlobalSystem("pantheon");
     expect(prompt).toContain("meaningfully different in kind (bold vs cautious, action vs inquiry, different targets)");
     expect(prompt).toContain("Follow every field of the STYLE CARD");
+    expect(prompt).toContain("banning its close synonym family");
     expect(prompt).toContain("example sentences are tone anchors, never to be copied verbatim");
   });
 
