@@ -768,7 +768,7 @@ it("creator settlement uses creator schema/prompt and never writes stanceToPlaye
     expect(vi.mocked(completeStructured)).toHaveBeenCalledWith("backstage", expect.objectContaining({
       system: expect.stringContaining("world-external Creator"),
       user: expect.stringContaining(creatorDeck.theme.eraSystem),
-      cache: { namespace: "settlement:v2:creator" },
+      cache: { namespace: "settlement:v3:creator" },
     }));
   } finally {
     await prisma.world.delete({ where: { id: data.world.id } });

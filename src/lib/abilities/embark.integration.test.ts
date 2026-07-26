@@ -52,7 +52,7 @@ describe("PostgreSQL embark transaction safety", () => {
           style: deck.style,
           cosmology: deck.cosmology,
           fusionAxiom: null,
-          currentEra: "裂光元年",
+          currentEra: "裂光纪",
           establishedFacts: [],
         },
         observerState: {

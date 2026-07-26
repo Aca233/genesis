@@ -414,6 +414,8 @@ const ImportSchema = z
   .object({
     version: z.literal(4),
     exportedAt: z.string().datetime().max(64).optional(),
+    // 导出侧按世界实际使用图标生成的致谢文本；导入时忽略，再次导出时重新生成。
+    iconCreditsMarkdown: z.string().max(65536).optional(),
     world: WorldSchema,
   })
   .strict();

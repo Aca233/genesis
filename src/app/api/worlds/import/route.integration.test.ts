@@ -112,7 +112,7 @@ describe("存档导出导入 PostgreSQL 往返", () => {
         { params: Promise.resolve({ id: originalWorld.id }) },
       );
       const archive = await exportResponse.json();
-      expect(archive.version).toBe(3);
+      expect(archive.version).toBe(4);
       expect(
         archive.world.timelines[0].gods.find((god: { id: string }) => god.id === majorGod.id)
           .relations.player,
@@ -394,7 +394,7 @@ describe("存档导出导入 PostgreSQL 往返", () => {
         { params: Promise.resolve({ id: source.id }) },
       );
       const archive = await exported.json();
-      expect(archive.version).toBe(3);
+      expect(archive.version).toBe(4);
       expect(archive.world.timelines).toHaveLength(3);
       expect(archive.world.rewrites).toHaveLength(2);
       expect(JSON.stringify(archive)).not.toContain("provider private diagnostic");
@@ -463,7 +463,7 @@ describe("存档导出导入 PostgreSQL 往返", () => {
     }
   });
 
-  it("真实 version 1 结构可导入并重建章节消息", async () => {
+  it("version 1 存档被版本门拒绝并返回明确提示", async () => {
     const oldWorldId = `v1-world-${crypto.randomUUID()}`;
     const oldTimelineId = `v1-timeline-${crypto.randomUUID()}`;
     const oldChapterId = `v1-chapter-${crypto.randomUUID()}`;
@@ -508,19 +508,9 @@ describe("存档导出导入 PostgreSQL 往返", () => {
         lorebookEntries: [],
       },
     }));
-    expect(response.status).toBe(200);
-    const { worldId } = await response.json();
-    try {
-      const imported = await prisma.world.findUniqueOrThrow({
-        where: { id: worldId },
-        include: { timelines: { include: { chapters: { include: { messages: true } } } } },
-      });
-      expect(imported.timelines[0]!.chapters[0]!.messages[0]).toMatchObject({
-        content: "旧世界仍在讲述。",
-      });
-    } finally {
-      await prisma.world.delete({ where: { id: worldId } });
-    }
+    expect(response.status).toBe(400);
+    const payload = await response.json();
+    expect(payload.error).toContain("仅接受 version 4");
   });
 });
 
