@@ -21,6 +21,7 @@ import { switchCreatorReality } from "@/components/play/reality-tree-state";
 import { RuneRail } from "@/components/play/RuneRail";
 import { PlayDrawer } from "@/components/play/PlayDrawer";
 import { PlayBackground } from "@/components/play/PlayBackground";
+import { PlayHeader } from "@/components/play/PlayHeader";
 import type { WorldActivityResponse } from "@/components/play/WorldActivityPanel";
 import {
   advanceActivityCursor,
@@ -76,6 +77,7 @@ export default function PlayPage({
   const [drawerTab, setDrawerTab] = useState<DrawerTab | null>(null);
   /** 正文实体链接点开时定位的实体（进入众生录详情） */
   const [drawerEntityId, setDrawerEntityId] = useState<string | null>(null);
+  const [drawerGodId, setDrawerGodId] = useState<string | null>(null);
   const [unreadActivityCount, setUnreadActivityCount] = useState(0);
 
   // 自动世界整理
@@ -445,6 +447,11 @@ export default function PlayPage({
     setDrawerTab("codex");
   }, []);
 
+  const openGod = useCallback((id: string) => {
+    setDrawerGodId(id);
+    setDrawerTab("god");
+  }, []);
+
   // ── 消息四件套 ──
 
   /** 朱批：PATCH 后以响应行替换本地 */
@@ -580,15 +587,15 @@ export default function PlayPage({
     <EntityIndexProvider index={entityIndex} openEntity={openEntity}>
       <main className="play-shell relative flex min-h-screen flex-col">
         <PlayBackground />
-        {/* 世界名（页眉淡墨，紧凑） */}
-        <header className="pointer-events-none sticky top-0 z-20 bg-gradient-to-b from-[var(--paper)] via-[var(--paper)]/80 to-transparent px-6 pb-2 pt-2 text-center">
-          <span
-            className="pointer-events-auto text-sm tracking-widest text-ink-faint"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            {state.world.name} · {state.temporal.era} · {state.temporal.time}
-          </span>
-        </header>
+        <PlayHeader
+          worldId={state.world.id}
+          worldName={state.world.name}
+          era={state.temporal.era}
+          time={state.temporal.time}
+          iconTheme={state.world.iconTheme}
+          iconThemeRevision={state.world.iconThemeRevision}
+          onThemeChanged={() => reloadState()}
+        />
 
         {/* 书页正文（中央限宽，大屏加宽） */}
         <div className="mx-auto w-full max-w-3xl flex-1 px-6 max-sm:pb-16 xl:max-w-4xl">
@@ -633,9 +640,11 @@ export default function PlayPage({
         {/* 右缘符文列 + 抽屉 */}
         <RuneRail
           mode={state.world.mode}
+          icons={state.world.navigationIcons}
           active={drawerTab}
           unreadActivityCount={unreadActivityCount}
           onOpen={(tab) => {
+            if (tab === "god") setDrawerGodId(null);
             setDrawerTab(tab);
           }}
         />
@@ -648,7 +657,9 @@ export default function PlayPage({
           recentRewrite={state.recentRewrite}
           busyKinds={{ chat: busy, settlement: settling, rewrite: rewriteBusy }}
           initialEntityId={drawerEntityId}
+          initialGodId={drawerGodId}
           onOpenEntity={openEntity}
+          onOpenGod={openGod}
           onActivitiesLoaded={markActivitiesRead}
           onStateChanged={() => reloadState()}
           onTimelineChanged={async () => {
