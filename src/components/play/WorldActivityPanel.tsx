@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildFocusMutation } from "./world-activity-panel-state";
+import { eventPhaseName } from "./lexicon";
 
 export type WorldActivityEventView = {
   id: string;
@@ -97,18 +98,25 @@ function EventCard({
   event,
   focused,
   focusBusy,
+  confirmingReplace,
   onOpenEntity,
   onOpenGod,
   onSelectEvent,
   onToggleFocus,
+  onConfirmReplace,
+  onCancelReplace,
 }: {
   event: WorldActivityEventView;
   focused: boolean;
   focusBusy: boolean;
+  /** 追踪替换的二次确认：confirmingEventId 与本卡一致时原位显示确认行 */
+  confirmingReplace: boolean;
   onOpenEntity: (id: string) => void;
   onOpenGod: (id: string) => void;
   onSelectEvent: (id: string) => void;
   onToggleFocus: (id: string) => void;
+  onConfirmReplace: (id: string) => void;
+  onCancelReplace: () => void;
 }) {
   return (
     <article className="rounded-lg border border-line bg-paper-raised/55 p-3">
@@ -122,19 +130,40 @@ function EventCard({
       </button>
       <p className="mt-1 text-sm leading-6 text-ink-soft">{event.summary}</p>
       <div className="mt-2 flex items-center gap-2 text-xs text-ink-faint">
-        <span>{event.phase}</span>
+        <span>{eventPhaseName(event.phase)}</span>
         {event.knowledgeLabel ? <span>{event.knowledgeLabel}</span> : null}
       </div>
       {event.resolvedAt === null ? (
-        <button
-          type="button"
-          data-focus-event-id={event.id}
-          disabled={focusBusy}
-          onClick={() => onToggleFocus(event.id)}
-          className="mt-2 rounded border border-gilt/50 px-2 py-1 text-xs text-gilt transition hover:bg-gilt/10 disabled:opacity-50"
-        >
-          {focused ? "取消追踪" : "追踪事件"}
-        </button>
+        confirmingReplace ? (
+          <span className="mt-2 flex flex-wrap items-center gap-2 text-xs text-cinnabar">
+            替换当前追踪目标？
+            <button
+              type="button"
+              disabled={focusBusy}
+              onClick={() => onConfirmReplace(event.id)}
+              className="font-bold underline disabled:opacity-50"
+            >
+              确认
+            </button>
+            <button
+              type="button"
+              onClick={onCancelReplace}
+              className="text-ink-faint hover:text-ink"
+            >
+              且慢
+            </button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            data-focus-event-id={event.id}
+            disabled={focusBusy}
+            onClick={() => onToggleFocus(event.id)}
+            className="mt-2 rounded border border-gilt/50 px-2 py-1 text-xs text-gilt transition hover:bg-gilt/10 disabled:opacity-50"
+          >
+            {focused ? "取消追踪" : "追踪事件"}
+          </button>
+        )
       ) : null}
       <SubjectLinks subjects={event.participants ?? []} onOpenEntity={onOpenEntity} onOpenGod={onOpenGod} />
     </article>
@@ -146,19 +175,26 @@ export function WorldActivityPanelView({
   data,
   selectedEventId,
   focusBusy = false,
+  confirmingEventId = null,
   onOpenEntity,
   onOpenGod = () => undefined,
   onSelectEvent,
   onToggleFocus = () => undefined,
+  onConfirmReplace = () => undefined,
+  onCancelReplace = () => undefined,
 }: {
   worldName: string;
   data: WorldActivityResponse;
   selectedEventId: string | null;
   focusBusy?: boolean;
+  /** 追踪替换确认态由容器 WorldActivityPanel 持有，经此透传至 EventCard 原位渲染 */
+  confirmingEventId?: string | null;
   onOpenEntity: (id: string) => void;
   onOpenGod?: (id: string) => void;
   onSelectEvent: (id: string) => void;
   onToggleFocus?: (id: string) => void;
+  onConfirmReplace?: (id: string) => void;
+  onCancelReplace?: () => void;
 }) {
   const selectedEvent = selectedEventId === null
     ? null
@@ -176,10 +212,13 @@ export function WorldActivityPanelView({
             event={selectedEvent}
             focused={data.focusedEvent?.id === selectedEvent.id}
             focusBusy={focusBusy}
+            confirmingReplace={confirmingEventId === selectedEvent.id}
             onOpenEntity={onOpenEntity}
             onOpenGod={onOpenGod}
             onSelectEvent={onSelectEvent}
             onToggleFocus={onToggleFocus}
+            onConfirmReplace={onConfirmReplace}
+            onCancelReplace={onCancelReplace}
           />
         </section>
       ) : null}
@@ -193,10 +232,13 @@ export function WorldActivityPanelView({
             event={data.focusedEvent}
             focused
             focusBusy={focusBusy}
+            confirmingReplace={confirmingEventId === data.focusedEvent.id}
             onOpenEntity={onOpenEntity}
             onOpenGod={onOpenGod}
             onSelectEvent={onSelectEvent}
             onToggleFocus={onToggleFocus}
+            onConfirmReplace={onConfirmReplace}
+            onCancelReplace={onCancelReplace}
           />
         ) : (
           <p className="text-sm text-ink-faint">尚未追踪重要事件</p>
@@ -214,10 +256,13 @@ export function WorldActivityPanelView({
               event={event}
               focused={data.focusedEvent?.id === event.id}
               focusBusy={focusBusy}
+              confirmingReplace={confirmingEventId === event.id}
               onOpenEntity={onOpenEntity}
               onOpenGod={onOpenGod}
               onSelectEvent={onSelectEvent}
               onToggleFocus={onToggleFocus}
+              onConfirmReplace={onConfirmReplace}
+              onCancelReplace={onCancelReplace}
             />
           )) : <p className="text-sm text-ink-faint">尚无持续中的重要事件</p>}
         </div>
@@ -283,6 +328,8 @@ export function WorldActivityPanel({
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
   const [focusBusy, setFocusBusy] = useState(false);
+  /** 追踪替换二次确认：待确认的事件 id（原位替代 window.confirm） */
+  const [confirmingEventId, setConfirmingEventId] = useState<string | null>(null);
   const onLoadedRef = useRef(onLoaded);
   const requestKey = useMemo(() => `${worldId}:${timelineId}`, [timelineId, worldId]);
 
@@ -327,25 +374,21 @@ export function WorldActivityPanel({
     };
   }, [loadActivities, requestKey]);
 
-  const toggleFocus = useCallback(async (eventId: string) => {
-    let mutation = buildFocusMutation({
+  const toggleFocus = useCallback(async (eventId: string, confirmedReplacement = false) => {
+    const mutation = buildFocusMutation({
       worldId,
       currentFocusedEventId: data.focusedEvent?.id ?? null,
       requestedEventId: eventId,
-      confirmedReplacement: false,
+      confirmedReplacement,
     });
     if (mutation.kind === "confirm_replace") {
-      const confirmed = window.confirm("当前正在追踪另一事件，是否替换追踪目标？");
-      if (!confirmed) return;
-      mutation = buildFocusMutation({
-        worldId,
-        currentFocusedEventId: data.focusedEvent?.id ?? null,
-        requestedEventId: eventId,
-        confirmedReplacement: true,
-      });
+      // 已在追踪另一事件 → 在事件卡原位展开确认行，不再用原生弹窗
+      setConfirmingEventId(eventId);
+      return;
     }
     if (mutation.kind !== "request") return;
 
+    setConfirmingEventId(null);
     setFocusBusy(true);
     try {
       const response = await fetch(mutation.url, { method: mutation.method });
@@ -365,17 +408,41 @@ export function WorldActivityPanel({
   const loading = loadedKey !== requestKey && failure?.key !== requestKey;
   const error = failure?.key === requestKey ? failure.message : null;
   if (loading) return <p className="text-sm text-ink-faint">正在读取世界动态…</p>;
-  if (error) return <p role="alert" className="text-sm text-red-700">{error}</p>;
+  if (error) {
+    return (
+      <p role="alert" className="text-sm text-cinnabar">
+        {error}{" "}
+        <button
+          type="button"
+          onClick={() => {
+            setFailure(null);
+            void loadActivities().catch((reason: unknown) => {
+              setFailure({
+                key: requestKey,
+                message: reason instanceof Error ? reason.message : String(reason),
+              });
+            });
+          }}
+          className="underline transition hover:text-ink"
+        >
+          重试
+        </button>
+      </p>
+    );
+  }
   return (
     <WorldActivityPanelView
       worldName={worldName}
       data={data}
       selectedEventId={selectedEventId}
       focusBusy={focusBusy}
+      confirmingEventId={confirmingEventId}
       onOpenEntity={onOpenEntity}
       onOpenGod={onOpenGod}
       onSelectEvent={setSelectedEventId}
       onToggleFocus={(eventId) => { void toggleFocus(eventId); }}
+      onConfirmReplace={(eventId) => { void toggleFocus(eventId, true); }}
+      onCancelReplace={() => setConfirmingEventId(null)}
     />
   );
 }

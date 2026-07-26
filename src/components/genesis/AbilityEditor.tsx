@@ -144,7 +144,7 @@ export function AbilityEditor({
             )}
 
             {sensitiveHidden ? (
-              <div className="rounded-md border border-[#4a3b28] bg-[#2a2118] px-4 py-3 text-sm text-[#e8dfc8]/65">
+              <div className="rounded-md border border-seal-line bg-seal-paper px-4 py-3 text-sm text-seal-ink/65">
                 此隐藏能力的效果、触发、代价、限制与状态将在本卡天机破封后显现。
               </div>
             ) : (

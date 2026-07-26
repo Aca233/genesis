@@ -73,6 +73,31 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     expect(messages[1]).toMatchObject({ role: "system", cacheScope: "world" });
   });
 
+  it("pantheon 征兆只租借注入（至多 2 条），不在构建时标记消费", async () => {
+    mocks.prisma.omenQueue.findMany.mockResolvedValue([
+      { id: "omen-1", text: "潮水连续三夜倒流", createdAt: new Date() },
+      { id: "omen-2", text: "灯塔火光转为青色", createdAt: new Date() },
+    ]);
+
+    const messages = await buildNarratorContext({
+      worldId: "world-1", chapterId: "chapter-1", playerInput: "巡视港城",
+      scale: "scene", mode: "say",
+    });
+    const systems = messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .join("\n");
+
+    expect(mocks.prisma.omenQueue.findMany).toHaveBeenCalledWith({
+      where: { timelineId: "timeline-1", consumed: false },
+      orderBy: { createdAt: "asc" },
+      take: 2,
+    });
+    expect(mocks.prisma.omenQueue.updateMany).not.toHaveBeenCalled();
+    expect(systems).toContain("潮水连续三夜倒流");
+    expect(messages.consumedOmenIds).toEqual(["omen-1", "omen-2"]);
+  });
+
   it("rejects a chapter outside the world's active timeline before consuming events", async () => {
     vi.clearAllMocks();
     mocks.prisma.world.findUnique.mockResolvedValue({
@@ -157,6 +182,7 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
       timelineId: "timeline-1", viewer: "creator_author",
     }));
     expect(mocks.prisma.omenQueue.updateMany).not.toHaveBeenCalled();
+    expect(messages.consumedOmenIds).toEqual([]);
     expect(mocks.prisma.chronicleEntry.findMany).toHaveBeenCalledWith({
       where: { timelineId: "timeline-1", revealed: false },
       orderBy: { createdAt: "desc" },

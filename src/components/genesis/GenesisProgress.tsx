@@ -34,6 +34,8 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
   const [pageError, setPageError] = useState<string | null>(null);
   const [seconds, setSeconds] = useState(0);
   const [now, setNow] = useState(0);
+  // 重试成功后自增，重建 SSE 与轮询（终态失败会停掉两者）
+  const [epoch, setEpoch] = useState(0);
   const redirected = useRef(false);
   const latestTask = useRef<Task | null>(null);
 
@@ -41,7 +43,9 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
     let disposed = false;
     let source: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+    // SSE 存活期间轮询退避为兜底频率，断线时恢复 5s
+    let sseLive = false;
 
     const apply = (next: Task) => {
       if (disposed) return;
@@ -66,11 +70,25 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
       }
     };
 
+    // 轮询兜底：SSE 存活时退避到 30s；任务终态失败后不再重排（重试成功会重建本 effect）
+    const schedulePoll = () => {
+      if (disposed) return;
+      pollTimer = setTimeout(async () => {
+        if (disposed) return;
+        if (latestTask.current?.status === "failed") return;
+        if (!sseLive) await fetchTask();
+        schedulePoll();
+      }, sseLive ? 30_000 : 5_000);
+    };
+
     const connect = () => {
       if (disposed) return;
       setConnection((value) => (value === "connecting" ? "connecting" : "reconnecting"));
       source = new EventSource(`/api/genesis/tasks/${taskId}/events`);
-      source.onopen = () => setConnection("live");
+      source.onopen = () => {
+        sseLive = true;
+        setConnection("live");
+      };
       source.addEventListener("progress", (event) => {
         apply(JSON.parse((event as MessageEvent<string>).data) as Task);
       });
@@ -82,10 +100,12 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
         }
       });
       source.addEventListener("failed", () => {
+        sseLive = false;
         source?.close();
         void fetchTask();
       });
       source.onerror = () => {
+        sseLive = false;
         source?.close();
         if (!disposed) {
           setConnection("reconnecting");
@@ -97,15 +117,15 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
 
     void fetchTask();
     connect();
-    pollTimer = setInterval(fetchTask, 5_000);
+    schedulePoll();
 
     return () => {
       disposed = true;
       source?.close();
       if (retryTimer) clearTimeout(retryTimer);
-      if (pollTimer) clearInterval(pollTimer);
+      if (pollTimer) clearTimeout(pollTimer);
     };
-  }, [router, taskId]);
+  }, [router, taskId, epoch]);
 
   useEffect(() => {
     const started = task?.createdAt ? new Date(task.createdAt).getTime() : Date.now();
@@ -130,13 +150,19 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
 
   async function retry() {
     setPageError(null);
-    const response = await fetch(`/api/genesis/tasks/${taskId}/retry`, { method: "POST" });
-    const data: { error?: string } = await response.json();
-    if (!response.ok) {
-      setPageError(data.error ?? "重试失败");
-      return;
+    try {
+      const response = await fetch(`/api/genesis/tasks/${taskId}/retry`, { method: "POST" });
+      const data: { error?: string } = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setPageError(data.error ?? "重试失败");
+        return;
+      }
+      // 不整页刷新：重建 SSE 与轮询，接管重启后的任务状态
+      setConnection("connecting");
+      setEpoch((n) => n + 1);
+    } catch (err) {
+      setPageError(String(err));
     }
-    window.location.reload();
   }
 
   return (
@@ -157,7 +183,7 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
           <div className="rounded-xl border border-line bg-paper-sunken/60 p-4 text-sm">
             <div className="flex items-center justify-between gap-4">
               <span className="flex items-center gap-2 text-ink-soft">
-                <span className={`h-2.5 w-2.5 rounded-full ${connection === "live" ? "animate-pulse bg-gilt" : "bg-cinnabar"}`} />
+                <span className={`h-2.5 w-2.5 rounded-full ${connection === "live" ? "animate-pulse bg-gilt" : connection === "connecting" ? "animate-pulse bg-ink-faint" : "bg-cinnabar"}`} />
                 {connection === "live" ? "模型仍在回应" : connection === "connecting" ? "正在建立连接" : "连接中断，正在恢复"}
               </span>
               <span className="tabular-nums text-ink-faint">{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</span>
@@ -166,6 +192,10 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
               {heartbeatAge < 3 ? "刚刚收到新的生成痕迹" : `${heartbeatAge} 秒前收到生成痕迹`}
             </p>
           </div>
+
+          <Link href="/" className="text-sm text-ink-faint transition hover:text-gilt">
+            ← 返回神谕（生成将在后台继续）
+          </Link>
 
           {(task?.status === "failed" || pageError) && (
             <div className="rounded-xl border border-cinnabar/40 bg-cinnabar/5 p-4">

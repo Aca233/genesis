@@ -14,13 +14,18 @@
   --paper-sunken: #eadfc6;   /* 凹陷区（输入框底） */
   --ink: #2e2418;            /* 墨字 */
   --ink-soft: #5c4f3d;       /* 次级墨 */
-  --ink-faint: #8a7a62;      /* 弱墨（元信息） */
+  --ink-faint: #75654c;      /* 弱墨（元信息，对纸底 ≈4.74:1 达 AA） */
   --gilt: #a87f2e;           /* 烫金 */
+  --gilt-strong: #7f5c1c;    /* 强金（可读文字级金，对纸底 ≈5.1:1） */
   --gilt-soft: rgba(168, 127, 46, 0.55); /* 淡金（建议/提示） */
   --gilt-glow: rgba(168, 127, 46, 0.18); /* 微焕光晕 */
   --cinnabar: #9e3b2c;       /* 朱红（朱批/警示） */
   --fog: #6b6156;            /* 残卷雾 */
   --line: rgba(46, 36, 24, 0.14); /* 分隔细线 */
+  --scrim: rgba(30, 24, 15, 0.4); /* 浮层遮罩 */
+  --seal-paper: #2a2118;     /* 封蜡底 */
+  --seal-line: #4a3b28;      /* 封蜡描线 */
+  --seal-ink: #e8dfc8;       /* 封蜡上的字 */
   --play-background-image: url("/images/backgrounds/play-celestial-day.webp");
   --play-background-opacity: 0.58;
   --genesis-mode-opacity: 0.38;
@@ -35,13 +40,18 @@
   --paper-sunken: #241e16;
   --ink: #e8dfc8;
   --ink-soft: #bfb298;
-  --ink-faint: #8d8069;
+  --ink-faint: #9a8d75;
   --gilt: #c9a356;
+  --gilt-strong: #d9b46a;
   --gilt-soft: rgba(201, 163, 86, 0.55);
   --gilt-glow: rgba(201, 163, 86, 0.16);
   --cinnabar: #c05545;
   --fog: #7d7264;
   --line: rgba(232, 223, 200, 0.12);
+  --scrim: rgba(12, 9, 5, 0.55);
+  --seal-paper: #1d1610;
+  --seal-line: #55442c;
+  --seal-ink: #e8dfc8;
   --play-background-image: url("/images/backgrounds/play-celestial-candle.webp");
   --play-background-opacity: 0.66;
   --genesis-mode-opacity: 0.34;
@@ -57,9 +67,14 @@
   --color-ink-soft: var(--ink-soft);
   --color-ink-faint: var(--ink-faint);
   --color-gilt: var(--gilt);
+  --color-gilt-strong: var(--gilt-strong);
   --color-cinnabar: var(--cinnabar);
   --color-fog: var(--fog);
   --color-line: var(--line);
+  --color-scrim: var(--scrim);
+  --color-seal-paper: var(--seal-paper);
+  --color-seal-line: var(--seal-line);
+  --color-seal-ink: var(--seal-ink);
 
   --font-prose: "LXGW WenKai Screen", serif;                    /* 正文：霞鹜文楷 */
   --font-display: "Noto Serif SC", "LXGW WenKai Screen", serif; /* 标题：思源宋体 */
@@ -71,6 +86,14 @@ body {
   color: var(--ink);
   font-family: var(--font-prose);
   transition: background-color 0.6s ease, color 0.6s ease;
+}
+
+/* 键盘焦点全站可见（烫金描边）。
+   必须保持在任何 @layer 之外：未分层作者样式恒高于 @layer utilities 里的
+   outline-none，方能压过全站大量 outline-none + focus:border 的写法。 */
+:focus-visible {
+  outline: 2px solid var(--gilt);
+  outline-offset: 2px;
 }
 
 /* 纸纹理：极低对比 SVG 噪点，不干扰阅读 */
@@ -100,6 +123,26 @@ body > * {
   z-index: -1;
   pointer-events: none;
   background-color: var(--paper);
+  opacity: var(--play-background-opacity);
+  transition: opacity 0.6s ease;
+}
+
+/* 主题切换的星穹图交叉淡化：照片与暗角渐变一并放入伪元素
+   （元素自身 background 恒绘于伪元素之下，渐变必须随照片同层才能压在照片上）。
+   ::after 按树序绘于 ::before 之上，两者均在父元素纸底之上，层序与旧实现一致。
+   代价（刻意接受）：日/烛双图恒定下载，换取主题切换零闪烁。 */
+.play-background::before,
+.play-background::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  transition: opacity 0.6s ease;
+}
+
+.play-background::before {
   background-image:
     linear-gradient(
       90deg,
@@ -107,12 +150,28 @@ body > * {
       transparent 22% 78%,
       color-mix(in srgb, var(--paper) 12%, transparent)
     ),
-    var(--play-background-image);
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: cover;
-  opacity: var(--play-background-opacity);
-  transition: opacity 0.6s ease;
+    url("/images/backgrounds/play-celestial-day.webp");
+  opacity: 1;
+}
+
+.play-background::after {
+  background-image:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--paper) 12%, transparent),
+      transparent 22% 78%,
+      color-mix(in srgb, var(--paper) 12%, transparent)
+    ),
+    url("/images/backgrounds/play-celestial-candle.webp");
+  opacity: 0;
+}
+
+[data-theme="candle"] .play-background::before {
+  opacity: 0;
+}
+
+[data-theme="candle"] .play-background::after {
+  opacity: 1;
 }
 
 .play-background--home {
@@ -293,8 +352,18 @@ body > * {
     transition: none;
   }
 
+  .play-background::before,
+  .play-background::after {
+    transition: none;
+  }
+
   .genesis-mode-background__image {
     transition: none;
+  }
+
+  .gilt-pulse,
+  .animate-pulse {
+    animation: none;
   }
 }
 

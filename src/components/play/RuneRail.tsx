@@ -40,6 +40,7 @@ export function RuneRail({
       {runes.map((r) => (
         <button
           key={r.tab}
+          data-rune-tab={r.tab}
           onClick={() => onOpen(r.tab)}
           className={`group relative flex h-10 w-10 items-center justify-center text-lg transition ${
             active === r.tab ? "text-gilt" : "text-ink-soft hover:text-gilt"
@@ -57,7 +58,7 @@ export function RuneRail({
               {unreadActivityCount > 9 ? "9+" : unreadActivityCount}
             </span>
           ) : null}
-          <span className="pointer-events-none absolute right-full mr-1 hidden whitespace-nowrap rounded border border-line bg-paper-raised px-1.5 py-0.5 text-xs text-ink-soft shadow-sm group-hover:block max-sm:group-hover:hidden">
+          <span className="pointer-events-none absolute right-full mr-1 hidden whitespace-nowrap rounded border border-line bg-paper-raised px-1.5 py-0.5 text-xs text-ink-soft shadow-sm group-hover:block group-focus-visible:block max-sm:group-hover:hidden">
             {r.label}
           </span>
         </button>
@@ -69,7 +70,7 @@ export function RuneRail({
         aria-label="打开设置"
       >
         <OperationIcon name="settings" size={20} />
-        <span className="pointer-events-none absolute right-full mr-1 hidden whitespace-nowrap rounded border border-line bg-paper-raised px-1.5 py-0.5 text-xs text-ink-soft shadow-sm group-hover:block max-sm:group-hover:hidden">
+        <span className="pointer-events-none absolute right-full mr-1 hidden whitespace-nowrap rounded border border-line bg-paper-raised px-1.5 py-0.5 text-xs text-ink-soft shadow-sm group-hover:block group-focus-visible:block max-sm:group-hover:hidden">
           设置
         </span>
       </Link>

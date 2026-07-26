@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 
 /** 全屏古卷样式编辑 Modal：卡片全文逐字段编辑的容器 */
@@ -14,6 +15,23 @@ export function CardEditorModal({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+
+  // Esc 合卷（仅 open 时挂载监听）
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
+  // 展卷时将焦点移入对话框（合卷按钮）
+  useEffect(() => {
+    if (open) closeRef.current?.focus();
+  }, [open]);
+
   return (
     <AnimatePresence>
       {open && (
@@ -22,10 +40,13 @@ export function CardEditorModal({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(30,24,15,0.45)] p-4 backdrop-blur-[2px]"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-scrim p-4 backdrop-blur-[2px]"
           onClick={onClose}
         >
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="card-editor-title"
             initial={{ opacity: 0, y: 24, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.98 }}
@@ -36,12 +57,14 @@ export function CardEditorModal({
             {/* 卷首 */}
             <header className="flex items-center justify-between border-b border-line px-6 py-4">
               <h2
+                id="card-editor-title"
                 className="text-xl text-ink"
                 style={{ fontFamily: "var(--font-display)" }}
               >
                 {title}
               </h2>
               <button
+                ref={closeRef}
                 type="button"
                 onClick={onClose}
                 className="rounded-md border border-line px-3 py-1 text-sm text-ink-faint transition hover:border-gilt/50 hover:text-gilt"

@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "motion/react";
+import { motion, AnimatePresence } from "motion/react";
 import type { DeckCardKey } from "@/lib/cards/schemas";
 import { memo, useState } from "react";
 
@@ -165,10 +165,14 @@ export function GroupHeader({
         )}
       </div>
 
-      {open && !rerolling && (
+      <AnimatePresence>
+        {open && !rerolling && (
         <motion.div
+          key="reroll-note"
           initial={{ opacity: 0, y: -4 }}
           animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.15 }}
           className="mt-2 flex flex-wrap items-center gap-2"
         >
           <input
@@ -197,7 +201,8 @@ export function GroupHeader({
             罢了
           </button>
         </motion.div>
-      )}
+        )}
+      </AnimatePresence>
     </div>
   );
 }

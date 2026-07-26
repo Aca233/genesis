@@ -29,7 +29,7 @@ const LABELS: Record<string, string> = {
 const fieldClassName = "min-h-10 min-w-0 w-full rounded border border-line bg-paper-sunken px-3 py-2 text-ink outline-none transition focus:border-gilt";
 
 export function MaterialLibrary() {
-  const [items, setItems] = useState<MaterialListItem[]>([]);
+  const [items, setItems] = useState<MaterialListItem[] | null>(null);
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState("");
   const [source, setSource] = useState("");
@@ -56,8 +56,8 @@ export function MaterialLibrary() {
     return () => clearTimeout(timer);
   }, [load]);
 
-  const options = useMemo(() => getMaterialFilterOptions(items), [items]);
-  const shown = useMemo(() => sortMaterials(filterMaterials(items, {
+  const options = useMemo(() => getMaterialFilterOptions(items ?? []), [items]);
+  const shown = useMemo(() => sortMaterials(filterMaterials(items ?? [], {
     visibility,
     favoriteOnly,
     kind: kind || null,
@@ -70,7 +70,7 @@ export function MaterialLibrary() {
   async function patch(id: string, payload: Partial<Pick<MaterialListItem, "favorite" | "hidden">>) {
     const before = items;
     setError(null);
-    setItems((all) => all.map((item) => item.id === id ? { ...item, ...payload } : item));
+    setItems((all) => (all ?? []).map((item) => item.id === id ? { ...item, ...payload } : item));
 
     try {
       const response = await fetch(`/api/materials/${id}`, {
@@ -97,6 +97,11 @@ export function MaterialLibrary() {
 
   if (open) return <MaterialDetail id={open} onClose={() => setOpen(null)} onChanged={load} />;
 
+  // 加载态：首次拉取未归来且无错误时，仅展示展卷提示
+  if (items === null && !error) {
+    return <p className="py-16 text-center text-ink-faint">展卷中…</p>;
+  }
+
   return (
     <div className="grid min-w-0 gap-5">
       {error && <p className="rounded border border-cinnabar/30 bg-cinnabar/5 px-4 py-3 text-cinnabar">{error}</p>}
@@ -109,7 +114,7 @@ export function MaterialLibrary() {
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="名讳、摘要、来源或版本名；空格分隔多个词"
+              placeholder="名讳 / 摘要 / 来源"
               className={fieldClassName}
             />
           </label>
@@ -122,7 +127,7 @@ export function MaterialLibrary() {
           </label>
           <label className="grid gap-1 text-xs text-ink-faint">
             来源世界
-            <select value={source} onChange={(event) => setSource(event.target.value)} className={fieldClassName}>
+            <select value={source} onChange={(event) => setSource(event.target.value)} className={`${fieldClassName} max-w-56 truncate`}>
               <option value="">全部来源</option>
               {options.sources.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -162,7 +167,7 @@ export function MaterialLibrary() {
             <input type="checkbox" checked={favoriteOnly} onChange={(event) => setFavoriteOnly(event.target.checked)} />
             只看收藏
           </label>
-          <span className="ml-auto text-sm text-ink-faint">{shown.length} / {items.length} 项</span>
+          <span className="ml-auto text-sm text-ink-faint">{shown.length} / {(items ?? []).length} 项</span>
           {hasActiveFilters && (
             <button type="button" onClick={resetFilters} className="text-sm text-gilt hover:underline">
               清除筛选
@@ -197,9 +202,9 @@ export function MaterialLibrary() {
         ))}
       </ul>
 
-      {shown.length === 0 && (
+      {items !== null && shown.length === 0 && (
         <div className="py-16 text-center">
-          <p className="fog-text">藏库中尚无对应素材。</p>
+          <p className="fog-text">{hasActiveFilters ? "无素材应此筛选。" : "藏库中尚无素材——终局或导出的世界会自动入藏。"}</p>
           {hasActiveFilters && <button type="button" onClick={resetFilters} className="mt-3 text-sm text-gilt hover:underline">清除全部筛选</button>}
         </div>
       )}

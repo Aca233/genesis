@@ -7,7 +7,7 @@ import { z } from "zod";
 
 export const PantheonTurnSchema = z.object({
   action: z.object({
-    description: z.string().describe("本章该神的一个幕后行动"),
+    description: z.string().describe("本章该神的一个幕后行动（60-120字，史官暗记体：主语明确，只记行动、对象与意图；不写心理独白、不堆叠形容词、不引用其他神的条目原文）"),
     targets: z.array(z.string()).describe("涉及的实体/神名"),
   }),
   omen: z
@@ -44,6 +44,7 @@ export type PantheonTurn = z.infer<typeof PantheonTurnSchema>;
 
 const turnJsonSchema = JSON.stringify(z.toJSONSchema(PantheonTurnSchema), null, 2);
 
+/** 非活跃路径：生产仅走 settlement.ts 的单次整理；规则变更须与 settlementSystem 同步。 */
 export function pantheonSystem(godName: string): string {
   return `You are ${godName} — playing YOURSELF, a god of this world. You are NOT a narrator; you are a player at the table of divine politics, pursuing your own agenda.
 

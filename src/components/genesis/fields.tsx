@@ -172,7 +172,7 @@ export function SealedBlock({
 }) {
   const [confirming, setConfirming] = useState(false);
   return (
-    <div className="rounded-md border border-[#4a3b28] bg-[#2a2118] p-6 text-center">
+    <div className="rounded-md border border-seal-line bg-seal-paper p-6 text-center">
       {!confirming ? (
         <button
           type="button"
@@ -185,13 +185,13 @@ export function SealedBlock({
           >
             {stamp}
           </span>
-          <span className="text-xs text-[#e8dfc8]/45">
+          <span className="text-xs text-seal-ink/45">
             蜡封未启 · 点击窥探
           </span>
         </button>
       ) : (
         <div className="grid gap-3">
-          <p className="text-sm leading-relaxed text-[#e8dfc8]/85">{message}</p>
+          <p className="text-sm leading-relaxed text-seal-ink/85">{message}</p>
           <div className="flex justify-center gap-3">
             <button
               type="button"
@@ -203,7 +203,7 @@ export function SealedBlock({
             <button
               type="button"
               onClick={() => setConfirming(false)}
-              className="rounded-md border border-[#e8dfc8]/25 px-4 py-1.5 text-sm text-[#e8dfc8]/60 transition hover:border-[#e8dfc8]/50"
+              className="rounded-md border border-seal-ink/25 px-4 py-1.5 text-sm text-seal-ink/60 transition hover:border-seal-ink/50"
             >
               罢了
             </button>

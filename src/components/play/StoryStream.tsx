@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import type { MessageRow } from "./types";
 import { MessageBlock } from "./MessageBlock";
 import { Prose } from "./Prose";
@@ -17,6 +18,7 @@ export function StoryStream({
   rerollingText,
   busy,
   error,
+  mode = "pantheon",
   onRetry,
   onEdit,
   onCut,
@@ -31,6 +33,8 @@ export function StoryStream({
   rerollingText: string;
   busy: boolean;
   error: string | null;
+  /** 世界模式：决定玩家引文措辞（神谕 / 敕令） */
+  mode?: "pantheon" | "creator";
   onRetry: () => void;
   onEdit: (id: string, content: string) => Promise<void>;
   onCut: (id: string) => Promise<void>;
@@ -77,6 +81,7 @@ export function StoryStream({
           message={m}
           readonly={m.editable === false}
           busy={busy}
+          mode={mode}
           streamingOverride={rerollingId === m.id ? deferredReroll : null}
           onEdit={onEdit}
           onCut={onCut}
@@ -87,38 +92,58 @@ export function StoryStream({
 
       {/* 新段生成中 */}
       {streamingText !== null && (
-        <div className="my-4">
+        <motion.div
+          key="streaming"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+          className="my-4"
+        >
           <Prose text={deferredStreaming ?? ""} />
           <span className="animate-pulse text-gilt">▍</span>
-        </div>
+        </motion.div>
       )}
 
       {/* 错误行 + 重试 */}
-      {error && (
-        <div className="my-6 flex items-center gap-3 text-sm text-cinnabar">
-          <span>✗ 笔锋中断：{error}</span>
-          <button
-            onClick={onRetry}
-            className="shrink-0 rounded border border-cinnabar/50 px-3 py-0.5 transition hover:bg-cinnabar/10"
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="my-6 flex items-center gap-3 text-sm text-cinnabar"
           >
-            重试
-          </button>
-        </div>
-      )}
+            <span>✗ 笔锋中断：{error}</span>
+            <button
+              onClick={onRetry}
+              className="shrink-0 rounded border border-cinnabar/50 px-3 py-0.5 transition hover:bg-cinnabar/10"
+            >
+              重试
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 回到卷尾（脱离吸底时浮现） */}
-      {!stickBottom && (
-        <button
-          onClick={() => {
-            stickRef.current = true;
-            setStickBottom(true);
-            bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-          }}
-          className="fixed bottom-40 left-1/2 z-20 -translate-x-1/2 rounded-full border border-line bg-paper-raised px-4 py-1 text-xs text-ink-faint shadow transition hover:text-gilt"
-        >
-          ↓ 回到卷尾
-        </button>
-      )}
+      <AnimatePresence>
+        {!stickBottom && (
+          <motion.button
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => {
+              stickRef.current = true;
+              setStickBottom(true);
+              bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+            }}
+            className="fixed bottom-40 left-1/2 z-20 -translate-x-1/2 rounded-full border border-line bg-paper-raised px-4 py-1 text-xs text-ink-faint shadow transition hover:text-gilt"
+          >
+            ↓ 回到卷尾
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       <div ref={bottomRef} />
     </div>

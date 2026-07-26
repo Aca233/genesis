@@ -38,7 +38,13 @@ export function TaskProgressBar({
                     : "text-ink-faint"
             }
           >
-            <span aria-hidden>{icon[step.status]} </span>
+            {/* 已完成步骤：淡金勾（docs/06 §3），文字保持 text-ink-soft */}
+            <span
+              aria-hidden
+              className={step.status === "completed" ? "text-gilt/70" : undefined}
+            >
+              {icon[step.status]}{" "}
+            </span>
             {step.label}
           </li>
         ))}

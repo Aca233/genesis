@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeScript } from "@/components/theme/ThemeScript";
+import { MotionProvider } from "@/components/theme/MotionProvider";
 
 export const metadata: Metadata = {
   title: "创世",
@@ -17,7 +18,9 @@ export default function RootLayout({
       <head>
         <ThemeScript />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <MotionProvider>{children}</MotionProvider>
+      </body>
     </html>
   );
 }

@@ -603,7 +603,7 @@ async function buildSettlementContext(
   mode: WorldMode,
   reality?: RealityState,
 ): Promise<Parameters<typeof settlementUserPrompt>[0]> {
-  const [entities, gods, abilities, lastEntry, worldActivity] = await Promise.all([
+  const [entities, gods, abilities, lastEntry, worldActivity, pantheonHistory] = await Promise.all([
     prisma.entity.findMany({
       where: { timelineId },
       select: {
@@ -616,7 +616,7 @@ async function buildSettlementContext(
           take: ENTITY_CONTEXT_MAX_SECTIONS,
         },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: { updatedAt: "desc" },
       take: EXTRACTION_MAX_ENTITIES,
     }),
     prisma.god.findMany({
@@ -634,7 +634,7 @@ async function buildSettlementContext(
         god: { select: { name: true } },
         sourceAbility: { select: { name: true } },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: { updatedAt: "desc" },
       take: EXTRACTION_MAX_ABILITIES,
     }),
     prisma.chronicleEntry.findFirst({
@@ -645,6 +645,17 @@ async function buildSettlementContext(
       timelineId,
       chapterText.messages.map((message) => message.id),
     ),
+    // 每神近期幕后行动史回喂：排除「静观本章风云」填充条目，供结算推进而非复读既往线头
+    prisma.chronicleEntry.findMany({
+      where: {
+        timelineId,
+        source: "pantheon",
+        text: { not: { contains: "静观本章风云" } },
+      },
+      select: { godIds: true, yearLabel: true, text: true },
+      orderBy: { createdAt: "desc" },
+      take: 60,
+    }),
   ]);
   const theme = mode === "creator" && reality
     ? reality.theme
@@ -673,12 +684,18 @@ async function buildSettlementContext(
         ...(sections.length ? ["  EXISTING VISIBLE UNLOCKED SECTIONS:", ...sections] : []),
       ].join("\n");
     }).join("\n\n"),
-    gods: gods.filter((god) => god.tier === "major" && !god.isPlayer).map((god) =>
-      `${god.name} [${god.id}] rank=${god.rank}\n${JSON.stringify({
+    gods: gods.filter((god) => god.tier === "major" && !god.isPlayer).map((god) => {
+      const recentActions = pantheonHistory
+        .filter((entry) => entry.godIds.includes(god.id))
+        .slice(0, 3);
+      const historyLine = recentActions.length
+        ? `\nRECENT OFFSTAGE ACTIONS (advance or conclude, do not repeat): ${recentActions.map((entry) => `${entry.yearLabel}：${entry.text}`).join(" / ")}`
+        : "";
+      return `${god.name} [${god.id}] rank=${god.rank}\n${JSON.stringify({
         persona: god.persona, voice: god.voice, agenda: god.agenda, relations: god.relations,
         domains: god.domains, faithScope: god.faithScope,
-      })}`,
-    ).join("\n\n"),
+      })}${historyLine}`;
+    }).join("\n\n"),
     abilities: abilities.map((ability) => {
       const owner = ability.entity?.name ?? ability.god?.name ?? "未知拥有者";
       const source = ability.sourceAbility ? `${ability.sourceAbility.name} [${ability.sourceAbilityId}]` : "—";

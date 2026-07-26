@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
 import type { MaterialSelectionItem } from "@/lib/materials/types";
 import { validateAbilityOwner, type SelectedMaterial } from "@/lib/materials/selection";
 import { ConflictPanel } from "./ConflictPanel";
@@ -12,12 +13,30 @@ type Card = { id: string; kind: string; name: string; summary: string; favorite:
 type VersionDetail = { content: unknown; dependencies: NonNullable<Version["dependencies"]> };
 
 export function MaterialPicker({ value, onChange, onClose }: { value: MaterialSelectionItem[]; onChange: (items: MaterialSelectionItem[]) => void; onClose: () => void }) {
-  const [cards, setCards] = useState<Card[]>([]);
+  const [cards, setCards] = useState<Card[] | null>(null);
   const [details, setDetails] = useState<Record<string, VersionDetail>>({});
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { void fetch("/api/materials").then((response) => response.json()).then((json) => setCards(json.materials ?? [])).catch(() => setError("素材列表读取失败")); }, []);
   const selected = useMemo(() => new Map(value.map((item) => [item.materialCardId, item])), [value]);
-  const cardById = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
+  const cardById = useMemo(() => new Map((cards ?? []).map((card) => [card.id, card])), [cards]);
+
+  // 挂载时快照打开前的选择：取消/Esc 一律回滚至此，杜绝冲突选择经即时 onChange 滞留在创世流中
+  const initialSelectionRef = useRef(value);
+  const cancel = () => {
+    onChange(initialSelectionRef.current);
+    onClose();
+  };
+  const cancelRef = useRef(cancel);
+  useEffect(() => {
+    cancelRef.current = cancel;
+  });
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") cancelRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   async function loadVersion(cardId: string, versionId: string): Promise<VersionDetail> {
     const cached = details[versionId];
@@ -89,16 +108,33 @@ export function MaterialPicker({ value, onChange, onClose }: { value: MaterialSe
     });
   }
 
-  return <div className="fixed inset-0 z-50 overflow-auto bg-black/30 p-4">
-    <section className="mx-auto max-w-5xl rounded-xl border border-line bg-paper p-6">
-      <header className="flex justify-between gap-4"><div><h2 className="text-2xl text-ink">引用创世素材</h2><p className="text-sm text-ink-faint">手动逐张选择；所有素材仍合并为一次创世请求。</p></div><button onClick={onClose} disabled={inspected.blockingMessages.length > 0} className="text-gilt disabled:opacity-40">完成（{value.length}）</button></header>
+  return <motion.div
+    initial={{ opacity: 0 }}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    transition={{ duration: 0.2 }}
+    role="dialog"
+    aria-modal="true"
+    aria-label="引用创世素材"
+    className="fixed inset-0 z-50 overflow-auto bg-scrim p-4"
+  >
+    <motion.section
+      initial={{ y: 8 }}
+      animate={{ y: 0 }}
+      exit={{ y: 8 }}
+      transition={{ duration: 0.2 }}
+      className="mx-auto max-w-5xl rounded-xl border border-line bg-paper p-6"
+    >
+      <header className="flex justify-between gap-4"><div><h2 className="text-2xl text-ink" style={{ fontFamily: "var(--font-display)" }}>引用创世素材</h2><p className="text-sm text-ink-faint">手动逐张选择；所有素材仍合并为一次创世请求。</p></div><div className="flex shrink-0 items-start gap-4"><button onClick={cancel} className="text-ink-faint transition hover:text-cinnabar">取消</button><button onClick={onClose} disabled={inspected.blockingMessages.length > 0} className="text-gilt disabled:opacity-40">完成（{value.length}）</button></div></header>
       {error && <p className="mt-3 text-sm text-cinnabar">{error}</p>}
       <div className="mt-4 grid gap-2"><p className="text-xs text-ink-faint">当前已估算 {inspected.budget.estimatedChars.toLocaleString()} / 120,000 字符{inspected.budget.largest[0] ? `；最大项 ${cardById.get(value.find((item) => item.materialVersionId === inspected.budget.largest[0]!.id)?.materialCardId ?? "")?.name ?? "未知"}` : ""}</p><ConflictPanel issues={inspected.blockingMessages} /></div>
-      <ul className="mt-5 grid gap-3 md:grid-cols-2">{cards.map((card) => {
+      {cards === null ? <p className="fog-text mt-5 py-10 text-center">展卷中…</p>
+      : cards.length === 0 ? <p className="fog-text mt-5 py-10 text-center">藏库尚无素材。</p>
+      : <ul className="mt-5 grid gap-3 md:grid-cols-2">{cards.map((card) => {
         const choice = selected.get(card.id);
         const deps = choice ? details[choice.materialVersionId]?.dependencies ?? [] : [];
         const owners = choice && card.kind === "ability" ? legalOwners(choice) : [];
-        return <li key={card.id} className={`rounded border p-4 ${choice ? "border-gilt" : "border-line"}`}>
+        return <li key={card.id} className={`rounded-lg border p-4 ${choice ? "border-gilt" : "border-line"}`}>
           <button onClick={() => void toggle(card)} className="w-full text-left"><h3>{card.favorite ? "★ " : ""}{card.name}</h3><p className="line-clamp-2 text-xs text-ink-faint">{card.summary}</p></button>
           {choice && <div className="mt-3 grid gap-2">
             <select value={choice.materialVersionId} onChange={(event) => void changeVersion(card, event.target.value)} className="bg-paper-sunken text-xs">{card.versions.map((version) => <option value={version.id} key={version.id}>v{version.version} · {version.name}</option>)}</select>
@@ -110,7 +146,7 @@ export function MaterialPicker({ value, onChange, onClose }: { value: MaterialSe
             <div className="flex gap-2 text-[11px] text-ink-faint"><span>优先级 {choice.priority + 1}</span><button onClick={() => shiftPriority(card.id, -1)}>↑ 提高</button><button onClick={() => shiftPriority(card.id, 1)}>↓ 降低</button></div>
           </div>}
         </li>;
-      })}</ul>
-    </section>
-  </div>;
+      })}</ul>}
+    </motion.section>
+  </motion.div>;
 }

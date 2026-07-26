@@ -7,7 +7,7 @@ export default function MaterialsPage() {
     <CelestialPageShell contentClassName="mx-auto w-full max-w-6xl">
       <header className="mb-8">
         <h1
-          className="text-4xl text-ink"
+          className="text-3xl text-ink"
           style={{ fontFamily: "var(--font-display)" }}
         >
           ✦ 万象藏库

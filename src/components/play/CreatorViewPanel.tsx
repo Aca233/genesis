@@ -40,6 +40,8 @@ export function CreatorViewPanel({
   const [acting, setActing] = useState(false);
   const [showAvatarForm, setShowAvatarForm] = useState(false);
   const [avatar, setAvatar] = useState(EMPTY_AVATAR);
+  /** 收回化身的两步确认：待确认的化身 id */
+  const [confirmWithdrawId, setConfirmWithdrawId] = useState<string | null>(null);
 
   async function act(body: Record<string, unknown>): Promise<boolean> {
     if (busy || acting) return false;
@@ -177,7 +179,33 @@ export function CreatorViewPanel({
                   ) : !dormant && (
                     <button disabled={busy || acting} onClick={() => void act({ action: "enter_avatar", avatarId: item.id })} className="text-gilt disabled:opacity-40">进入</button>
                   )}
-                  {!dormant && <button disabled={busy || acting} onClick={() => void act({ action: "withdraw_avatar", avatarId: item.id })} className="text-cinnabar disabled:opacity-40">收回</button>}
+                  {!dormant && (confirmWithdrawId === item.id ? (
+                    <span className="flex flex-wrap items-center gap-2 text-cinnabar">
+                      收回化身？其此生不可再入世。
+                      <button
+                        disabled={busy || acting}
+                        onClick={() => {
+                          void act({ action: "withdraw_avatar", avatarId: item.id }).then((succeeded) => {
+                            if (succeeded) setConfirmWithdrawId(null);
+                          });
+                        }}
+                        className="font-bold underline disabled:opacity-40"
+                      >
+                        落印
+                      </button>
+                      <button onClick={() => setConfirmWithdrawId(null)} className="text-ink-faint hover:text-ink">
+                        且慢
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      disabled={busy || acting}
+                      onClick={() => setConfirmWithdrawId(item.id)}
+                      className="text-cinnabar disabled:opacity-40"
+                    >
+                      收回
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>

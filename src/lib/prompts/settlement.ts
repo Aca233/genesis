@@ -165,13 +165,14 @@ Mode rules:
 ${turnRules}
 
 Tasks inside the same response:
-1. pantheonTurns: give every listed non-player major god exactly one offstage action. Respect rank order, persona, agenda, relations, abilities and earlier gods' consequences. A deliberate stillness is valid.
+1. pantheonTurns: give every listed non-player major god exactly one offstage action. Respect rank order, persona, agenda, relations, abilities and earlier gods' consequences. A deliberate stillness is valid. Each god's action must be written in that god's own temperament and diction per its supplied card — a drunk brawler god and a courtly dragon king must never share sentence patterns. Where RECENT OFFSTAGE ACTIONS are supplied for a god, advance, conclude or derail that thread first: never repeat an unfulfilled departure, preparation or observation beat from an earlier checkpoint.
 2. extraction: extract only state deltas explicitly supported by labelled chapter messages. Ability changes require one exact evidenceMessageIndex and a verbatim evidence excerpt of at least 12 Chinese characters.
 3. chronicle: write 2-3 public historian entries and an epilogue. The legacy chapterTitle field is internal compatibility data only: return an empty string. Never expose hidden pantheon actions, abilities, agendas or relations.
 4. worldActivity: merge duplicate activities, promote multiple related ordinary activities into an important event, advance or resolve an unresolved event, or derive a new event from one. Return empty arrays when no durable correction is justified.
 
 Global rules:
 - Output one JSON object only. No markdown or commentary. All user-facing strings are Chinese.
+- Never let engine vocabulary (本章, 章节, 剧情, 检查点, 玩家, AI, 设定, 系统) or fourth-wall memes from player input enter any user-facing string (summaries, aliases, sections, chronicle text); re-express such content as in-world diction (e.g. a player's out-of-world joke becomes an in-world epithet).
 - Never invent IDs. Use exact known names and ability IDs from input.
 - Never guess an activity or event ID from its title. worldActivity may reference only exact IDs listed in CHECKPOINT WORLD ACTIVITY.
 - A create mutation must cite the exact related sourceActivityIds. An advance or derive mutation must cite an exact unresolved event ID.

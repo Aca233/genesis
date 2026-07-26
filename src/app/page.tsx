@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { AnimatePresence } from "motion/react";
 import { useTheme } from "@/components/theme/useTheme";
 import { MaterialPicker } from "@/components/materials/MaterialPicker";
 import { PlayBackground } from "@/components/play/PlayBackground";
@@ -10,6 +11,25 @@ import { GenesisModeBackground } from "@/components/genesis/GenesisModeBackgroun
 import type { MaterialSelectionItem } from "@/lib/materials/types";
 import { buildGenesisTaskPayload, defaultGenesisMode } from "@/lib/genesis/create-request";
 import { WORLD_MODES, WORLD_MODE_PRESENTATION, type WorldMode } from "@/lib/world-mode";
+
+/** 续玩入口所需的世界摘要（GET /api/worlds 已按 updatedAt desc 排序） */
+type LastWorld = { id: string; name: string; status: string; updatedAt: string };
+
+/** 相对时间：续玩入口的「上回书」时间标注 */
+function relativeTime(iso: string) {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const minutes = Math.floor((Date.now() - t) / 60000);
+  if (minutes < 1) return "方才";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} 天前`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} 个月前`;
+  return `${Math.floor(months / 12)} 年前`;
+}
 
 /** 首屏：输入神谕 → 创世 → 跳转卡片编辑器（/genesis/[id]） */
 export default function Home() {
@@ -24,6 +44,29 @@ export default function Home() {
   const [materialSelections, setMaterialSelections] = useState<MaterialSelectionItem[]>([]);
   const [materialPickerOpen, setMaterialPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsModelHint, setNeedsModelHint] = useState(false);
+  const [lastWorld, setLastWorld] = useState<LastWorld | null>(null);
+
+  // 未配模型引导 + 续玩入口：两者失败均静默，不挡创建流
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/settings")
+      .then((res) => (res.ok ? (res.json() as Promise<{ narrativeSlot?: unknown }>) : null))
+      .then((json) => {
+        if (!cancelled && json && !json.narrativeSlot) setNeedsModelHint(true);
+      })
+      .catch(() => {});
+    void fetch("/api/worlds")
+      .then((res) => (res.ok ? (res.json() as Promise<{ worlds?: LastWorld[] }>) : null))
+      .then((json) => {
+        const latest = json?.worlds?.[0];
+        if (!cancelled && latest) setLastWorld(latest);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /** 携带典籍：读取 SillyTavern worldbook JSON */
   async function pickLorebook(e: React.ChangeEvent<HTMLInputElement>) {
@@ -86,12 +129,21 @@ export default function Home() {
         >
           创世
         </h1>
-        <p className="mt-4 text-ink-soft">
+        <p className="mt-4 text-balance text-ink-soft">
           {WORLD_MODE_PRESENTATION[worldMode].subtitle}
         </p>
       </header>
 
       <section className="home-genesis-panel relative w-full max-w-xl">
+        {needsModelHint && (
+          <p className="mb-4 rounded-md border border-gilt/40 bg-gilt/5 px-3 py-2 text-sm text-gilt">
+            尚未配置叙事模型——先往{" "}
+            <Link href="/settings" className="underline">
+              香炉
+            </Link>{" "}
+            封存你的 Key。
+          </p>
+        )}
         <fieldset className="mb-4" disabled={creating}>
           <legend className="mb-2 text-sm text-ink-faint">选择世界模式（创建后不可更改）</legend>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -193,7 +245,24 @@ export default function Home() {
         </div>
       </section>
 
-      {materialPickerOpen && <MaterialPicker value={materialSelections} onChange={setMaterialSelections} onClose={() => setMaterialPickerOpen(false)} />}
+      <AnimatePresence>
+        {materialPickerOpen && <MaterialPicker value={materialSelections} onChange={setMaterialSelections} onClose={() => setMaterialPickerOpen(false)} />}
+      </AnimatePresence>
+
+      {lastWorld && (
+        <p className="relative text-sm text-ink-faint">
+          上回书：<span className="text-ink-soft">{lastWorld.name}</span>
+          {relativeTime(lastWorld.updatedAt) && (
+            <span className="ml-2 text-xs">{relativeTime(lastWorld.updatedAt)}</span>
+          )}{" "}
+          <Link
+            className="text-gilt hover:underline"
+            href={lastWorld.status === "draft" ? `/genesis/${lastWorld.id}` : `/play/${lastWorld.id}`}
+          >
+            {lastWorld.status === "draft" ? "续掷卡组" : "入界"} →
+          </Link>
+        </p>
+      )}
 
       <footer className="relative flex flex-col items-center gap-3 text-xs text-ink-faint">
         <nav className="flex gap-8">

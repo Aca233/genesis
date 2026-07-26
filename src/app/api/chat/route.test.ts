@@ -240,10 +240,10 @@ describe("POST /api/chat", () => {
     expect(mocks.narratorSSE).not.toHaveBeenCalled();
   });
 
-  it("把 Narrator 上下文允许推进的事件 ID 传给同轮 finalize", async () => {
+  it("把 Narrator 上下文允许推进的事件 ID 与租借征兆 ID 传给同轮 finalize", async () => {
     const context = Object.assign(
       [{ role: "user", content: "继续" }],
-      { allowedEventIds: ["event-existing"] },
+      { allowedEventIds: ["event-existing"], consumedOmenIds: ["omen-1"] },
     );
     mocks.buildNarratorContext.mockResolvedValue(context);
 
@@ -282,6 +282,7 @@ describe("POST /api/chat", () => {
       mocks.prisma,
       expect.objectContaining({
         allowedEventIds: ["event-existing"],
+        consumedOmenIds: ["omen-1"],
       }),
     );
   });

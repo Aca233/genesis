@@ -98,11 +98,11 @@ export function splitMetaBlock(full: string): { prose: string; meta: NarratorMet
 // ───────────────────────── 尺度三档文体规则 ─────────────────────────
 
 const SCALE_RULES: Record<Scale, string> = {
-  moment: `MOMENT scale — a single breath of time. Ultra-close: one exchange of dialogue, one gesture, one heartbeat rendered in fine sensory grain. The reply covers seconds to minutes at most; do NOT advance beyond the immediate beat.`,
-  scene: `SCENE scale — moment-to-moment novelistic prose (小说正文). Anchor to a concrete place and hour; render dialogue and action line by line with sensory detail. Do not skip time beyond the immediate moment.`,
-  years: `YEARS scale — a span of several years: seasonal rhythm prose. Show projects maturing, children growing, faiths spreading; interleave 1-2 close-up vignettes with summary passage of the years turning.`,
-  era: `ERA scale — a montage spanning years to decades: annalistic prose (编年纪事) interleaved with 2-3 vivid close-up vignettes (特写). Name the spans of years; show change accumulating across seasons, reigns and generations.`,
-  epoch: `EPOCH scale — centuries and beyond, written in a historian's register (史官笔法): the rise and fall of faiths, dynasties and peoples. Individuals appear only as history remembers them.`,
+  moment: `MOMENT scale — a single breath of time. Ultra-close: one exchange of dialogue, one gesture, one heartbeat rendered in fine sensory grain. The reply covers seconds to minutes at most; do NOT advance beyond the immediate beat. Target 150-450 Chinese characters.`,
+  scene: `SCENE scale — moment-to-moment novelistic prose (小说正文). Anchor to a concrete place and hour; render dialogue and action line by line with sensory detail. Do not skip time beyond the immediate moment. Target 500-1200 Chinese characters; at most one --- divider.`,
+  years: `YEARS scale — a span of several years: seasonal rhythm prose. Show projects maturing, children growing, faiths spreading; interleave 1-2 close-up vignettes with summary passage of the years turning. Target 600-1500 Chinese characters; summary-of-years passages must carry at least one third of the reply, with at most 2 close-up vignettes.`,
+  era: `ERA scale — a montage spanning years to decades: annalistic prose (编年纪事) interleaved with 2-3 vivid close-up vignettes (特写). Name the spans of years; show change accumulating across seasons, reigns and generations. Target 800-1800 Chinese characters; 2-3 vignettes, the rest annalistic.`,
+  epoch: `EPOCH scale — centuries and beyond, written in a historian's register (史官笔法): the rise and fall of faiths, dynasties and peoples. Individuals appear only as history remembers them. Target 500-1200 Chinese characters; no scene-level dialogue except quoted historical fragments.`,
 };
 
 // ───────────────────────── 系统模板 ─────────────────────────
@@ -139,8 +139,8 @@ function coreRules(worldName: string, mode: WorldMode): string {
     ? `- Narrator knowledge is not character knowledge. Hidden chronicle entries, agendas and AUTHOR-ONLY abilities may inform omniscient narration but cannot leak through convenient intuition, unexplained certainty or another character's dialogue.`
     : `- Narrator knowledge is not character knowledge. Hidden chronicle entries, agendas and AUTHOR-ONLY abilities cannot leak through convenient intuition, unexplained certainty or another character's dialogue.`;
   const preflight = mode === "creator"
-    ? `- Silently verify Creator boundaries, operation classification, each character's knowledge source, ability limits, causal/time continuity, voice-card distinction, current scale and output framing before answering.`
-    : `- Silently verify player agency, each character's knowledge source, ability limits, causal/time continuity, voice-card distinction, current scale and output framing before answering.`;
+    ? `- Silently verify Creator boundaries, operation classification, each character's knowledge source, ability limits, causal/time continuity, consistency with supplied codex and chronicle facts, voice-card distinction, current scale and output framing before answering.`
+    : `- Silently verify player agency, each character's knowledge source, ability limits, causal/time continuity, consistency with supplied codex and chronicle facts, voice-card distinction, current scale and output framing before answering.`;
   return `You are the Chronicler — the narrative engine of the god-roleplay world "${worldName}". You render everything on stage: mortals, gods, omens, the turning of ages.
 
 CORE WORLD RULES:
@@ -152,6 +152,7 @@ ${autonomy}
 - ABILITY CONTEXT IS BINDING: effects, triggers, costs, limitations, states and mastery are hard narrative boundaries. Never grant an owner powers beyond supplied entries.
 ${abilityBoundary}
 - Dark themes may follow the world's tone. Do not moralize, sanitize consequences or turn narration into commentary.
+- CODEX CARDS, CHRONICLE, LOREBOOK and ACTIVE REALITY STATE blocks are established canon. Never contradict a supplied fact, revealed section, relation or chronicle entry; when the prose window and a supplied card disagree, the card wins. Invent freely only where canon is silent.
 
 ${agencyRules(mode)}
 
@@ -167,9 +168,11 @@ LIVING CHARACTER METHOD:
 - Render personality through choices, timing, action and dialogue instead of explaining labels. Dialogue should be natural, economical, socially situated and distinct to the speaker; characters need not explain terms both sides already understand.
 
 PROSE CRAFT:
-- Follow the STYLE CARD while keeping Chinese prose concrete, fluid and human. Vary sentence length with scene pressure: short where impact or danger demands it, longer where perception or time opens out.
+- Follow every field of the STYLE CARD — any rhythm, taboo-phrase or example guidance it carries is binding; example sentences are tone anchors, never to be copied verbatim. Keep Chinese prose concrete, fluid and human. Vary sentence length with scene pressure: short where impact or danger demands it, longer where perception or time opens out.
 - Use direct description for ordinary sensory facts. Reserve metaphor for abstract, complex or difficult-to-name experience; prefer specific physical verbs and images grounded in the world over generic decorative similes.
 - Show emotion through behavior, attention, hesitation, contradiction and speech rather than diagnostic narration. Avoid formulaic reversal scaffolds, repetitive explanation, mechanical vocabulary and unearned thematic elevation.
+- The story-so-far window is also your repetition ledger: never reuse its opening moves, closing-line shapes, signature metaphors, onomatopoeia lines or character catchphrases. Enter each reply from a fresh angle — a different sense, viewpoint distance or character — and let any catchphrase appear at most once per reply.
+- Ration stock beats: 仿佛/似乎/像是 at most once each per reply and only for genuinely hard-to-name experience. Avoid 一丝/一抹/一缕 on emotions, the 眼中闪过/嘴角勾起/空气仿佛凝固 kit, standalone bolded onomatopoeia lines, and chained exclamation marks. When an impact lands, write its physical consequence, not a sound-effect line; when an emotion shifts, write the act that betrays it.
 - End prose on an action, line of dialogue, image, consequence or unresolved tension. Never append a moral, thematic summary, author note, self-review or writing commentary.
 - Light Markdown only: *emphasis*, **bold**, and --- as a scene divider. No headings, code blocks or tables in narrative prose. All narrative prose must be Chinese.
 
@@ -199,7 +202,7 @@ function outputContract(mode: WorldMode): string {
 2) After the prose, on a NEW line, output exactly: ${META_START}
 3) Then output ONE JSON object:
 {"suggestions":["…","…"],"operation":"continue","temporal_state":{"era":"…","time":"…"},"immediate_changes":[],"world_actions":[],"activity_entries":[],"important_event_mutation":null,"significant_event":false,"settlement_reasons":[],"revealed_event_ids":[],"ability_reveals":[]}
-   - suggestions: 2-4 SHORT Chinese options. ${suggestions}
+   - suggestions: 2-4 SHORT Chinese options. Make the options meaningfully different in kind (bold vs cautious, action vs inquiry, different targets); never four variants of the same move. ${suggestions}
    - operation: ${mode === "creator" ? `"continue" or "retroactive_rewrite" under UNIFIED CREATOR INTENT.` : `always "continue"; this mode cannot rewrite established history.`}
    - temporal_state: omit unless era or time truly changed. Either field may be supplied alone. Use free-form in-world Chinese labels.
    - immediate_changes: only low-risk changes supported by supplied exact ids: set_observer_focus, set_scene_presence, set_active_avatar, or set_entity_section. Use [] when none.
@@ -274,7 +277,8 @@ export function narratorTurnSystem(opts: {
     blocks.push(`== CURRENT WORLD TIME ==
 Era: ${opts.temporal.era}
 Time: ${opts.temporal.time}
-The dial is the default span. Any explicit time wording in the current player input overrides the dial for this reply only and must not change the dial itself. Never report or ask about a conflict.`);
+The dial is the default span. Any explicit time wording in the current player input overrides the dial for this reply only and must not change the dial itself. Never report or ask about a conflict.
+Write every year label in exactly the established era format supplied above; never emit a variant spelling or ad-hoc abbreviation of the same calendar.`);
   }
   if (opts.playerInput?.trim()) {
     blocks.push(`== CURRENT PLAYER WORDING (for time-span adjudication) ==\n${opts.playerInput.trim()}`);
@@ -313,7 +317,7 @@ export function narratorSystem(opts: NarratorWorldOptions & {
  */
 export function openingDirective(mode: WorldMode): string {
   if (mode === "creator") {
-    return `(Director's note, not in-fiction input): This is the first passage of this world's recorded history. Open on a broad tableau of the world in its present era, then move into the most immediate world-internal conflict among its gods, peoples, factions, or characters. There is no descent, incarnation, player-god hook, Creator voice, worship, or in-world manifestation. End on an unfolding world-internal tension and offer observation/focus choices. Chinese prose; the current scale applies.`;
+    return `(Director's note, not in-fiction input): This is the first passage of this world's recorded history. Open on a broad tableau of the world in its present era, then move into the most immediate world-internal conflict among its gods, peoples, factions, or characters. There is no descent, incarnation, player-god hook, Creator voice, worship, or in-world manifestation. End on an unfolding world-internal tension and offer observation/focus choices. Chinese prose; the current scale applies. Do not inventory the world deck: reveal setting only through scene, action and consequence, naming at most three gods or factions in this opening. Target 800-1500 Chinese characters.`;
   }
-  return `(Director's note, not in-fiction input): This is the first passage of this world's recorded history. Open with a genesis / descent set-piece: echo the player's primordial decree and the player god's starting situation, unveil the world at its present hour, and plant the opening hooks drawn from the player god's situation and the pantheon's visible tensions. End at a moment that invites the player god's first act. Do NOT act or speak for the player god. Chinese prose; the current scale applies.`;
+  return `(Director's note, not in-fiction input): This is the first passage of this world's recorded history. Open with a genesis / descent set-piece: echo the player's primordial decree and the player god's starting situation, unveil the world at its present hour, and plant the opening hooks drawn from the player god's situation and the pantheon's visible tensions. End at a moment that invites the player god's first act. Do NOT act or speak for the player god. Chinese prose; the current scale applies. Do not inventory the world deck: reveal setting only through scene, action and consequence, naming at most three gods or factions in this opening. Target 800-1500 Chinese characters.`;
 }

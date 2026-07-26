@@ -16,7 +16,7 @@ export const Prose = memo(function Prose({ text }: { text: string }) {
   const link = (children: React.ReactNode) => linkifyChildren(children, patterns);
 
   return (
-    <div className="prose-scroll leading-loose text-ink">
+    <div className="leading-loose text-ink">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

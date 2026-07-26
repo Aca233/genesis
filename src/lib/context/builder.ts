@@ -38,6 +38,8 @@ export type BuildOpts = {
 
 export type NarratorContext = ChatMessage[] & {
   allowedEventIds: string[];
+  /** 本轮注入的征兆 id；由 finalize 在叙事成功落库后标记消费 */
+  consumedOmenIds: string[];
 };
 
 /** 议程绝不注入 schemes——仅把 stanceToPlayer.level 译为一句外显倾向 */
@@ -154,22 +156,20 @@ function proseWindow(
 const PROBE_RE =
   /占卜|卜算|窥探|洞察|洞见|审问|拷问|追查|探查|查探|侦查|神览|天眼|推演|感知.{0,6}(真相|幕后|阴谋)|谁在(背后|暗中)/;
 
-/** 消费征兆队列：取未消费的至多 3 条并标记消费（叙事一次机会织入） */
+/**
+ * 租借征兆队列：取未消费的至多 2 条（与 prompt「至多织入 1-2 条」对齐）。
+ * 此处不标记消费——由 finalizeNarration 在叙事成功落库后按 id 标记，
+ * 生成失败/搁笔/变体重掷不再永久丢失征兆。
+ */
 async function consumeOmens(
   timelineId: string,
-): Promise<{ texts: string[] }> {
+): Promise<{ texts: string[]; ids: string[] }> {
   const omens = await prisma.omenQueue.findMany({
     where: { timelineId, consumed: false },
     orderBy: { createdAt: "asc" },
-    take: 3,
+    take: 2,
   });
-  if (omens.length) {
-    await prisma.omenQueue.updateMany({
-      where: { id: { in: omens.map((o) => o.id) } },
-      data: { consumed: true },
-    });
-  }
-  return { texts: omens.map((o) => o.text) };
+  return { texts: omens.map((o) => o.text), ids: omens.map((o) => o.id) };
 }
 
 /** 查探命中：玩家在查探时，检索隐藏大事记供裁决 */
@@ -338,7 +338,7 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<NarratorCon
   const probeText = opts.playerInput ?? "";
   const [omens, hiddenEntries] = mode === "creator"
     ? await Promise.all([
-        Promise.resolve({ texts: [] }),
+        Promise.resolve({ texts: [] as string[], ids: [] as string[] }),
         prisma.chronicleEntry.findMany({
           where: { timelineId: chapter.timelineId, revealed: false },
           orderBy: { createdAt: "desc" },
@@ -444,7 +444,7 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
     parts.push(`${mode === "creator" ? "【创世主意图】" : "【玩家神谕】"}${opts.playerInput ?? ""}`);
   } else if (opts.mode === "continue") {
     parts.push(
-      `(幕后导演提示，不作为剧情输入): ${opts.directive?.trim() || "继续叙事，顺势推进。"}`,
+      `(幕后导演提示，不作为剧情输入): ${opts.directive?.trim() || "继续叙事，顺势推进；换一个切入视点或感官开场，不沿用上一轮的开头句式、收束句式与标志性比喻。"}`,
     );
   } else {
     parts.push(openingDirective(mode));
@@ -466,5 +466,6 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
   messages.push({ role: "user", content: parts.join("\n\n"), cacheScope: "dynamic" });
   return Object.assign(messages, {
     allowedEventIds: [...worldActivityContext.actionableEventIds],
+    consumedOmenIds: omens.ids,
   });
 }

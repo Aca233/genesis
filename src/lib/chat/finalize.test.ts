@@ -69,6 +69,7 @@ function fixture() {
     },
     ability: { findFirst: vi.fn() },
     chronicleEntry: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    omenQueue: { updateMany: vi.fn().mockResolvedValue({ count: 2 }) },
     realityRewrite: {
       findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({
@@ -207,6 +208,53 @@ describe("finalizeNarration", () => {
 
     await expect(finalizeNarration(client as never, base)).rejects.toThrow("database unavailable");
     expect(tx.chronicleEntry.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("两阶段征兆消费：叙事落库成功后才标记，复用重试不重复标记", async () => {
+    const { client, tx } = fixture();
+    tx.ability.findFirst.mockResolvedValue(null);
+    const input = { ...base, consumedOmenIds: ["omen-1", "omen-2"] };
+
+    await finalizeNarration(client as never, input);
+
+    expect(tx.omenQueue.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["omen-1", "omen-2"] }, consumed: false },
+      data: { consumed: true },
+    });
+    expect(tx.omenQueue.updateMany.mock.invocationCallOrder[0])
+      .toBeGreaterThan(tx.message.create.mock.invocationCallOrder[0]);
+
+    await finalizeNarration(client as never, input);
+    expect(tx.omenQueue.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("未提供 consumedOmenIds 时不触碰征兆队列（存储快照恢复路径）", async () => {
+    const { client, tx } = fixture();
+    tx.ability.findFirst.mockResolvedValue(null);
+
+    await finalizeNarration(client as never, base);
+
+    expect(tx.omenQueue.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("significant_event 无 settlement_reasons 且未触发整理时打印告警", async () => {
+    const { client, tx } = fixture();
+    tx.ability.findFirst.mockResolvedValue(null);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      await finalizeNarration(client as never, {
+        ...base,
+        meta: { ...base.meta, significantEvent: true, settlementReasons: [] },
+      });
+
+      expect(warn).toHaveBeenCalledWith(
+        "significant_event 被忽略：缺少 settlement_reasons",
+        { generationId: "generation-1" },
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("creator omniscient observation never consumes author-only hidden chronicles", async () => {

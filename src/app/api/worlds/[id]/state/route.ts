@@ -31,6 +31,20 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  try {
+    // 整个读取流程统一兜底：任何未捕获异常都返回结构化中文错误体，
+    // 避免空 500 响应使客户端 res.json() 抛 Unexpected end of JSON input。
+    return await loadWorldState(id);
+  } catch (cause) {
+    console.error("GET /api/worlds/[id]/state 未捕获异常：", cause);
+    return NextResponse.json(
+      { error: "星轨紊乱：世界状态读取失败，请稍后再试" },
+      { status: 500 },
+    );
+  }
+}
+
+async function loadWorldState(id: string) {
   const world = await prisma.world.findUnique({ where: { id } });
   if (!world) {
     return NextResponse.json({ error: "世界不存在" }, { status: 404 });

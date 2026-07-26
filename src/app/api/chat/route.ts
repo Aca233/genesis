@@ -169,6 +169,7 @@ export async function POST(request: Request) {
   }
   const narratorIndex = prepared.meta.narratorIndex;
   let allowedEventIds: readonly string[] = [];
+  let consumedOmenIds: readonly string[] = [];
 
   const applyOutput = async (output: StoredNarratorOutput) => {
     publishNarrationTaskEvent(progressEvent(
@@ -194,6 +195,7 @@ export async function POST(request: Request) {
           output,
           scale,
           allowedEventIds,
+          consumedOmenIds,
           logInvalidReveal: ({ abilityId }) => {
             console.warn("[chat] 跳过非法能力揭示", {
               abilityId,
@@ -249,6 +251,7 @@ export async function POST(request: Request) {
       directive,
     });
     allowedEventIds = messages.allowedEventIds;
+    consumedOmenIds = messages.consumedOmenIds;
   } catch (error) {
     try {
       await markGenerationFailed(

@@ -24,8 +24,17 @@ function EntityLink({ item, text }: { item: EntityIndexItem; text: string }) {
         e.stopPropagation();
         openEntity(item.id);
       }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          e.stopPropagation();
+          openEntity(item.id);
+        }
+      }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      onFocus={() => setHover(true)}
+      onBlur={() => setHover(false)}
       role="button"
       tabIndex={0}
     >

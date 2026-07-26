@@ -61,7 +61,6 @@ export default function ArchivesPage() {
       setWorlds(json.worlds ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      setWorlds([]);
     }
   }, []);
 
@@ -133,8 +132,11 @@ export default function ArchivesPage() {
     <CelestialPageShell contentClassName="mx-auto w-full max-w-2xl">
       <header className="mb-8 flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
+          <Link href="/" className="text-sm text-ink-faint hover:text-gilt">
+            ← 回到原初
+          </Link>
           <h1
-            className="text-3xl text-ink"
+            className="mt-2 text-3xl text-ink"
             style={{ fontFamily: "var(--font-display)" }}
           >
             📜 往昔诸界
@@ -161,10 +163,25 @@ export default function ArchivesPage() {
         </div>
       </header>
 
-      {error && <p className="mb-4 text-sm text-cinnabar">{error}</p>}
+      {error && worlds !== null && <p className="mb-4 text-sm text-cinnabar">{error}</p>}
 
       {worlds === null ? (
-        <p className="py-16 text-center text-ink-faint">展卷中…</p>
+        error ? (
+          <p className="py-16 text-center text-sm text-cinnabar">
+            {error}{" "}
+            <button
+              onClick={() => {
+                setError(null);
+                void load();
+              }}
+              className="underline"
+            >
+              重试
+            </button>
+          </p>
+        ) : (
+          <p className="py-16 text-center text-ink-faint">展卷中…</p>
+        )
       ) : worlds.length === 0 ? (
         <div className="rounded-lg border border-dashed border-line py-16 text-center">
           <p className="fog-text">尚无世界。回到原初，说出第一句神谕。</p>
@@ -196,13 +213,15 @@ export default function ArchivesPage() {
                       style={{ fontFamily: "var(--font-display)" }}
                     >
                       <span className="min-w-0 max-w-full truncate">{w.name}</span>
-                      <span
-                        className={`shrink-0 rounded border px-1.5 py-0.5 text-xs ${badge.cls}`}
-                      >
-                        {badge.label}
-                      </span>
-                      <span className="shrink-0 rounded border border-gilt/25 bg-gilt/5 px-1.5 py-0.5 text-xs text-gilt">
-                        {worldModeLabel(w.mode)}
+                      <span className="inline-flex shrink-0 items-center gap-2">
+                        <span
+                          className={`rounded border px-1.5 py-0.5 text-xs ${badge.cls}`}
+                        >
+                          {badge.label}
+                        </span>
+                        <span className="rounded border border-gilt/25 bg-gilt/5 px-1.5 py-0.5 text-xs text-gilt">
+                          {worldModeLabel(w.mode)}
+                        </span>
                       </span>
                     </h2>
                     <p className="decree mt-2 text-sm">

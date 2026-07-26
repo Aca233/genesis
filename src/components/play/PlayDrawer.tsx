@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import type {
   CreatorAvatar,
@@ -64,15 +64,33 @@ export function PlayDrawer({
   onActivitiesLoaded?: (data: WorldActivityResponse) => void;
   onClose: () => void;
 }) {
+  // 焦点管理：开卷时聚焦关闭按钮，合卷时还焦到对应符文
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const prevTabRef = useRef<DrawerTab | null>(null);
+
+  useEffect(() => {
+    if (tab && prevTabRef.current === null) {
+      closeButtonRef.current?.focus();
+    }
+    prevTabRef.current = tab;
+  }, [tab]);
+
+  const close = useCallback(() => {
+    if (tab) {
+      document.querySelector<HTMLElement>(`[data-rune-tab="${tab}"]`)?.focus();
+    }
+    onClose();
+  }, [tab, onClose]);
+
   // Esc 关闭
   useEffect(() => {
     if (!tab) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tab, onClose]);
+  }, [tab, close]);
 
   return (
     <AnimatePresence>
@@ -85,7 +103,7 @@ export function PlayDrawer({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.25 }}
-            onClick={onClose}
+            onClick={close}
             className="fixed inset-0 z-40 bg-ink/25"
             aria-hidden
           />
@@ -109,7 +127,8 @@ export function PlayDrawer({
                 {tabTitle(world.mode, tab)}
               </h2>
               <button
-                onClick={onClose}
+                ref={closeButtonRef}
+                onClick={close}
                 className="text-ink-faint transition hover:text-ink"
                 aria-label="合卷"
               >
@@ -117,7 +136,19 @@ export function PlayDrawer({
               </button>
             </header>
 
-            <div className="flex-1 overflow-y-auto px-6 py-5">
+            <div
+              className="flex-1 overflow-y-auto px-6 py-5"
+              tabIndex={0}
+              role="region"
+              aria-label={tabTitle(world.mode, tab)}
+            >
+              {/* 页签切换淡切：key={tab} 使内容重挂载并淡入 */}
+              <motion.div
+                key={tab}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.15 }}
+              >
               {tab === "activity" ? (
                 <WorldActivityPanel
                   worldId={world.id}
@@ -167,6 +198,7 @@ export function PlayDrawer({
               ) : (
                 <StarmapPanel gods={gods} theme={world.themeCard} />
               )}
+              </motion.div>
             </div>
           </motion.aside>
         </>

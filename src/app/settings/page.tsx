@@ -133,8 +133,8 @@ function SlotEditor({
           />
         </label>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="relative grid content-start gap-1 text-sm text-ink-soft">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="relative grid min-w-0 content-start gap-1 text-sm text-ink-soft">
             <span className="flex items-center justify-between">
               模型名
               <button
@@ -149,6 +149,11 @@ function SlotEditor({
             </span>
             <input
               value={slot.model}
+              aria-label="模型名"
+              role="combobox"
+              aria-expanded={pickerOpen}
+              aria-controls={`${slotName}-model-listbox`}
+              aria-autocomplete="list"
               onChange={(e) => {
                 onChange({ ...slot, model: e.target.value });
                 if (models) setPickerOpen(true);
@@ -165,7 +170,11 @@ function SlotEditor({
             )}
             {/* 名录下拉（输入即筛选） */}
             {pickerOpen && models && (
-              <div className="absolute top-full z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-line bg-paper-raised shadow-lg">
+              <div
+                id={`${slotName}-model-listbox`}
+                role="listbox"
+                className="absolute top-full z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-line bg-paper-raised shadow-lg"
+              >
                 {filtered.length === 0 ? (
                   <p className="px-3 py-2 text-xs text-ink-faint">
                     名录中无匹配（共 {models.length} 个）
@@ -175,6 +184,8 @@ function SlotEditor({
                     <button
                       key={m}
                       type="button"
+                      role="option"
+                      aria-selected={m === slot.model}
                       onMouseDown={(e) => {
                         e.preventDefault();
                         onChange({ ...slot, model: m });
@@ -192,7 +203,7 @@ function SlotEditor({
               </div>
             )}
           </div>
-          <label className="grid gap-1 text-sm text-ink-soft">
+          <label className="grid min-w-0 gap-1 text-sm text-ink-soft">
             温度（可选）
             <input
               type="number"
@@ -240,10 +251,25 @@ export default function SettingsPage() {
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedTick, setSavedTick] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [testing, setTesting] = useState<"narrative" | "backstage" | null>(null);
   const [testResults, setTestResults] = useState<
     Partial<Record<"narrative" | "backstage", { ok: boolean; text: string }>>
   >({});
+  // 对局偏好：AI 行动建议开关（纯本地偏好，读取侧在 InputDeck）
+  const [suggestionsOn, setSuggestionsOn] = useState(true);
+
+  useEffect(() => {
+    setSuggestionsOn(
+      window.localStorage.getItem("chuangshi:ai-suggestions") !== "off",
+    );
+  }, []);
+
+  function toggleSuggestions() {
+    const next = !suggestionsOn;
+    window.localStorage.setItem("chuangshi:ai-suggestions", next ? "on" : "off");
+    setSuggestionsOn(next);
+  }
 
   useEffect(() => {
     fetch("/api/settings")
@@ -262,6 +288,7 @@ export default function SettingsPage() {
 
   async function save() {
     setSaving(true);
+    setSaveError(null);
     try {
       const payload = {
         narrativeSlot: toPayload(narrative),
@@ -275,7 +302,12 @@ export default function SettingsPage() {
       if (res.ok) {
         setSavedTick(true);
         setTimeout(() => setSavedTick(false), 2000);
+      } else {
+        const json = await res.json().catch(() => ({}));
+        setSaveError(json.error ?? `封存失败（${res.status}）`);
       }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
@@ -377,12 +409,14 @@ export default function SettingsPage() {
               testing={testing === "backstage"}
               testResult={testResults.backstage ?? null}
             />
-            <button
-              onClick={() => setBackstage(null)}
-              className="mt-2 text-xs text-ink-faint hover:text-cinnabar"
-            >
-              移除幕后槽（回落叙事模型）
-            </button>
+            <div className="mt-2 flex justify-end">
+              <button
+                onClick={() => setBackstage(null)}
+                className="text-xs text-ink-faint hover:text-cinnabar"
+              >
+                移除幕后槽（回落叙事模型）
+              </button>
+            </div>
           </div>
         ) : (
           <button
@@ -392,6 +426,46 @@ export default function SettingsPage() {
             + 配置幕后模型（可选：诸神回合与结算用便宜模型，省钱提速）
           </button>
         )}
+
+        <section
+          className="rounded-lg border border-line bg-paper-raised p-5"
+          aria-labelledby="play-prefs-title"
+        >
+          <h2
+            id="play-prefs-title"
+            className="text-lg text-ink"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            对局偏好
+          </h2>
+          <div className="mt-3 flex items-center justify-between gap-4">
+            <div className="text-sm text-ink-soft">
+              AI 行动建议
+              <p className="mt-0.5 text-xs text-ink-faint">
+                每轮叙事后附上 2-4 条可点选的行动建议；关闭后只留自由书写。
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={suggestionsOn}
+              aria-label="AI 行动建议"
+              onClick={toggleSuggestions}
+              className={`relative h-6 w-11 shrink-0 rounded-full border transition ${
+                suggestionsOn
+                  ? "border-gilt/60 bg-gilt/25"
+                  : "border-line bg-paper-sunken"
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full transition-all ${
+                  suggestionsOn ? "left-6 bg-gilt" : "left-1 bg-ink-faint"
+                }`}
+              />
+            </button>
+          </div>
+        </section>
 
         <PromptCacheStats />
 
@@ -413,11 +487,12 @@ export default function SettingsPage() {
           <button
             onClick={save}
             disabled={saving || !narrative.baseUrl || !narrative.model}
-            className="rounded-md border border-gilt/50 bg-gilt/5 px-8 py-2 text-gilt transition hover:bg-gilt/15 disabled:opacity-40"
+            className="rounded-md border border-gilt bg-gilt/10 px-8 py-2 text-gilt transition hover:bg-gilt/20 disabled:opacity-40"
           >
             {saving ? "封存中…" : "封存设置"}
           </button>
           {savedTick && <span className="text-sm text-gilt">✓ 已封存</span>}
+          {saveError && <span className="text-sm text-cinnabar">✗ {saveError}</span>}
         </div>
       </div>
     </CelestialPageShell>

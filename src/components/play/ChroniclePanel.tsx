@@ -136,6 +136,7 @@ export function ChroniclePanel({ timelineId }: { timelineId: string }) {
           <select
             value={godId}
             onChange={(e) => setGodId(e.target.value)}
+            aria-label="按神明过滤"
             className="rounded-md border border-line bg-paper-sunken px-2 py-1 text-ink outline-none focus:border-gilt/50"
           >
             <option value="">诸神——不限</option>
@@ -148,6 +149,7 @@ export function ChroniclePanel({ timelineId }: { timelineId: string }) {
           <select
             value={entityId}
             onChange={(e) => setEntityId(e.target.value)}
+            aria-label="按众生过滤"
             className="max-w-56 rounded-md border border-line bg-paper-sunken px-2 py-1 text-ink outline-none focus:border-gilt/50"
           >
             <option value="">众生——不限</option>

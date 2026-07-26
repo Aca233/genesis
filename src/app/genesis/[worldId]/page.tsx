@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence } from "motion/react";
 import type { WorldDeck, DeckCardKey } from "@/lib/cards/schemas";
@@ -89,6 +90,12 @@ export default function GenesisEditorPage({
   const [rerolling, setRerolling] = useState<DeckCardKey | null>(null);
   /** 已破封的天机（本地记忆）：majorGods.N / epochConflict */
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  /** 返回链接的脏数据内联确认（存卷后离开 / 弃改离开 / 且慢） */
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  /** 「创世」不可逆前的二次确认 */
+  const [confirmEmbark, setConfirmEmbark] = useState(false);
+  /** 逐出主神席的两步内联确认 */
+  const [confirmExpel, setConfirmExpel] = useState(false);
 
   // ── 演出状态 ──
   const [ceremony, setCeremony] = useState<EmbarkState | null>(null);
@@ -97,6 +104,17 @@ export default function GenesisEditorPage({
   const embarkFlow = useRef<ReturnType<typeof createEmbarkFlow> | null>(null);
 
   const dirty = dirtyPaths.size > 0 || structDirty;
+
+  // ── 脏数据守卫（仅兜底刷新/关标签；站内导航由返回链接 onClick 拦截） ──
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
 
   // ── 加载 ──
   useEffect(() => {
@@ -207,12 +225,10 @@ export default function GenesisEditorPage({
   const deleteMajorGod = useCallback(
     (index: number) => {
       if (!deck) return;
-      const god = deck.majorGods[index];
       if (deck.majorGods.length <= 4) {
         setNotice({ ok: false, text: "主神席不得少于 4 位，不可再删" });
         return;
       }
-      if (!window.confirm(`将「${god.name}」逐出主神席？此神的全部设定将被抹去。`)) return;
       setOpenCard(null);
       const majorGods = deck.mode === "creator"
         ? removeCreatorMajorGod(deck, index).majorGods
@@ -329,6 +345,50 @@ export default function GenesisEditorPage({
       <div className="genesis-deck-page mx-auto w-full max-w-6xl px-6 pb-28 pt-10">
       {/* ── 顶部：世界名 + 原初神谕 ── */}
       <header className="genesis-deck-header mb-8 grid gap-3">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <Link
+            href="/archives"
+            onClick={(e) => {
+              // beforeunload 拦不住客户端路由跳转：dirty 时在此拦截并内联确认
+              if (dirty) {
+                e.preventDefault();
+                setConfirmLeave(true);
+              }
+            }}
+            className="text-sm text-ink-faint transition hover:text-gilt"
+          >
+            ← 往昔诸界
+          </Link>
+          {confirmLeave && (
+            <>
+              <span className="text-cinnabar">卡组尚有未保存的改动。</span>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={async () => {
+                  if (await save(deck)) router.push("/archives");
+                }}
+                className="rounded-md border border-gilt/50 bg-gilt/5 px-3 py-1 text-gilt transition hover:bg-gilt/15 disabled:opacity-40"
+              >
+                {saving ? "落笔中…" : "存卷后离开"}
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push("/archives")}
+                className="rounded-md border border-line px-3 py-1 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar"
+              >
+                弃改离开
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmLeave(false)}
+                className="text-ink-faint transition hover:text-ink"
+              >
+                且慢
+              </button>
+            </>
+          )}
+        </div>
         <input
           value={deck.worldName}
           onChange={(e) => handleEdit("worldName", e.target.value)}
@@ -472,18 +532,20 @@ export default function GenesisEditorPage({
         onReroll={reroll}
       />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {deck.factions.map((f, i) => (
-          <DeckCard
-            key={f.ref}
-            title={f.name}
-            subtitle={f.kind}
-            lines={[clip(f.overview), clip(`信仰:${f.faith}`)]}
-            lockedCount={countLockedUnder(lockedPaths, `factions.${i}`)}
-            rerolling={rerolling === "factions"}
-            openIndex={i}
-            onOpen={() => setOpenCard({ kind: "faction", index: i })}
-          />
-        ))}
+        <AnimatePresence>
+          {deck.factions.map((f, i) => (
+            <DeckCard
+              key={f.ref}
+              title={f.name}
+              subtitle={f.kind}
+              lines={[clip(f.overview), clip(`信仰:${f.faith}`)]}
+              lockedCount={countLockedUnder(lockedPaths, `factions.${i}`)}
+              rerolling={rerolling === "factions"}
+              openIndex={i}
+              onOpen={() => setOpenCard({ kind: "faction", index: i })}
+            />
+          ))}
+        </AnimatePresence>
       </div>
 
       {/* ── 种族 ── */}
@@ -497,18 +559,20 @@ export default function GenesisEditorPage({
         onReroll={reroll}
       />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {deck.races.map((r, i) => (
-          <DeckCard
-            key={r.ref}
-            title={r.name}
-            subtitle={`寿命:${r.lifespan}`}
-            lines={[clip(r.traits), clip(`渊源:${r.divineTies}`)]}
-            lockedCount={countLockedUnder(lockedPaths, `races.${i}`)}
-            rerolling={rerolling === "races"}
-            openIndex={i}
-            onOpen={() => setOpenCard({ kind: "race", index: i })}
-          />
-        ))}
+        <AnimatePresence>
+          {deck.races.map((r, i) => (
+            <DeckCard
+              key={r.ref}
+              title={r.name}
+              subtitle={`寿命:${r.lifespan}`}
+              lines={[clip(r.traits), clip(`渊源:${r.divineTies}`)]}
+              lockedCount={countLockedUnder(lockedPaths, `races.${i}`)}
+              rerolling={rerolling === "races"}
+              openIndex={i}
+              onOpen={() => setOpenCard({ kind: "race", index: i })}
+            />
+          ))}
+        </AnimatePresence>
       </div>
 
       {/* ── 主要人物 ── */}
@@ -522,22 +586,24 @@ export default function GenesisEditorPage({
         onReroll={reroll}
       />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {deck.majorCharacters.map((character, index) => {
-          const race = deck.races.find((entry) => entry.ref === character.raceRef);
-          const skillCount = character.learnedTraditionRefs.length + character.racialOverrides.length + character.abilities.length;
-          return (
-            <DeckCard
-              key={character.ref}
-              title={character.name}
-              subtitle={`${character.identity} · ${race?.name ?? character.raceRef}`}
-              lines={[clip(`目标：${character.goals}`), clip(`技能：${skillCount} 项`)]}
-              lockedCount={countLockedUnder(lockedPaths, `majorCharacters.${index}`)}
-              rerolling={rerolling === "majorCharacters"}
-              openIndex={index}
-              onOpen={() => setOpenCard({ kind: "majorCharacter", index })}
-            />
-          );
-        })}
+        <AnimatePresence>
+          {deck.majorCharacters.map((character, index) => {
+            const race = deck.races.find((entry) => entry.ref === character.raceRef);
+            const skillCount = character.learnedTraditionRefs.length + character.racialOverrides.length + character.abilities.length;
+            return (
+              <DeckCard
+                key={character.ref}
+                title={character.name}
+                subtitle={`${character.identity} · ${race?.name ?? character.raceRef}`}
+                lines={[clip(`目标：${character.goals}`), clip(`技能：${skillCount} 项`)]}
+                lockedCount={countLockedUnder(lockedPaths, `majorCharacters.${index}`)}
+                rerolling={rerolling === "majorCharacters"}
+                openIndex={index}
+                onOpen={() => setOpenCard({ kind: "majorCharacter", index })}
+              />
+            );
+          })}
+        </AnimatePresence>
       </div>
 
       {/* ── 地理 ── */}
@@ -551,18 +617,20 @@ export default function GenesisEditorPage({
         onReroll={reroll}
       />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {deck.places.map((p, i) => (
-          <DeckCard
-            key={p.ref}
-            title={p.name}
-            subtitle={`${p.kind} · ${clip(p.allegiance, 20)}`}
-            lines={[clip(p.overview)]}
-            lockedCount={countLockedUnder(lockedPaths, `places.${i}`)}
-            rerolling={rerolling === "places"}
-            openIndex={i}
-            onOpen={() => setOpenCard({ kind: "place", index: i })}
-          />
-        ))}
+        <AnimatePresence>
+          {deck.places.map((p, i) => (
+            <DeckCard
+              key={p.ref}
+              title={p.name}
+              subtitle={`${p.kind} · ${clip(p.allegiance, 20)}`}
+              lines={[clip(p.overview)]}
+              lockedCount={countLockedUnder(lockedPaths, `places.${i}`)}
+              rerolling={rerolling === "places"}
+              openIndex={i}
+              onOpen={() => setOpenCard({ kind: "place", index: i })}
+            />
+          ))}
+        </AnimatePresence>
       </div>
 
       {/* ── 纪元冲突 / 叙事风格 / 主题措辞 ── */}
@@ -605,7 +673,11 @@ export default function GenesisEditorPage({
       <CardEditorModal
         open={openCard !== null}
         title={modalTitle(openCard, deck)}
-        onClose={() => setOpenCard(null)}
+        onClose={() => {
+          // 合卷同时收起「逐出主神席」确认（openCard 仅经 onOpen/onClose 变化，此处即全覆盖）
+          setOpenCard(null);
+          setConfirmExpel(false);
+        }}
       >
         {openCard?.kind === "cosmology" && (
           <CosmologyEditor deck={deck} lockedPaths={lockedPaths} onEdit={handleEdit} />
@@ -628,13 +700,38 @@ export default function GenesisEditorPage({
                 setRevealed((s) => new Set(s).add(`majorGods.${openCard.index}`))
               }
             />
-            <button
-              type="button"
-              onClick={() => deleteMajorGod(openCard.index)}
-              className="mt-2 justify-self-start rounded-md border border-cinnabar/40 px-4 py-1.5 text-sm text-cinnabar transition hover:bg-cinnabar/10"
-            >
-              逐出主神席
-            </button>
+            {!confirmExpel ? (
+              <button
+                type="button"
+                onClick={() => setConfirmExpel(true)}
+                className="mt-2 justify-self-start rounded-md border border-cinnabar/40 px-4 py-1.5 text-sm text-cinnabar transition hover:bg-cinnabar/10"
+              >
+                逐出主神席
+              </button>
+            ) : (
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+                <span className="text-cinnabar">
+                  将其逐出主神席？此神的全部设定将被抹去，不可复得。
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmExpel(false);
+                    deleteMajorGod(openCard.index);
+                  }}
+                  className="rounded-md border border-cinnabar px-3 py-1 text-cinnabar transition hover:bg-cinnabar/10"
+                >
+                  落印
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmExpel(false)}
+                  className="text-ink-faint transition hover:text-ink"
+                >
+                  且慢
+                </button>
+              </div>
+            )}
           </>
         )}
         {openCard?.kind === "minorGods" && (
@@ -699,15 +796,42 @@ export default function GenesisEditorPage({
                 {saving ? "落笔中…" : "保存手改"}
               </button>
             )}
-            <button
-              type="button"
-              onClick={embark}
-              disabled={!canEmbarkMode(deck.mode) || saving || busy || ceremony?.phase === "pending"}
-              className="rounded-md border border-gilt bg-gilt/10 px-10 py-2 text-lg tracking-widest text-gilt transition hover:bg-gilt/20 disabled:opacity-40"
-              style={{ fontFamily: "var(--font-display)" }}
-            >
-              创　世
-            </button>
+            {confirmEmbark ? (
+              <>
+                <span className="text-sm text-gilt">
+                  落笔之后，卡组即成定稿，不可再掷。
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmEmbark(false);
+                    void embark();
+                  }}
+                  disabled={!canEmbarkMode(deck.mode) || saving || busy || ceremony?.phase === "pending"}
+                  className="rounded-md border border-gilt bg-gilt/10 px-10 py-2 text-lg tracking-widest text-gilt transition hover:bg-gilt/20 disabled:opacity-40"
+                  style={{ fontFamily: "var(--font-display)" }}
+                >
+                  确认创世
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmEmbark(false)}
+                  className="text-sm text-ink-faint transition hover:text-ink"
+                >
+                  且慢
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmEmbark(true)}
+                disabled={!canEmbarkMode(deck.mode) || saving || busy || ceremony?.phase === "pending"}
+                className="rounded-md border border-gilt bg-gilt/10 px-10 py-2 text-lg tracking-widest text-gilt transition hover:bg-gilt/20 disabled:opacity-40"
+                style={{ fontFamily: "var(--font-display)" }}
+              >
+                创　世
+              </button>
+            )}
           </div>
         </div>
       </footer>

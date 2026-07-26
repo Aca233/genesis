@@ -21,12 +21,29 @@ function isCandle(mode: ThemeMode): boolean {
   return false;
 }
 
+/**
+ * 同步移动端浏览器铬条颜色（<meta name="theme-color">）。
+ * 字面量取双主题 --paper 值（#f3ead8 日卷 / #2b241c 烛光）；
+ * 与 ThemeScript.tsx 首帧内联脚本中的取值各自独立维护、互为镜像。
+ */
+function syncThemeColor(candle: boolean) {
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.setAttribute("name", "theme-color");
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute("content", candle ? "#2b241c" : "#f3ead8");
+}
+
 function apply(mode: ThemeMode) {
-  if (isCandle(mode)) {
+  const candle = isCandle(mode);
+  if (candle) {
     document.documentElement.dataset.theme = "candle";
   } else {
     delete document.documentElement.dataset.theme;
   }
+  syncThemeColor(candle);
 }
 
 /** 日卷/烛光主题控制 */

@@ -67,6 +67,11 @@ function failed(
 export async function followWorldSettlement(
   segmentId: string,
   fetcher: typeof fetch = fetch,
+  onProgress?: (event: {
+    stage: string;
+    status: "running" | "completed";
+    occurredAt: string;
+  }) => void,
 ): Promise<WorldSettlementState> {
   let response: Response;
   try {
@@ -110,6 +115,11 @@ export async function followWorldSettlement(
             ? [...completedBefore(event.stage), event.stage]
             : completedBefore(event.stage),
         };
+        onProgress?.({
+          stage: event.stage,
+          status: event.status,
+          occurredAt: event.occurredAt,
+        });
       }
       if (event.type === "failed") {
         terminal = failed(segmentId, event.message, event.stage, event.retryable);

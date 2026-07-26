@@ -16,11 +16,25 @@ function chosenIndex(variants: Variant[] | null): number {
   return i === -1 ? variants.length - 1 : i;
 }
 
+/** 结算缘由 → 徽章中文措辞（continuous-meta SettlementReasonSchema 枚举） */
+const SETTLEMENT_REASON_LABELS: Record<string, string> = {
+  major_event: "重大事件",
+  ability_change: "能力变迁",
+  important_death: "重要陨落",
+  faction_change: "势力更迭",
+  rank_change: "位阶变动",
+  identity_change: "身份之变",
+  relation_restructure: "关系重构",
+  era_change: "纪元更替",
+  multi_entity_change: "众象俱变",
+};
+
 export const MessageBlock = memo(function MessageBlock({
   message,
   readonly,
   busy,
   streamingOverride,
+  mode = "pantheon",
   onEdit,
   onCut,
   onReroll,
@@ -33,6 +47,8 @@ export const MessageBlock = memo(function MessageBlock({
   busy?: boolean;
   /** 另掷异文时流式替换本条内容 */
   streamingOverride?: string | null;
+  /** 世界模式：决定玩家引文措辞（神谕 / 敕令） */
+  mode?: "pantheon" | "creator";
   onEdit?: (id: string, content: string) => Promise<void>;
   onCut?: (id: string) => Promise<void>;
   onReroll?: (id: string) => void;
@@ -52,6 +68,24 @@ export const MessageBlock = memo(function MessageBlock({
   const content = isStreaming ? streamingOverride : message.content;
   const isRewriteResult = message.meta?.kind === "reality_rewrite_result";
   const canAct = !readonly && !busy && !editing && !isStreaming;
+
+  // 本轮变化折叠行：已落库的世界变化推到玩家眼前；hidden 项一律不渲染（防泄露幕后行动）
+  const meta = message.meta;
+  const temporalChange = meta?.temporalState ?? null;
+  const visibleActions = (meta?.worldActions ?? []).filter(
+    (a) => a.visibility !== "hidden",
+  );
+  const visibleEntries = (meta?.activityEntries ?? []).filter(
+    (e) => e.visibility !== "hidden",
+  );
+  const abilityReveals = meta?.abilityReveals ?? [];
+  const settlementReasons = meta?.settlementReasons ?? [];
+  const changeCount =
+    (temporalChange ? 1 : 0) +
+    visibleActions.length +
+    visibleEntries.length +
+    abilityReveals.length +
+    settlementReasons.length;
 
   // 编辑态 textarea 自适应高度
   useEffect(() => {
@@ -102,7 +136,7 @@ export const MessageBlock = memo(function MessageBlock({
     <div className="group relative">
       {/* 悬停操作排（右上浮现） */}
       {canAct && (onEdit || onCut || onReroll) && (
-        <div className="pointer-events-none absolute -top-3 right-0 z-10 flex items-center gap-1 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100">
+        <div className="pointer-events-none absolute -top-3 right-0 z-10 flex items-center gap-1 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-sm:pointer-events-auto max-sm:opacity-70">
           <div className="flex items-center gap-1 rounded border border-line bg-paper-raised px-1.5 py-0.5 text-xs shadow-sm">
             {!isPlayer && vCount > 1 && (
               <span className="flex items-center gap-0.5 text-ink-faint">
@@ -204,13 +238,55 @@ export const MessageBlock = memo(function MessageBlock({
         </article>
       ) : isPlayer ? (
         <blockquote className="decree my-4 whitespace-pre-wrap leading-loose">
-          <span className="text-gilt/70">你降下神谕：</span>
+          <span className="text-gilt/70">
+            {mode === "creator" ? "你颁下敕令：" : "你降下神谕："}
+          </span>
           {content}
         </blockquote>
       ) : (
         <div className="my-4">
           <Prose text={content} />
           {isStreaming && <span className="animate-pulse text-gilt">▍</span>}
+          {!isStreaming && changeCount > 0 && (
+            <details className="mt-2 text-xs text-ink-faint">
+              <summary className="cursor-pointer select-none transition hover:text-gilt">
+                ◈ 本轮变化 · {changeCount} 项
+              </summary>
+              <ul className="mt-1.5 space-y-1 border-l border-line pl-3">
+                {temporalChange && (
+                  <li>
+                    时间推至{" "}
+                    {[temporalChange.era, temporalChange.time]
+                      .filter(Boolean)
+                      .join("·")}
+                  </li>
+                )}
+                {visibleActions.map((a, i) => (
+                  <li key={`action-${i}`}>
+                    {a.action}——{a.consequence}
+                  </li>
+                ))}
+                {visibleEntries.map((e, i) => (
+                  <li key={`entry-${i}`}>{e.text}</li>
+                ))}
+                {abilityReveals.map((r, i) => (
+                  <li key={`reveal-${i}`}>能力显露：{r.evidence}</li>
+                ))}
+                {settlementReasons.length > 0 && (
+                  <li className="flex flex-wrap gap-1">
+                    {settlementReasons.map((reason) => (
+                      <span
+                        key={reason}
+                        className="rounded border border-line bg-paper-sunken px-1.5 py-0.5"
+                      >
+                        {SETTLEMENT_REASON_LABELS[reason] ?? reason}
+                      </span>
+                    ))}
+                  </li>
+                )}
+              </ul>
+            </details>
+          )}
         </div>
       )}
 
@@ -219,7 +295,7 @@ export const MessageBlock = memo(function MessageBlock({
         <div className="-mt-2 mb-2 text-right text-xs text-cinnabar/60">朱批</div>
       )}
       {readonly && !editing && (
-        <div className="-mt-2 mb-2 text-right text-xs text-ink-faint/60">已成史</div>
+        <div className="-mt-2 mb-2 text-right text-xs text-ink-faint/60">已入史册</div>
       )}
 
       {/* 裁去二次确认 */}

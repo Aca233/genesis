@@ -19,6 +19,19 @@ export type MessageMeta = {
   summary?: string | null;
   sourceTimelineId?: string;
   settlementRequired?: boolean;
+  /** 本轮变化（finalize 落库时写入 meta，state 路由原样下发；供折叠变化行展示） */
+  temporalState?: { era?: string; time?: string };
+  worldActions?: {
+    actorType: string;
+    actorId: string;
+    action: string;
+    targetIds: string[];
+    visibility: string;
+    consequence: string;
+  }[];
+  activityEntries?: { kind: string; text: string; visibility: string }[];
+  abilityReveals?: { abilityId: string; visibility: string; evidence: string }[];
+  settlementReasons?: string[];
 };
 
 /** 异文候选 */

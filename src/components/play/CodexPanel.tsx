@@ -89,47 +89,52 @@ function EntityRow({
   const dormant = entity.heat === "dormant";
   return (
     <li
-      className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition hover:border-gilt/40 ${
+      className={`flex items-center gap-3 rounded-lg border p-3 transition hover:border-gilt/40 ${
         entity.isChosen
           ? "border-gilt/50 bg-paper-raised"
           : "border-line bg-paper-raised"
       } ${dormant ? "opacity-55" : ""}`}
-      onClick={onOpen}
     >
-      <Emblem
-        seed={entity.emblemSeed}
-        type={entity.type}
-        size={38}
-        imageUrl={entity.imageUrl}
-        motif={entity.iconAssignment.icon}
-      />
-      <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1.5 text-sm text-ink">
-          <span className="truncate">{entity.name}</span>
-          {entity.isChosen && (
-            <span className="shrink-0 text-[10px] text-gilt" title="神选者">
-              ◈ 神选
-            </span>
-          )}
-          {entity.scenePresence && (
-            <span
-              className="shrink-0 text-[10px] text-cinnabar/70"
-              title="在场"
-            >
-              ·在场
-            </span>
-          )}
-        </p>
-        <p className="truncate text-xs text-ink-faint">
-          {dormant ? "（尘封）" : ""}
-          {entity.summary}
-        </p>
-      </div>
       <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onStar();
-        }}
+        type="button"
+        onClick={onOpen}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left"
+      >
+        <Emblem
+          seed={entity.emblemSeed}
+          type={entity.type}
+          size={38}
+          imageUrl={entity.imageUrl}
+          motif={entity.iconAssignment.icon}
+        />
+        <span className="block min-w-0 flex-1">
+          <span className="flex items-center gap-1.5 text-sm text-ink">
+            <span className="truncate">{entity.name}</span>
+            {entity.isChosen && (
+              <span className="shrink-0 text-[10px] text-gilt" title="神选者">
+                ◈ 神选
+              </span>
+            )}
+            {entity.scenePresence && (
+              <span
+                className="shrink-0 text-[10px] text-cinnabar/70"
+                title="在场"
+              >
+                ·在场
+              </span>
+            )}
+          </span>
+          <span className="block truncate text-xs text-ink-faint">
+            {dormant ? "（尘封）" : ""}
+            {entity.summary}
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onStar}
+        aria-pressed={entity.starred}
+        aria-label={entity.starred ? "取消标星" : "标星（常驻上下文）"}
         className={`shrink-0 text-base transition ${
           entity.starred ? "text-gilt" : "text-ink-faint/40 hover:text-gilt/60"
         }`}
@@ -505,12 +510,24 @@ export function CodexPanel({
   const [entities, setEntities] = useState<EntityLite[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(initialEntityId ?? null);
   const [filter, setFilter] = useState("");
+  const [listError, setListError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/codex?timelineId=${timelineId}`);
-    if (!res.ok) return;
-    const json = (await res.json()) as { entities: EntityLite[] };
-    setEntities(json.entities);
+    try {
+      const res = await fetch(`/api/codex?timelineId=${timelineId}`);
+      const json = (await res.json().catch(() => null)) as
+        | { entities?: EntityLite[]; error?: string }
+        | null;
+      if (!res.ok || !json?.entities) {
+        setListError(json?.error ?? "众生录读取失败，请稍后再试");
+        return;
+      }
+      setEntities(json.entities);
+      setListError(null);
+    } catch (err) {
+      console.error("众生录读取失败", err);
+      setListError("众生录读取失败，请稍后再试");
+    }
   }, [timelineId]);
 
   useEffect(() => {
@@ -521,16 +538,25 @@ export function CodexPanel({
 
   const star = useCallback(
     async (id: string, starred: boolean) => {
+      // 乐观更新 + 失败回滚（仿 MaterialLibrary.patch）
+      const before = entities;
       setEntities((es) =>
         es ? es.map((e) => (e.id === id ? { ...e, starred } : e)) : es,
       );
-      await fetch(`/api/codex/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ starred }),
-      });
+      try {
+        const res = await fetch(`/api/codex/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ starred }),
+        });
+        if (!res.ok) throw new Error("星标未能落笔");
+      } catch (err) {
+        console.error("星标更新失败", err);
+        setEntities(before);
+        setListError("星标未能落笔，请稍后再试");
+      }
     },
-    [],
+    [entities],
   );
 
   if (openId) {
@@ -553,7 +579,26 @@ export function CodexPanel({
     );
   }
 
-  if (!entities) return <p className="fog-text text-sm">展卷中…</p>;
+  if (!entities) {
+    if (listError) {
+      return (
+        <p className="text-sm text-cinnabar">
+          {listError}{" "}
+          <button
+            type="button"
+            className="underline transition hover:text-ink"
+            onClick={() => {
+              setListError(null);
+              void load();
+            }}
+          >
+            重试
+          </button>
+        </p>
+      );
+    }
+    return <p className="fog-text text-sm">展卷中…</p>;
+  }
   if (entities.length === 0) {
     return <p className="fog-text text-sm">众生尚未入册——史官将在世界变化后清点。</p>;
   }
@@ -573,9 +618,14 @@ export function CodexPanel({
       <input
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
+        aria-label="检索众生"
         placeholder="检索众生（名讳 / 别称 / 摘要）…"
         className="w-full rounded-md border border-line bg-paper-sunken px-3 py-1.5 text-sm text-ink outline-none placeholder:text-ink-faint/60 focus:border-gilt/50"
       />
+
+      {listError && (
+        <p role="alert" className="text-sm text-cinnabar">{listError}</p>
+      )}
 
       {ENTITY_TYPE_ORDER.map((type) => {
         const group = shown.filter((e) => e.type === type);

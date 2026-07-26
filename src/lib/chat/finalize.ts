@@ -85,6 +85,12 @@ export type NarrationFinalizationTx = Omit<AbilityMutationTx, "message" | "abili
       data: { revealed: true; revealedAtChapter: number };
     }): Promise<unknown>;
   };
+  omenQueue: {
+    updateMany(args: {
+      where: { id: { in: string[] }; consumed: false };
+      data: { consumed: true };
+    }): Promise<unknown>;
+  };
   realityRewrite: {
     findUnique(args: { where: { idempotencyKey: string } }): Promise<{
       id: string;
@@ -128,6 +134,8 @@ export async function finalizeNarration(
     scale: Scale;
     signal?: AbortSignal;
     allowedEventIds?: readonly string[];
+    /** 本轮上下文注入的征兆 id；叙事成功落库后才标记消费（两阶段消费） */
+    consumedOmenIds?: readonly string[];
     logInvalidReveal?: (details: { abilityId: string; generationId: string }) => void;
   },
 ): Promise<GenerationCompletion & { reused: boolean }> {
@@ -266,6 +274,15 @@ export async function finalizeNarration(
       significantEvent: effectiveMeta.significantEvent,
       settlementReasons: effectiveMeta.settlementReasons,
     });
+    if (
+      effectiveMeta.significantEvent
+      && effectiveMeta.settlementReasons.length === 0
+      && !settlement.required
+    ) {
+      console.warn("significant_event 被忽略：缺少 settlement_reasons", {
+        generationId: input.generationId,
+      });
+    }
     const followUp = settlement.required
       ? { kind: "settlement" as const, segmentId: input.chapterId }
       : { kind: "none" as const };
@@ -287,6 +304,15 @@ export async function finalizeNarration(
         } as unknown as Prisma.InputJsonValue,
       },
     });
+    checkCancelled();
+
+    // 两阶段消费：叙事消息成功落库后才把注入过的征兆标记为已消费。
+    if (input.consumedOmenIds?.length) {
+      await tx.omenQueue.updateMany({
+        where: { id: { in: [...input.consumedOmenIds] }, consumed: false },
+        data: { consumed: true },
+      });
+    }
     checkCancelled();
 
     const activityApply = await applyWorldActivityInTransaction(tx, {

@@ -245,6 +245,7 @@ export const SECTION_TEMPLATES: Record<string, string[]> = {
   cult: ["overview", "deity", "doctrine", "holySites", "structure", "heresies", "secularTies"],
 };
 
+/** 非活跃路径：生产仅走 settlement.ts 的单次整理；规则变更须与 settlementSystem 同步。 */
 export function extractorSystem(): string {
   return `You are the Archivist — you read a chapter of narrative and extract structured state deltas for the world codex.
 
@@ -335,13 +336,14 @@ export const ChronicleSchema = z.object({
     .min(1)
     .max(4),
   epilogue: z.string().describe("章末小结一段（100-200字，史官口吻）"),
-  chapterTitle: z.string().describe("本章标题（4-8字）"),
+  chapterTitle: z.string().describe("遗留兼容字段：恒返回空字符串"),
 });
 
 export type ChronicleOutput = z.infer<typeof ChronicleSchema>;
 
 const chronicleJsonSchema = JSON.stringify(z.toJSONSchema(ChronicleSchema), null, 2);
 
+/** 非活跃路径：生产仅走 settlement.ts 的单次整理；规则变更须与 settlementSystem 同步。 */
 export function chronicleSystem(): string {
   return `You are the Court Historian (史官). Compress a chapter of narrative into chronicle entries.
 

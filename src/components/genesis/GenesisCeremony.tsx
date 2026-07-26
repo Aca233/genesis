@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import type { WorldDeck } from "@/lib/cards/schemas";
 import { PlayBackground } from "@/components/play/PlayBackground";
 
@@ -53,9 +53,11 @@ export function GenesisCeremony({
   /** embark 成功且动画结束（或被跳过）→ 跳转 */
   onFinished: () => void;
 }) {
+  // 减弱动效：跳过逐字与拓印两幕，直接呈现世界题名
+  const reducedMotion = useReducedMotion();
   // 幕次：decree（逐字神谕）→ stamps（拓印）→ title（世界题名）→ hold（等待 opening）
   const [act, setAct] = useState<"decree" | "stamps" | "title" | "hold">(
-    "decree",
+    reducedMotion ? "title" : "decree",
   );
   const [charCount, setCharCount] = useState(0);
   const [stampCount, setStampCount] = useState(0);
@@ -69,6 +71,14 @@ export function GenesisCeremony({
   const charInterval = chars.length > 150 ? Math.max(30, 12000 / chars.length) : 80;
   // 拓印错落 ~400ms；条目多时略加速
   const stampInterval = stamps.length > 18 ? 280 : 400;
+
+  // 逐字浮现只保留尾部窗口内的动画节点（窗口覆盖 0.5s 淡入时长），
+  // 已完成淡入的前缀提交为纯字符串，避免每帧重渲染 O(N²) 个 motion span
+  const tailStart = Math.max(0, charCount - Math.max(1, Math.ceil(600 / charInterval)));
+  const committedText = useMemo(
+    () => chars.slice(0, tailStart).join(""),
+    [chars, tailStart],
+  );
 
   // 第一幕：神谕逐字浮现
   useEffect(() => {
@@ -115,75 +125,83 @@ export function GenesisCeremony({
       className="play-shell ceremony-veil fixed inset-0 z-50 flex items-center justify-center overflow-hidden"
     >
       <PlayBackground variant="ceremony" />
-      {/* 演出主体（跳过后隐去，只留等待态） */}
-      {!skipped && (
-        <div className="ceremony-content relative flex w-full max-w-2xl flex-col items-center px-8">
-          <AnimatePresence mode="wait">
-            {/* 第一幕：原初神谕，金色文楷逐字浮现 */}
-            {act === "decree" && (
-              <motion.p
-                key="decree"
-                exit={{ opacity: 0, y: 40, filter: "blur(3px)" }}
-                transition={{ duration: 1.1, ease: "easeIn" }}
-                className="text-center text-xl leading-loose text-gilt md:text-2xl"
-                style={{ fontFamily: "var(--font-prose)" }}
-              >
-                {chars.slice(0, charCount).map((ch, i) => (
-                  <motion.span
-                    key={i}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.5 }}
-                  >
-                    {ch}
-                  </motion.span>
-                ))}
-              </motion.p>
-            )}
+      {/* 演出主体（跳过后对称淡出，只留等待态） */}
+      <AnimatePresence>
+        {!skipped && (
+          <motion.div
+            key="ceremony-content"
+            exit={{ opacity: 0, filter: "blur(3px)" }}
+            transition={{ duration: 0.4 }}
+            className="ceremony-content relative flex w-full max-w-2xl flex-col items-center px-8"
+          >
+            <AnimatePresence mode="wait">
+              {/* 第一幕：原初神谕，金色文楷逐字浮现 */}
+              {act === "decree" && (
+                <motion.p
+                  key="decree"
+                  exit={{ opacity: 0, y: 40, filter: "blur(3px)" }}
+                  transition={{ duration: 1.1, ease: "easeIn" }}
+                  className="text-center text-xl leading-loose text-gilt md:text-2xl"
+                  style={{ fontFamily: "var(--font-prose)" }}
+                >
+                  {committedText}
+                  {chars.slice(tailStart, charCount).map((ch, i) => (
+                    <motion.span
+                      key={tailStart + i}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.5 }}
+                    >
+                      {ch}
+                    </motion.span>
+                  ))}
+                </motion.p>
+              )}
 
-            {/* 第二幕：卡组名目逐张拓印 */}
-            {act === "stamps" && (
-              <motion.ul
-                key="stamps"
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.7 }}
-                className="flex max-h-[70vh] flex-col items-center gap-2 overflow-hidden"
-              >
-                {stamps.slice(0, stampCount).map((s, i) => (
-                  <motion.li
-                    key={i}
-                    initial={{ opacity: 0, scale: 1.12, filter: "blur(2px)" }}
-                    animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-                    transition={{ duration: 0.45 }}
-                    className="text-base tracking-widest text-ink-soft md:text-lg"
-                    style={{ fontFamily: "var(--font-display)" }}
-                  >
-                    {s}
-                  </motion.li>
-                ))}
-              </motion.ul>
-            )}
+              {/* 第二幕：卡组名目逐张拓印 */}
+              {act === "stamps" && (
+                <motion.ul
+                  key="stamps"
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.7 }}
+                  className="flex max-h-[70vh] flex-col items-center gap-2 overflow-hidden"
+                >
+                  {stamps.slice(0, stampCount).map((s, i) => (
+                    <motion.li
+                      key={i}
+                      initial={{ opacity: 0, scale: 1.12, filter: "blur(2px)" }}
+                      animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                      transition={{ duration: 0.45 }}
+                      className="text-base tracking-widest text-ink-soft md:text-lg"
+                      style={{ fontFamily: "var(--font-display)" }}
+                    >
+                      {s}
+                    </motion.li>
+                  ))}
+                </motion.ul>
+              )}
 
-            {/* 第三幕：世界时间与史册印记晕开 */}
-            {(act === "title" || act === "hold") && (
-              <motion.div
-                key="title"
-                initial={{ opacity: 0, filter: "blur(10px)" }}
-                animate={{ opacity: 1, filter: "blur(0px)" }}
-                transition={{ duration: 2, ease: "easeOut" }}
-                className="text-center text-ink"
-                style={{ fontFamily: "var(--font-display)" }}
-              >
-                <h1 className="text-4xl tracking-[0.2em] md:text-5xl">{title.world}</h1>
-                <p className="mt-5 text-base tracking-widest text-ink-soft">
-                  {title.era} · {title.time}
-                </p>
-                <p className="mt-4 text-sm tracking-[0.4em] text-gilt">{title.seal}</p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      )}
+              {/* 第三幕：世界时间与史册印记晕开 */}
+              {(act === "title" || act === "hold") && (
+                <motion.div
+                  key="title"
+                  initial={{ opacity: 0, filter: "blur(10px)" }}
+                  animate={{ opacity: 1, filter: "blur(0px)" }}
+                  transition={{ duration: 2, ease: "easeOut" }}
+                  className="text-center text-ink"
+                  style={{ fontFamily: "var(--font-display)" }}
+                >
+                  <h1 className="text-4xl tracking-[0.2em] md:text-5xl">{title.world}</h1>
+                  <p className="mt-5 text-base tracking-widest text-ink-soft">
+                    {title.era} · {title.time}
+                  </p>
+                  <p className="mt-4 text-sm tracking-[0.4em] text-gilt">{title.seal}</p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 动画已毕但 embark 尚在途 */}
       {animationDone && embark.phase === "pending" && (
@@ -198,15 +216,20 @@ export function GenesisCeremony({
       )}
 
       {/* 跳过：仅结束动画，仍等待 embark */}
-      {!skipped && (
-        <button
-          type="button"
-          onClick={() => setSkipped(true)}
-          className="absolute bottom-6 right-8 text-sm text-ink-faint transition hover:text-gilt"
-        >
-          跳过 »
-        </button>
-      )}
+      <AnimatePresence>
+        {!skipped && (
+          <motion.button
+            key="ceremony-skip"
+            type="button"
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            onClick={() => setSkipped(true)}
+            className="absolute bottom-6 right-8 text-sm text-ink-faint transition hover:text-gilt"
+          >
+            跳过 »
+          </motion.button>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

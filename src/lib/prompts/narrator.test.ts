@@ -232,6 +232,65 @@ describe("narrator quality contract", () => {
 });
 
 
+describe("narrator discipline pack", () => {
+  it("declares supplied context blocks as binding canon over the prose window", () => {
+    const prompt = narratorGlobalSystem("pantheon");
+    expect(prompt).toContain("CODEX CARDS, CHRONICLE, LOREBOOK and ACTIVE REALITY STATE blocks are established canon");
+    expect(prompt).toContain("when the prose window and a supplied card disagree, the card wins");
+    expect(prompt).toContain("Invent freely only where canon is silent");
+    expect(prompt).toContain("consistency with supplied codex and chronicle facts");
+    expect(narratorGlobalSystem("creator")).toContain("consistency with supplied codex and chronicle facts");
+  });
+
+  it("uses the story-so-far window as a repetition ledger and rations stock beats", () => {
+    const prompt = narratorGlobalSystem("pantheon");
+    expect(prompt).toContain("repetition ledger");
+    expect(prompt).toContain("Enter each reply from a fresh angle");
+    expect(prompt).toContain("Ration stock beats");
+    expect(prompt).toContain("一丝/一抹/一缕");
+    expect(prompt).toContain("眼中闪过/嘴角勾起/空气仿佛凝固");
+    expect(prompt).toContain("write its physical consequence, not a sound-effect line");
+  });
+
+  it("gives every scale an explicit length band", () => {
+    expect(narratorTurnSystem({ mode: "pantheon", scale: "moment" }))
+      .toContain("Target 150-450 Chinese characters");
+    expect(narratorTurnSystem({ mode: "pantheon", scale: "scene" }))
+      .toContain("Target 500-1200 Chinese characters; at most one --- divider");
+    expect(narratorTurnSystem({ mode: "pantheon", scale: "years" }))
+      .toContain("with at most 2 close-up vignettes");
+    expect(narratorTurnSystem({ mode: "pantheon", scale: "era" }))
+      .toContain("Target 800-1800 Chinese characters");
+    expect(narratorTurnSystem({ mode: "pantheon", scale: "epoch" }))
+      .toContain("no scene-level dialogue except quoted historical fragments");
+  });
+
+  it("locks year labels to the established era format", () => {
+    const prompt = narratorTurnSystem({
+      mode: "pantheon",
+      scale: "scene",
+      temporal: { era: "潮汐纪元", time: "第七日" },
+    });
+    expect(prompt).toContain("exactly the established era format supplied above");
+  });
+
+  it("demands suggestion diversity and binds every style-card field", () => {
+    const prompt = narratorGlobalSystem("pantheon");
+    expect(prompt).toContain("meaningfully different in kind (bold vs cautious, action vs inquiry, different targets)");
+    expect(prompt).toContain("Follow every field of the STYLE CARD");
+    expect(prompt).toContain("example sentences are tone anchors, never to be copied verbatim");
+  });
+
+  it("keeps openings scenic instead of deck inventories in both modes", () => {
+    for (const mode of ["pantheon", "creator"] as const) {
+      const directive = openingDirective(mode);
+      expect(directive).toContain("Do not inventory the world deck");
+      expect(directive).toContain("naming at most three gods or factions");
+      expect(directive).toContain("Target 800-1500 Chinese characters");
+    }
+  });
+});
+
 describe("creator unified narration contract", () => {
   it("treats the player as world-external while classifying every input in one channel", () => {
     const prompt = narratorGlobalSystem("creator");

@@ -56,6 +56,7 @@ export default function PlayPage({
 
   const [state, setState] = useState<PlayState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadErrorStatus, setLoadErrorStatus] = useState<number | null>(null);
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [scale, setScale] = useState<Scale>("scene");
 
@@ -116,12 +117,13 @@ export default function PlayPage({
 
   // ── 数据同步 ──
 
-  /** 与后端对齐当前内部记录段消息（error 后、done 后统一调用） */
-  const syncMessages = useCallback(async (cid: string) => {
+  /** 与后端对齐当前内部记录段消息（error 后、done 后统一调用）；返回对齐后的行，失败返回 null */
+  const syncMessages = useCallback(async (cid: string): Promise<MessageRow[] | null> => {
     const res = await fetch(`/api/chapters/${cid}/messages`);
-    if (!res.ok) return;
+    if (!res.ok) return null;
     const json = (await res.json()) as { messages: MessageRow[] };
     setMessages(json.messages);
+    return json.messages;
   }, []);
 
   /** 完整重载当前活动现实，并在时间线变化时重置章节/开场引用。 */
@@ -147,6 +149,35 @@ export default function PlayPage({
       : null);
     setMessages(enrichRewriteResultMessages(json.messages, rewrite));
   }, [worldId]);
+
+  /** 重载失败不再静默：错误落到叙事错误行（需要抛错语义的调用处仍用 reloadState） */
+  const safeReload = useCallback(
+    (rewrite?: RealityRewriteView) => reloadState(rewrite).catch((e) => {
+      setGenError(e instanceof Error ? e.message : String(e));
+    }),
+    [reloadState],
+  );
+
+  /** 结算 SSE 进度 → 任务进度条（○●✓）+ 当前阶段（输入区提示行） */
+  const handleSettlementProgress = useCallback(
+    (segmentId: string) =>
+      (event: { stage: string; status: "running" | "completed"; occurredAt: string }) => {
+        setSettlementState((current) => (
+          current.status === "running" && current.segmentId === segmentId
+            ? { ...current, stage: event.stage }
+            : current
+        ));
+        setTaskProgress((current) => reduceTaskProgress(current, {
+          taskKind: "settlement",
+          taskId: segmentId,
+          stage: event.stage,
+          status: event.status,
+          retryable: true,
+          updatedAt: event.occurredAt,
+        }));
+      },
+    [],
+  );
 
   /** 实体索引（正文微光链接）：加载时 + 结算后刷新 */
   const syncEntityIndex = useCallback(async () => {
@@ -228,40 +259,56 @@ export default function PlayPage({
     worldId,
   ]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api/worlds/${worldId}/state`);
-        const json = (await res.json()) as PlayState & { error?: string };
-        if (cancelled) return;
-        if (!res.ok) {
-          setLoadError(json.error ?? "此界无从寻觅。");
-          return;
-        }
-        setState(json);
-        setTaskProgress((current) => json.taskProgress
-          ? reduceTaskProgress(current, json.taskProgress)
-          : null);
-        setMessages(json.messages);
-        // 初始尺度沿用最后一条消息
-        const last = json.messages.at(-1);
-        if (
-          last &&
-          ["moment", "scene", "years", "era", "epoch"].includes(last.scale)
-        ) {
-          setScale(last.scale as Scale);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setLoadError(err instanceof Error ? err.message : String(err));
-        }
+  /** 初始加载（错误卡片「重试」可重调）；序号护栏丢弃过期请求的写入 */
+  const loadSeqRef = useRef(0);
+  const loadInitial = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
+    const stale = () => loadSeqRef.current !== seq;
+    try {
+      const res = await fetch(`/api/worlds/${worldId}/state`);
+      const json = (await res.json().catch(() => null)) as
+        | (PlayState & { error?: string })
+        | null;
+      if (stale()) return;
+      if (!res.ok || json === null) {
+        // 原始技术信息仅入控制台，界面展示主题化中文文案
+        console.error(`世界状态读取失败（HTTP ${res.status}）`);
+        setLoadErrorStatus(res.status);
+        setLoadError(json?.error ?? (res.status === 404
+          ? "此界不存在或早已消散。"
+          : "星轨紊乱：世界状态读取失败，请稍后再试。"));
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+      setState(json);
+      setTaskProgress((current) => json.taskProgress
+        ? reduceTaskProgress(current, json.taskProgress)
+        : null);
+      setMessages(json.messages);
+      // 初始尺度沿用最后一条消息
+      const last = json.messages.at(-1);
+      if (
+        last &&
+        ["moment", "scene", "years", "era", "epoch"].includes(last.scale)
+      ) {
+        setScale(last.scale as Scale);
+      }
+    } catch (err) {
+      if (!stale()) {
+        console.error(err);
+        setLoadErrorStatus(null);
+        setLoadError("星轨紊乱：世界状态读取失败，请稍后再试。");
+      }
+    }
   }, [worldId]);
+
+  useEffect(() => {
+    // defer：避免 effect 内同步 setState
+    const t = setTimeout(() => void loadInitial(), 0);
+    return () => {
+      clearTimeout(t);
+      loadSeqRef.current += 1;
+    };
+  }, [loadInitial]);
 
   useEffect(() => {
     if (
@@ -280,19 +327,25 @@ export default function PlayPage({
         stage: "checkpoint_read",
         completedStages: [],
       });
-      void followWorldSettlement(segmentId).then(async (result) => {
+      void followWorldSettlement(
+        segmentId,
+        fetch,
+        handleSettlementProgress(segmentId),
+      ).then(async (result) => {
         setSettlementState(result);
         setSettling(false);
+        setTaskProgress(null);
         if (result.status === "idle") {
-          await reloadState();
+          await safeReload();
           await syncEntityIndex();
         }
       });
     }, 0);
     return () => clearTimeout(timer);
   }, [
-    reloadState,
+    handleSettlementProgress,
     rewriteBusy,
+    safeReload,
     settlementState.status,
     settling,
     state,
@@ -336,11 +389,16 @@ export default function PlayPage({
                 stage: "checkpoint_read",
                 completedStages: [],
               });
-              const settled = await followWorldSettlement(followUp.segmentId);
+              const settled = await followWorldSettlement(
+                followUp.segmentId,
+                fetch,
+                handleSettlementProgress(followUp.segmentId),
+              );
               setSettlementState(settled);
               setSettling(false);
+              setTaskProgress(null);
               if (settled.status === "idle") {
-                await reloadState();
+                await safeReload();
                 await syncEntityIndex();
               }
               return;
@@ -352,14 +410,14 @@ export default function PlayPage({
                   followUp.taskId,
                   () => undefined,
                 );
-                await reloadState(completed);
+                await safeReload(completed);
                 await syncEntityIndex();
               } finally {
                 setRewriteBusy(false);
               }
               return;
             }
-            await reloadState();
+            await safeReload();
           },
           onError: async (msg) => {
             // say 的玩家消息可能已落库 → 对齐
@@ -400,7 +458,7 @@ export default function PlayPage({
       }
       abortRef.current = null;
     },
-    [reloadState, syncEntityIndex, syncMessages],
+    [handleSettlementProgress, safeReload, syncEntityIndex, syncMessages],
   );
 
   /** 搁笔：中止当前生成（已写出的文字由对齐结果决定去留） */
@@ -429,17 +487,39 @@ export default function PlayPage({
     [chapterId, scale, runChat],
   );
 
-  const doContinue = useCallback(() => {
+  const doContinue = useCallback((directive?: string) => {
     if (!chapterId || busyRef.current) return;
-    void runChat({ chapterId, scale, mode: "continue" });
+    void runChat({
+      chapterId,
+      scale,
+      mode: "continue",
+      ...(directive ? { directive } : {}),
+    });
   }, [chapterId, scale, runChat]);
 
-  /** 重试：重新对齐消息后允许再发（不自动重发） */
+  /** 重试：重新对齐消息后允许再发（不自动重发）——任务条恢复入口沿用 */
   const retry = useCallback(() => {
     if (!chapterId) return;
     setGenError(null);
     void syncMessages(chapterId);
   }, [chapterId, syncMessages]);
+
+  /** 叙事错误行「重试」：对齐后按缺失情形真正重新落笔 */
+  const retryNarrative = useCallback(async () => {
+    if (!chapterId || busyRef.current) return;
+    setGenError(null);
+    const rows = await syncMessages(chapterId);
+    if (rows === null) return; // 对齐失败不盲动
+    if (rows.length === 0) {
+      // opening 失败：让开场 effect 重跑
+      setOpeningChapterId(null);
+      return;
+    }
+    if (rows.at(-1)?.role === "player") {
+      // 神谕已落库而史官未回 → 续写
+      await runChat({ chapterId, scale, mode: "continue" });
+    }
+  }, [chapterId, runChat, scale, syncMessages]);
 
   /** 正文实体链接 / 众生录定位 */
   const openEntity = useCallback((id: string) => {
@@ -549,36 +629,58 @@ export default function PlayPage({
       stage: settlementState.stage,
       completedStages: settlementState.completedStages,
     });
-    void followWorldSettlement(segmentId).then(async (result) => {
+    void followWorldSettlement(
+      segmentId,
+      fetch,
+      handleSettlementProgress(segmentId),
+    ).then(async (result) => {
       setSettlementState(result);
       setSettling(false);
+      setTaskProgress(null);
       if (result.status === "idle") {
-        await reloadState();
+        await safeReload();
         await syncEntityIndex();
       }
     });
-  }, [reloadState, settlementState, syncEntityIndex]);
+  }, [handleSettlementProgress, safeReload, settlementState, syncEntityIndex]);
 
   // ── 渲染 ──
 
   if (loadError) {
     return (
-      <main className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-        <p className="text-2xl text-ink" style={{ fontFamily: "var(--font-display)" }}>
-          此界无从寻觅
-        </p>
-        <p className="text-sm text-cinnabar">{loadError}</p>
-        <Link href="/archives" className="text-sm text-gilt transition hover:underline">
-          ← 回到往昔诸界
-        </Link>
+      <main className="play-shell flex min-h-screen flex-1 items-center justify-center px-6">
+        <PlayBackground />
+        <div className="genesis-status-panel flex flex-col items-center gap-4 text-center">
+          <p className="text-2xl text-ink" style={{ fontFamily: "var(--font-display)" }}>
+            {loadErrorStatus === 404 ? "此界无从寻觅" : "星轨紊乱，此界暂不可入"}
+          </p>
+          <p className="text-sm text-cinnabar">{loadError}</p>
+          <div className="flex items-center gap-5">
+            <Link href="/archives" className="text-sm text-gilt transition hover:underline">
+              ← 回到往昔诸界
+            </Link>
+            <button
+              type="button"
+              onClick={() => {
+                setLoadError(null);
+                setLoadErrorStatus(null);
+                void loadInitial();
+              }}
+              className="rounded-md border border-gilt/50 bg-gilt/5 px-4 py-1 text-sm text-gilt transition hover:bg-gilt/15"
+            >
+              重试
+            </button>
+          </div>
+        </div>
       </main>
     );
   }
 
   if (!state) {
     return (
-      <main className="flex flex-1 items-center justify-center text-ink-faint">
-        展卷中…
+      <main className="play-shell flex min-h-screen flex-1 items-center justify-center px-6">
+        <PlayBackground />
+        <p className="genesis-status-panel text-ink-faint">展卷中…</p>
       </main>
     );
   }
@@ -594,19 +696,20 @@ export default function PlayPage({
           time={state.temporal.time}
           iconTheme={state.world.iconTheme}
           iconThemeRevision={state.world.iconThemeRevision}
-          onThemeChanged={() => reloadState()}
+          onThemeChanged={() => { void safeReload(); }}
         />
 
         {/* 书页正文（中央限宽，大屏加宽） */}
         <div className="mx-auto w-full max-w-3xl flex-1 px-6 max-sm:pb-16 xl:max-w-4xl">
           <StoryStream
+            mode={state.world.mode}
             messages={messages}
             streamingText={streamingText}
             rerollingId={rerollingId}
             rerollingText={rerollingText}
             busy={anyBusy}
             error={genError}
-            onRetry={retry}
+            onRetry={retryNarrative}
             onEdit={edit}
             onCut={cut}
             onReroll={reroll}
@@ -631,9 +734,12 @@ export default function PlayPage({
               ? settlementState.error
               : null}
             onRetrySettlement={retrySettlement}
+            settlementStage={settlementState.status === "running"
+              ? settlementState.stage
+              : null}
             taskProgress={taskProgress}
             onRetryTask={retry}
-            onRefreshWorld={() => { void reloadState(); }}
+            onRefreshWorld={() => { void safeReload(); }}
           />
         </div>
 
@@ -661,7 +767,7 @@ export default function PlayPage({
           onOpenEntity={openEntity}
           onOpenGod={openGod}
           onActivitiesLoaded={markActivitiesRead}
-          onStateChanged={() => reloadState()}
+          onStateChanged={() => safeReload()}
           onTimelineChanged={async () => {
             await reloadState();
             await syncEntityIndex();

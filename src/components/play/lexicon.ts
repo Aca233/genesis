@@ -105,3 +105,15 @@ export const SECTION_LABELS: Record<string, string> = {
 export function sectionName(key: string): string {
   return SECTION_LABELS[key] ?? key;
 }
+
+/** 事件阶段的中文化（世界动态 EventCard 用） */
+export const EVENT_PHASE_LABELS: Record<string, string> = {
+  emerging: "萌动",
+  developing: "酝酿",
+  escalating: "激化",
+  resolved: "已了",
+};
+
+export function eventPhaseName(phase: string): string {
+  return EVENT_PHASE_LABELS[phase] ?? phase;
+}

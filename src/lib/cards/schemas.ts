@@ -239,6 +239,10 @@ export const StyleCardSchema = z.object({
   preset: z.enum(["epic", "webnovel", "grimdark", "lightnovel", "canon"]),
   presetName: z.string().describe("预设中文名"),
   toneNotes: z.string().describe("文风细则"),
+  narrationNotes: z.string().optional().describe("叙述视角与人称约定：『你』的指向、凡人段落的视角选择"),
+  rhythm: z.string().optional().describe("句法节奏细则：长短句配比、段落长度倾向、对白密度"),
+  dictionExamples: z.array(z.string()).max(3).optional().describe("2-3句符合本世界腔调的锚点例句；仅作语感锚，不得原样进入正文"),
+  tabooPhrases: z.array(z.string()).max(12).optional().describe("本世界应回避或限量的套语与滥用词，如：一丝、一抹、眼中闪过、空气仿佛凝固、极度"),
 });
 
 export const ThemeCardSchema = z.object({

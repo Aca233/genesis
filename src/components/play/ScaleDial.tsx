@@ -67,6 +67,20 @@ export function ScaleDial({
     onChange(best.key);
   }
 
+  const stopIndex = SCALE_STOPS.findIndex((s) => s.key === current.key);
+
+  /** 方向键步进选档（焦点样式由全局 :focus-visible 覆盖） */
+  function step(e: React.KeyboardEvent<SVGSVGElement>) {
+    if (disabled) return;
+    if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+      e.preventDefault();
+      if (stopIndex > 0) onChange(SCALE_STOPS[stopIndex - 1].key);
+    } else if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (stopIndex < SCALE_STOPS.length - 1) onChange(SCALE_STOPS[stopIndex + 1].key);
+    }
+  }
+
   return (
     <div
       className={`select-none ${disabled ? "opacity-50" : ""}`}
@@ -75,10 +89,16 @@ export function ScaleDial({
       <svg
         viewBox="0 0 130 70"
         onClick={pick}
+        onKeyDown={step}
+        tabIndex={disabled ? -1 : 0}
         className={`h-[60px] w-[112px] ${disabled ? "" : "cursor-pointer"}`}
         role="slider"
         aria-label="叙事时间尺度"
         aria-valuetext={current.label}
+        aria-valuemin={0}
+        aria-valuemax={4}
+        aria-valuenow={stopIndex}
+        aria-disabled={disabled || undefined}
       >
         {/* 表盘弧 */}
         <path
@@ -131,6 +151,10 @@ export function ScaleDial({
         {/* 轴心 */}
         <circle cx={CX} cy={CY} r="3.5" fill="var(--gilt)" />
       </svg>
+      {/* 窄屏可见档位提示（弥补 title 悬停在触屏不可达） */}
+      <span className="hidden text-[10px] text-ink-faint max-sm:block">
+        {current.hint}
+      </span>
     </div>
   );
 }
