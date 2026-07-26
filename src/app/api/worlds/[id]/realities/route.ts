@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import {
+  CheckpointForkConflictError,
+  CheckpointForkNotFoundError,
+  forkPantheonCheckpoint,
+} from "@/lib/reality/checkpoint-fork";
 import { WorldOperationConflictError } from "@/lib/reality/operation-lock";
 import {
   RealityConflictError,
@@ -24,6 +29,13 @@ const PostBodySchema = z.discriminatedUnion("action", [
     action: z.literal("undo"),
     expectedActiveId: IdSchema,
   }),
+  z.object({
+    action: z.literal("fork"),
+    sourceChapterId: IdSchema,
+    expectedActiveId: IdSchema,
+    branchName: z.string().optional(),
+    idempotencyKey: z.string().min(8).max(128),
+  }),
 ]);
 const PatchBodySchema = z.object({
   timelineId: IdSchema,
@@ -40,10 +52,14 @@ function errorResponse(error: unknown): NextResponse {
   if (error instanceof z.ZodError) {
     return NextResponse.json({ error: "请求体不合法" }, { status: 400 });
   }
-  if (error instanceof RealityNotFoundError) {
+  if (error instanceof RealityNotFoundError || error instanceof CheckpointForkNotFoundError) {
     return NextResponse.json({ error: error.message }, { status: 404 });
   }
-  if (error instanceof RealityConflictError || error instanceof WorldOperationConflictError) {
+  if (
+    error instanceof RealityConflictError
+    || error instanceof CheckpointForkConflictError
+    || error instanceof WorldOperationConflictError
+  ) {
     return NextResponse.json({ error: error.message }, { status: 409 });
   }
   if (error instanceof RealityTreeValidationError) {
@@ -52,16 +68,22 @@ function errorResponse(error: unknown): NextResponse {
   throw error;
 }
 
-async function requireCreatorWorld(worldId: string): Promise<NextResponse | null> {
+/** 创世主与万神殿都可管理现实树；万神殿经检查点回溯获得自己的分叉树。 */
+async function requireManagedWorld(
+  worldId: string,
+): Promise<{ mode: "creator" | "pantheon" } | NextResponse> {
   const world = await prisma.world.findUnique({
     where: { id: worldId },
-    select: { mode: true },
+    select: { mode: true, status: true },
   });
   if (world === null) return NextResponse.json({ error: "世界不存在" }, { status: 404 });
-  if (world.mode !== "creator") {
-    return NextResponse.json({ error: "仅创世主模式可管理现实树" }, { status: 403 });
+  if (world.status === "concluded") {
+    return NextResponse.json({ error: "此界已成史，不可再改动现实" }, { status: 409 });
   }
-  return null;
+  if (world.mode !== "creator" && world.mode !== "pantheon") {
+    return NextResponse.json({ error: "该模式不可管理现实树" }, { status: 403 });
+  }
+  return { mode: world.mode };
 }
 
 export async function GET(_request: Request, { params }: Context) {
@@ -80,10 +102,24 @@ export async function GET(_request: Request, { params }: Context) {
 
 export async function POST(request: Request, { params }: Context) {
   const { id } = await params;
-  const denied = await requireCreatorWorld(id);
-  if (denied !== null) return denied;
+  const gate = await requireManagedWorld(id);
+  if (gate instanceof NextResponse) return gate;
   try {
     const body = PostBodySchema.parse(await request.json().catch(() => null));
+    if (body.action === "fork") {
+      // 创世主用敕令改写分叉；检查点回溯是万神殿专属通道
+      if (gate.mode !== "pantheon") {
+        return NextResponse.json({ error: "仅万神殿模式可回溯检查点" }, { status: 403 });
+      }
+      const forked = await forkPantheonCheckpoint(prisma, {
+        worldId: id,
+        sourceChapterId: body.sourceChapterId,
+        expectedActiveId: body.expectedActiveId,
+        branchName: body.branchName,
+        idempotencyKey: body.idempotencyKey,
+      });
+      return NextResponse.json({ activeId: forked.activeId });
+    }
     const result = body.action === "switch"
       ? await switchReality(prisma, {
         worldId: id,
@@ -102,8 +138,8 @@ export async function POST(request: Request, { params }: Context) {
 
 export async function PATCH(request: Request, { params }: Context) {
   const { id } = await params;
-  const denied = await requireCreatorWorld(id);
-  if (denied !== null) return denied;
+  const gate = await requireManagedWorld(id);
+  if (gate instanceof NextResponse) return gate;
   try {
     const body = PatchBodySchema.parse(await request.json().catch(() => null));
     return NextResponse.json(await renameReality(prisma, {
@@ -118,8 +154,8 @@ export async function PATCH(request: Request, { params }: Context) {
 
 export async function DELETE(request: Request, { params }: Context) {
   const { id } = await params;
-  const denied = await requireCreatorWorld(id);
-  if (denied !== null) return denied;
+  const gate = await requireManagedWorld(id);
+  if (gate instanceof NextResponse) return gate;
   try {
     const body = DeleteBodySchema.parse(await request.json().catch(() => null));
     return NextResponse.json(await deleteRealitySubtree(prisma, {

@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { completeCreatorDeck, completeDeck } from "@/lib/abilities/embark.test-fixtures";
+import { PantheonWorldDeckSchema } from "@/lib/cards/schemas";
 import { runClaimedEmbarkTransaction } from "@/lib/embark/mutations";
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
@@ -24,7 +25,59 @@ function importRequest(payload: unknown) {
 
 describe("存档导出导入 PostgreSQL 往返", () => {
   it("真实 embark v2 往返保留 player 关系、来源与历史，同时普通 API 隐藏私有能力", async () => {
-    const deck = completeDeck();
+    const deck = PantheonWorldDeckSchema.parse({
+      ...completeDeck(),
+      canonEvents: [
+        {
+          ref: "canon-tide-awakening",
+          title: "潮汐苏醒",
+          timeLabel: "三年后的大潮",
+          ordinal: 1,
+          epoch: "future",
+          summary: "潮汐之神将于大潮之夜试探新神。",
+          participantRefs: ["god-major-1", "place-city"],
+          prerequisites: [
+            { kind: "entity_status", entityRef: "faction-court", requiredStatus: ["动摇"] },
+          ],
+          blockers: [],
+          expectedConsequences: [
+            { kind: "status_change", targetRef: "faction-court", toStatus: "分裂" },
+          ],
+          status: "pending",
+          visibility: "author_only",
+        },
+        {
+          ref: "canon-archive-schism",
+          title: "星图学会分裂",
+          timeLabel: "大潮之后",
+          ordinal: 2,
+          epoch: "future",
+          summary: "学会因潮汐异象分成两派。",
+          participantRefs: ["faction-archive", "character-3"],
+          prerequisites: [
+            { kind: "prior_event_occurred", canonEventRef: "canon-tide-awakening" },
+          ],
+          blockers: [],
+          expectedConsequences: [],
+          status: "pending",
+          visibility: "author_only",
+        },
+        {
+          ref: "canon-ember-court",
+          title: "余烬议会",
+          timeLabel: "数年之后",
+          ordinal: 4,
+          epoch: "future",
+          summary: "晨钟议会残部将于灰烬中重聚。",
+          participantRefs: ["god-major-3"],
+          prerequisites: [{ kind: "custom", description: "余烬之火重燃" }],
+          blockers: [],
+          expectedConsequences: [],
+          status: "pending",
+          visibility: "author_only",
+        },
+      ],
+    });
     const originalWorld = await prisma.world.create({
       data: {
         name: `archive-roundtrip-${crypto.randomUUID()}`,
@@ -34,6 +87,7 @@ describe("存档导出导入 PostgreSQL 往返", () => {
       },
     });
     let importedWorldId: string | undefined;
+    let legacyImportedWorldId: string | undefined;
 
     try {
       const { timelineId, chapterId } = await runClaimedEmbarkTransaction(
@@ -41,6 +95,18 @@ describe("存档导出导入 PostgreSQL 往返", () => {
         originalWorld.id,
         async () => deck,
       );
+      const embarkedCanonEvents = await prisma.canonEvent.findMany({
+        where: { timelineId },
+        orderBy: { ordinal: "asc" },
+      });
+      expect(embarkedCanonEvents.map((row) => [row.ref, row.ordinal])).toEqual([
+        ["canon-tide-awakening", 1],
+        ["canon-archive-schism", 2],
+        ["canon-ember-court", 4],
+      ]);
+      expect(embarkedCanonEvents.every(
+        (row) => row.status === "pending" && row.visibility === "author_only",
+      )).toBe(true);
       const [majorGod, character, derivedAbility] = await Promise.all([
         prisma.god.findFirstOrThrow({ where: { timelineId, tier: "major" } }),
         prisma.entity.findFirstOrThrow({ where: { timelineId, type: "character" } }),
@@ -114,6 +180,15 @@ describe("存档导出导入 PostgreSQL 往返", () => {
       const archive = await exportResponse.json();
       expect(archive.version).toBe(4);
       expect(
+        archive.world.timelines[0].canonEvents.map(
+          (event: { ref: string; ordinal: number }) => [event.ref, event.ordinal],
+        ),
+      ).toEqual([
+        ["canon-tide-awakening", 1],
+        ["canon-archive-schism", 2],
+        ["canon-ember-court", 4],
+      ]);
+      expect(
         archive.world.timelines[0].gods.find((god: { id: string }) => god.id === majorGod.id)
           .relations.player,
       ).toMatchObject({ label: deck.majorGods[0]!.initialRelationToPlayer.label });
@@ -159,6 +234,35 @@ describe("存档导出导入 PostgreSQL 往返", () => {
         expect.objectContaining({ evidence: "roundtrip-derived-history" }),
       );
 
+      const importedCanonEvents = await prisma.canonEvent.findMany({
+        where: { timelineId: importedTimeline.id },
+        orderBy: { ordinal: "asc" },
+      });
+      const canonSummary = (rows: typeof importedCanonEvents) => rows.map((row) => ({
+        ref: row.ref,
+        ordinal: row.ordinal,
+        status: row.status,
+        visibility: row.visibility,
+      }));
+      expect(canonSummary(importedCanonEvents)).toEqual(canonSummary(embarkedCanonEvents));
+      const sourceCanonIds = new Set(embarkedCanonEvents.map((row) => row.id));
+      expect(importedCanonEvents.every((row) => !sourceCanonIds.has(row.id))).toBe(true);
+      expect(importedCanonEvents[0]!.prerequisites).toEqual([
+        { kind: "entity_status", entityRef: "faction-court", requiredStatus: ["动摇"] },
+      ]);
+
+      // 不带 canonEvents 键的旧版 v4 存档仍可导入（default([]) 兜底）。
+      const legacyArchive = JSON.parse(JSON.stringify(archive)) as {
+        world: { timelines: Array<Record<string, unknown>> };
+      };
+      for (const timeline of legacyArchive.world.timelines) delete timeline.canonEvents;
+      const legacyResponse = await importWorld(importRequest(legacyArchive));
+      expect(legacyResponse.status).toBe(200);
+      legacyImportedWorldId = (await legacyResponse.json()).worldId;
+      expect(await prisma.canonEvent.count({
+        where: { timeline: { worldId: legacyImportedWorldId } },
+      })).toBe(0);
+
       const stateResponse = await getWorldState(
         new Request(`http://localhost/api/worlds/${importedId}/state`),
         { params: Promise.resolve({ id: importedId }) },
@@ -174,6 +278,9 @@ describe("存档导出导入 PostgreSQL 往返", () => {
       expect(codexText).not.toContain("未揭示的影技");
       expect(codexText).not.toContain("roundtrip-hidden-history");
     } finally {
+      if (legacyImportedWorldId !== undefined) {
+        await prisma.world.delete({ where: { id: legacyImportedWorldId } });
+      }
       if (importedWorldId !== undefined) {
         await prisma.world.delete({ where: { id: importedWorldId } });
       }

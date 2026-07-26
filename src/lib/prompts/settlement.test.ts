@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ChapterSettlementSchema,
+  CreatorChapterSettlementSchema,
   SettlementWorldActivitySchema,
   chapterSettlementSchema,
   settlementSystem,
@@ -174,5 +175,202 @@ describe("creator settlement contract", () => {
     expect(system).toContain("whole section");
     expect(system).toContain("explicitly changed");
     expect(system).toContain("Never invent");
+  });
+
+  it("抽取规则声明既存关系图谱只报增量，不复读未变关系", () => {
+    const system = settlementSystem("creator");
+
+    expect(system).toContain(
+      "EXISTING RELATIONS lines show the stored graph; never re-emit an unchanged listed relation.",
+    );
+  });
+});
+
+describe("era digest settlement contract", () => {
+  it.each(["pantheon", "creator"] as const)("%s 系统词含 ERA TO CLOSE 指令且序列化 schema 含 eraDigest", (mode) => {
+    const system = settlementSystem(mode);
+
+    expect(system).toContain("When an == ERA TO CLOSE == block is supplied, additionally fill chronicle.eraDigest");
+    expect(system).toContain("Otherwise omit eraDigest.");
+    expect(system).toContain("\"eraDigest\"");
+    expect(system).toContain("closedEra");
+  });
+
+  const baseOpts = {
+    mode: "pantheon" as const,
+    chapterMessages: "【玩家神谕】看向盐沼",
+    scaleNote: "场景",
+    eraSystem: "纪元",
+    currentYearLabel: "元年",
+    entities: "盐沼城",
+    gods: "潮神",
+    abilities: "—",
+    lockedPaths: "—",
+  };
+
+  it("settlementUserPrompt 传 eraToClose 时渲染 ERA TO CLOSE 块", () => {
+    const user = settlementUserPrompt({
+      ...baseOpts,
+      eraToClose: "The chronicle lines below belong to the era that ended within this checkpoint. Distill them into chronicle.eraDigest.\n[元年] 盐潮越过旧堤。",
+    });
+
+    expect(user).toContain("== ERA TO CLOSE (compress into chronicle.eraDigest) ==");
+    expect(user).toContain("[元年] 盐潮越过旧堤。");
+  });
+
+  it("settlementUserPrompt 不传 eraToClose 时不出现 ERA TO CLOSE 块", () => {
+    expect(settlementUserPrompt(baseOpts)).not.toContain("ERA TO CLOSE");
+  });
+});
+
+describe("settlement clock contract", () => {
+  const baseOpts = {
+    mode: "pantheon" as const,
+    chapterMessages: "【玩家神谕】看向盐沼",
+    scaleNote: "数年跨度",
+    eraSystem: "纪元",
+    currentYearLabel: "元年",
+    entities: "盐沼城",
+    gods: "潮神",
+    abilities: "—",
+    lockedPaths: "—",
+  };
+
+  it("settlementUserPrompt 传 timeBudget 时渲染 TIME BUDGET 块并禁止自造历法", () => {
+    const user = settlementUserPrompt({ ...baseOpts, timeBudget: "数年跨度" });
+
+    expect(user).toContain("== TIME BUDGET ==");
+    expect(user).toContain("This checkpoint window spans 数年跨度");
+    expect(user).toContain("never invent a rival calendar");
+  });
+
+  it("settlementUserPrompt 不传 timeBudget 时不出现 TIME BUDGET 块", () => {
+    expect(settlementUserPrompt(baseOpts)).not.toContain("TIME BUDGET");
+  });
+
+  it("settlementUserPrompt 传 chosenMortals 时渲染 CHOSEN MORTALS 块并要求逐一表态", () => {
+    const user = settlementUserPrompt({
+      ...baseOpts,
+      chosenMortals: "阿岚 [entity-1] lifespan=未记",
+    });
+
+    expect(user).toContain("== CHOSEN MORTALS (lifespan adjudication required) ==");
+    expect(user).toContain("阿岚 [entity-1] lifespan=未记");
+    expect(user).toContain("chosenLifespanChecks");
+  });
+
+  it("settlementUserPrompt 不传 chosenMortals 时不出现 CHOSEN MORTALS 块", () => {
+    expect(settlementUserPrompt(baseOpts)).not.toContain("CHOSEN MORTALS");
+  });
+
+  it("divineCostAudit 审计任务仅出现在 pantheon 系统词", () => {
+    const pantheon = settlementSystem("pantheon");
+
+    expect(pantheon).toContain("divineCostAudit");
+    expect(pantheon).toContain("世间暗记");
+    expect(settlementSystem("creator")).not.toContain("divineCostAudit");
+  });
+
+  const clockEnvelope = {
+    pantheonTurns: [],
+    extraction: {
+      newEntities: [], newGods: [], entityUpdates: [], godUpdates: [],
+      revealSections: [], majorCharacterPromotions: [], abilityChanges: [],
+    },
+    chronicle: { entries: [{ yearLabel: "元年", text: "盐潮越过旧堤。", entityNames: [], godNames: [] }], epilogue: "终", chapterTitle: "" },
+  };
+
+  it("ChapterSettlementSchema 兼容缺省 divineCostAudit 的旧 pendingSettlement（断点恢复回归）", () => {
+    const parsed = ChapterSettlementSchema.parse(clockEnvelope);
+
+    expect(parsed.divineCostAudit).toBeUndefined();
+    expect(parsed.extraction.chosenLifespanChecks).toEqual([]);
+  });
+
+  it("接受合法 divineCostAudit 并拒绝非法 verdict", () => {
+    const parsed = ChapterSettlementSchema.parse({
+      ...clockEnvelope,
+      divineCostAudit: [{ abilityName: "覆潮", verdict: "dodged", note: "河谷的井水一夜转咸。" }],
+    });
+
+    expect(parsed.divineCostAudit).toEqual([
+      { abilityName: "覆潮", verdict: "dodged", note: "河谷的井水一夜转咸。" },
+    ]);
+    expect(ChapterSettlementSchema.safeParse({
+      ...clockEnvelope,
+      divineCostAudit: [{ abilityName: "覆潮", verdict: "ignored", note: "非法裁决" }],
+    }).success).toBe(false);
+  });
+});
+
+describe("canon settlement contract", () => {
+  it.each(["pantheon", "creator"] as const)("%s 系统词含 canonEventUpdates 裁决任务与作者侧防泄露规则", (mode) => {
+    const system = settlementSystem(mode);
+
+    expect(system).toContain("canonEventUpdates:");
+    expect(system).toContain("IMPENDING CANON EVENTS are author-only");
+    expect(system).toContain("pressure, not a script");
+  });
+
+  const baseOpts = {
+    mode: "pantheon" as const,
+    chapterMessages: "【玩家神谕】看向盐沼",
+    scaleNote: "场景",
+    eraSystem: "纪元",
+    currentYearLabel: "元年",
+    entities: "盐沼城",
+    gods: "潮神",
+    abilities: "—",
+    lockedPaths: "—",
+  };
+
+  it("settlementUserPrompt 传 canonEvents 时渲染 IMPENDING CANON EVENTS 块", () => {
+    const user = settlementUserPrompt({
+      ...baseOpts,
+      canonEvents: "[canon-blood-moon] ordinal=1 status=pending | 血月盟约（三年后的血月）: 山民与盐商缔约。 | prerequisites=[]",
+    });
+
+    expect(user).toContain("== IMPENDING CANON EVENTS (author-only; never quote verbatim) ==");
+    expect(user).toContain("[canon-blood-moon] ordinal=1 status=pending");
+  });
+
+  it("settlementUserPrompt 不传 canonEvents 时不出现 IMPENDING CANON EVENTS 块", () => {
+    expect(settlementUserPrompt(baseOpts)).not.toContain("== IMPENDING CANON EVENTS");
+  });
+
+  const canonEnvelope = {
+    pantheonTurns: [],
+    extraction: {
+      newEntities: [], newGods: [], entityUpdates: [], godUpdates: [],
+      revealSections: [], majorCharacterPromotions: [], abilityChanges: [],
+    },
+    chronicle: { entries: [{ yearLabel: "元年", text: "盐潮越过旧堤。", entityNames: [], godNames: [] }], epilogue: "终", chapterTitle: "" },
+  };
+
+  it("两种模式 schema 均兼容缺省 canonEventUpdates 的旧 pendingSettlement（默认 []）", () => {
+    expect(ChapterSettlementSchema.parse(canonEnvelope).canonEventUpdates).toEqual([]);
+    expect(CreatorChapterSettlementSchema.parse(canonEnvelope).canonEventUpdates).toEqual([]);
+  });
+
+  it("拒绝 status 为 pending 的将临之事更新（状态机不允许回退未裁决）", () => {
+    const parsed = ChapterSettlementSchema.safeParse({
+      ...canonEnvelope,
+      canonEventUpdates: [{ ref: "canon-blood-moon", status: "pending", note: "不得回退" }],
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("接受 eligible 携带传闻与 occurred 无传闻的合法更新", () => {
+    const parsed = ChapterSettlementSchema.parse({
+      ...canonEnvelope,
+      canonEventUpdates: [
+        { ref: "canon-blood-moon", status: "eligible", note: "停战已成，前提俱备。", rumor: "盐道旅人传言血月之下将有大事。" },
+        { ref: "canon-gate-fall", status: "occurred", note: "正文已明写山门倾覆。" },
+      ],
+    });
+
+    expect(parsed.canonEventUpdates).toHaveLength(2);
+    expect(parsed.canonEventUpdates[0]).toMatchObject({ status: "eligible", rumor: "盐道旅人传言血月之下将有大事。" });
   });
 });

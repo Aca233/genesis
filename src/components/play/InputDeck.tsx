@@ -29,6 +29,7 @@ export function InputDeck({
   scale,
   onScaleChange,
   suggestions,
+  powerHints,
   busyKind,
   canContinue,
   onSend,
@@ -45,6 +46,8 @@ export function InputDeck({
   scale: Scale;
   onScaleChange: (s: Scale) => void;
   suggestions: string[];
+  /** 神权提示条：玩家神的神赋能力（万神殿模式；creator 传空数组即隐藏） */
+  powerHints?: { id: string; name: string; effect: string; cost?: string }[];
   busyKind: "idle" | "narrating" | "settling" | "rewriting";
   /** 消息流非空时才允许续笔 */
   canContinue: boolean;
@@ -62,6 +65,7 @@ export function InputDeck({
   onRefreshWorld?: () => void;
 }) {
   const [text, setText] = useState("");
+  const [inputFocused, setInputFocused] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const { candle, setMode } = useTheme();
   const busy = busyKind !== "idle";
@@ -156,6 +160,32 @@ export function InputDeck({
         </div>
       )}
 
+      {/* 神权提示条：输入聚焦时列出玩家神的神赋能力，点击仅插入名称文本（非发动按钮） */}
+      {inputFocused && !busy && (powerHints?.length ?? 0) > 0 && (
+        <div className="mb-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 px-2">
+          <span className="text-[10px] text-ink-faint">神权</span>
+          {powerHints!.map((h) => (
+            <button
+              key={h.id}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setText((t) => {
+                  if (!t) return h.name;
+                  const tail = t.slice(-1);
+                  return /[\s，。：；、！？]/.test(tail) ? `${t}${h.name}` : `${t}，${h.name}`;
+                });
+                taRef.current?.focus();
+              }}
+              title={`${h.effect}${h.cost ? `（代价：${h.cost}）` : ""}`}
+              className="rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-soft transition hover:border-gilt/50 hover:text-gilt"
+            >
+              {h.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* AI 建议（淡金小字，生成中淡出；高度恒定不顶起输入区） */}
       {suggestionsEnabled && (
         <div
@@ -193,6 +223,8 @@ export function InputDeck({
             ref={taRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();

@@ -76,4 +76,27 @@ describe("ContinuousNarratorMetaSchema", () => {
       activityEntries: [],
     });
   });
+
+  it("合法 outcome 申报解析通过", () => {
+    const parsed = ContinuousNarratorMetaSchema.parse({
+      ...emptyContinuousMeta(),
+      outcome: { result: "thwarted", note: "堤坝在神力触及前已被凡人炸毁" },
+    });
+    expect(parsed.outcome).toEqual({
+      result: "thwarted",
+      note: "堤坝在神力触及前已被凡人炸毁",
+    });
+  });
+
+  it("outcome.result 非法枚举被拒", () => {
+    expect(() => ContinuousNarratorMetaSchema.parse({
+      ...emptyContinuousMeta(),
+      outcome: { result: "glorious", note: "自造裁定" },
+    })).toThrow();
+  });
+
+  it("缺省 outcome 的旧 meta 继续解析", () => {
+    const parsed = ContinuousNarratorMetaSchema.parse(emptyContinuousMeta());
+    expect(parsed.outcome).toBeUndefined();
+  });
 });

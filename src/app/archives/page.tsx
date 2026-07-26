@@ -6,6 +6,10 @@ import { useRouter } from "next/navigation";
 import { CelestialPageShell } from "@/components/layout/CelestialPageShell";
 import { OperationIcon } from "@/components/icons/OperationIcon";
 import { worldModeLabel, type WorldMode } from "@/lib/world-mode";
+import {
+  countUnreadActivities,
+  type ActivityCursor,
+} from "@/components/play/world-activity-panel-state";
 
 /** 存档列表项（GET /api/worlds 返回 shape） */
 type WorldItem = {
@@ -18,7 +22,31 @@ type WorldItem = {
   materialArchiveError: string | null;
   createdAt: string;
   updatedAt: string;
+  /** 进行中世界的状态行：你离开时正在发生什么（仅 playing + 有活动时间线） */
+  statusLine?: {
+    timelineId: string;
+    era: string;
+    time: string;
+    trackedEventTitle: string | null;
+    recentActivityRefs: { id: string; createdAt: string }[];
+  };
 };
+
+/** 未读动态数：读取入界页写下的本地阅读游标，与状态行动态引用对比 */
+function unreadFor(w: WorldItem): number {
+  if (!w.statusLine || typeof window === "undefined") return 0;
+  let cursor: ActivityCursor | null = null;
+  try {
+    // 键格式与入界页（/play/[worldId]）完全一致
+    const raw = window.localStorage.getItem(
+      `genesis:activity-cursor:${w.id}:${w.statusLine.timelineId}`,
+    );
+    cursor = raw ? (JSON.parse(raw) as ActivityCursor) : null;
+  } catch {
+    cursor = null;
+  }
+  return countUnreadActivities(w.statusLine.recentActivityRefs, cursor);
+}
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   draft: { label: "草稿", cls: "text-ink-faint border-line" },
@@ -202,6 +230,7 @@ export default function ArchivesPage() {
             };
             const enterHref =
               w.status === "draft" ? `/genesis/${w.id}` : `/play/${w.id}`;
+            const unread = unreadFor(w);
             return (
               <li
                 key={w.id}
@@ -228,6 +257,23 @@ export default function ArchivesPage() {
                     <p className="decree mt-2 text-sm">
                       {excerpt(w.genesisInput)}
                     </p>
+                    {w.statusLine && (
+                      <p className="mt-2 flex min-w-0 items-center text-xs text-ink-soft">
+                        <span className="shrink-0">
+                          「{w.statusLine.era} · {w.statusLine.time}」
+                        </span>
+                        {w.statusLine.trackedEventTitle && (
+                          <span className="ml-2 min-w-0 max-w-[14rem] truncate">
+                            追踪：{w.statusLine.trackedEventTitle}
+                          </span>
+                        )}
+                        {unread > 0 && (
+                          <span className="ml-2 shrink-0 text-gilt">
+                            {unread} 条新动态
+                          </span>
+                        )}
+                      </p>
+                    )}
                   </div>
                   <time className="shrink-0 text-xs text-ink-faint">
                     {fmtTime(w.updatedAt)}
@@ -245,7 +291,11 @@ export default function ArchivesPage() {
                     onClick={() => router.push(enterHref)}
                     className="text-gilt transition hover:underline"
                   >
-                    {w.status === "draft" ? "续掷卡组" : "入界"}
+                    {w.status === "draft"
+                      ? "续掷卡组"
+                      : w.status === "concluded"
+                        ? "览史"
+                        : "入界"}
                   </button>
                   <a
                     href={`/api/worlds/${w.id}/export`}

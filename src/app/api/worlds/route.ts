@@ -9,6 +9,7 @@ import { genesisSystem, genesisUserPrompt } from "@/lib/prompts/genesis";
 import { parseStWorldbook, lorebookExcerpts } from "@/lib/lorebook/st-import";
 import { WorldModeSchema } from "@/lib/world-mode";
 import { buildWorldIconTheme } from "@/lib/icons/theme";
+import { resolveTemporalState } from "@/lib/chat/continuous-state";
 
 /**
  * POST /api/worlds —— 创世：一句话 → 世界卡组草稿
@@ -113,6 +114,15 @@ export async function POST(request: Request) {
   return NextResponse.json({ worldId: world.id, deck });
 }
 
+/** 存档状态行（附加于 playing 世界）：你离开时正在发生什么 */
+type WorldStatusLine = {
+  timelineId: string;
+  era: string;
+  time: string;
+  trackedEventTitle: string | null;
+  recentActivityRefs: { id: string; createdAt: string }[];
+};
+
 export async function GET() {
   const worlds = await prisma.world.findMany({
     orderBy: { updatedAt: "desc" },
@@ -128,5 +138,83 @@ export async function GET() {
       updatedAt: true,
     },
   });
-  return NextResponse.json({ worlds });
+
+  // ── 附加 statusLine（仅 playing + 有活动时间线；纯附加字段，
+  // 首页续玩入口的 id/name/status/updatedAt 契约保持不变）──
+  // 完全派生自既有 WorldEvent / WorldActivity 数据，不做任何 LLM 调用：
+  // 追踪事件标题与动态引用本就逐字可得，摘要生成只会增加时延而无信息增益。
+  const playingIds = worlds.filter((w) => w.status === "playing").map((w) => w.id);
+  const details = playingIds.length
+    ? await prisma.world.findMany({
+        where: { id: { in: playingIds } },
+        select: { id: true, draftDeck: true, themeCard: true, activeTimelineId: true },
+      })
+    : [];
+  const detailById = new Map(details.map((d) => [d.id, d]));
+  const activeTimelineIds = details
+    .map((d) => d.activeTimelineId)
+    .filter((id): id is string => id !== null);
+  const timelines = activeTimelineIds.length
+    ? await prisma.timeline.findMany({
+        where: { id: { in: activeTimelineIds } },
+        select: { id: true, realityState: true, observerState: true },
+      })
+    : [];
+  const timelineById = new Map(timelines.map((t) => [t.id, t]));
+
+  // 单次 Promise.all 覆盖全部世界（受本地存档数约束）；逐世界查询换取与
+  // activities 路由完全一致的可见性过滤。注：列表端点没有观察者上下文，
+  // creator 世界在此只拿到 public/player_known 引用——可接受，未读数是
+  // 回访钩子而非审计口径。
+  const rows = await Promise.all(worlds.map(async (world) => {
+    const detail = detailById.get(world.id);
+    const timelineId = detail?.activeTimelineId ?? null;
+    const timeline = timelineId ? timelineById.get(timelineId) : undefined;
+    if (world.status !== "playing" || !detail || !timelineId || !timeline) {
+      return world;
+    }
+    const [trackedEvent, recentActivityRefs] = await Promise.all([
+      prisma.worldEvent.findFirst({
+        where: {
+          timelineId,
+          phase: { not: "resolved" },
+          // 可见性过滤与 activities 路由的玩家视角一致
+          visibility: { in: ["public", "player_known"] },
+        },
+        orderBy: { updatedAt: "desc" },
+        select: { title: true },
+      }),
+      prisma.worldActivity.findMany({
+        where: { timelineId, visibility: { in: ["public", "player_known"] } },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 30,
+        select: { id: true, createdAt: true },
+      }),
+    ]);
+    const temporal = resolveTemporalState({
+      realityState: timeline.realityState,
+      observerState: timeline.observerState,
+      epochName: detail.draftDeck && typeof detail.draftDeck === "object"
+        ? (detail.draftDeck as { epochConflict?: { epochName?: string } }).epochConflict?.epochName
+        : null,
+      yearLabel: detail.draftDeck && typeof detail.draftDeck === "object"
+        ? (detail.draftDeck as { epochConflict?: { yearLabel?: string } }).epochConflict?.yearLabel
+        : null,
+      eraSystem: detail.themeCard && typeof detail.themeCard === "object"
+        ? (detail.themeCard as { eraSystem?: string }).eraSystem
+        : null,
+    });
+    const statusLine: WorldStatusLine = {
+      timelineId,
+      era: temporal.era,
+      time: temporal.time,
+      trackedEventTitle: trackedEvent?.title ?? null,
+      recentActivityRefs: recentActivityRefs.map((ref) => ({
+        id: ref.id,
+        createdAt: ref.createdAt.toISOString(),
+      })),
+    };
+    return { ...world, statusLine };
+  }));
+  return NextResponse.json({ worlds: rows });
 }

@@ -32,6 +32,7 @@ export type MessageMeta = {
   activityEntries?: { kind: string; text: string; visibility: string }[];
   abilityReveals?: { abilityId: string; visibility: string; evidence: string }[];
   settlementReasons?: string[];
+  outcome?: { result: "fulfilled" | "partial" | "thwarted" | "backfired"; note: string };
 };
 
 /** 异文候选 */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ChronicleSchema,
   IconConceptSchema,
   StrictExtractionSchema,
   extractorSystem,
@@ -158,5 +159,78 @@ describe("character relation extraction", () => {
     expect(system).toContain("explicitly changes");
     expect(system).toContain("whole section");
     expect(system).toContain("Never invent");
+  });
+});
+
+describe("chosen lifespan checks schema", () => {
+  it("缺省 chosenLifespanChecks 时默认空数组（旧结算响应回归）", () => {
+    const parsed = StrictExtractionSchema.parse({
+      ...baseExtraction,
+      entityUpdates: [],
+    });
+
+    expect(parsed.chosenLifespanChecks).toEqual([]);
+  });
+
+  it("接受对神选者的合法寿数表态", () => {
+    const parsed = StrictExtractionSchema.parse({
+      ...baseExtraction,
+      entityUpdates: [],
+      chosenLifespanChecks: [{
+        name: "阿岚",
+        verdict: "nearing_end",
+        note: "山道上的白鸦成群北去，村中老人夜闻磬响。",
+      }],
+    });
+
+    expect(parsed.chosenLifespanChecks).toEqual([{
+      name: "阿岚",
+      verdict: "nearing_end",
+      note: "山道上的白鸦成群北去，村中老人夜闻磬响。",
+    }]);
+  });
+
+  it("拒绝非法 verdict 与多余字段", () => {
+    expect(StrictExtractionSchema.safeParse({
+      ...baseExtraction,
+      entityUpdates: [],
+      chosenLifespanChecks: [{ name: "阿岚", verdict: "immortal", note: "非法裁决" }],
+    }).success).toBe(false);
+    expect(StrictExtractionSchema.safeParse({
+      ...baseExtraction,
+      entityUpdates: [],
+      chosenLifespanChecks: [{ name: "阿岚", verdict: "unchanged", note: "无变化", omen: "多余字段" }],
+    }).success).toBe(false);
+  });
+});
+
+describe("chronicle era digest schema", () => {
+  const baseChronicle = {
+    entries: [{ yearLabel: "元年", text: "盐潮越过旧堤。", entityNames: [], godNames: [] }],
+    epilogue: "潮声未止。",
+    chapterTitle: "",
+  };
+
+  it("旧响应缺省 eraDigest 时照常解析", () => {
+    const parsed = ChronicleSchema.safeParse(baseChronicle);
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.eraDigest).toBeFalsy();
+  });
+
+  it("接受显式 null 的 eraDigest", () => {
+    expect(ChronicleSchema.safeParse({ ...baseChronicle, eraDigest: null }).success).toBe(true);
+  });
+
+  it("接受并保留合法 eraDigest 内容", () => {
+    const parsed = ChronicleSchema.parse({
+      ...baseChronicle,
+      eraDigest: { closedEra: "破晓纪", text: "破晓纪以盐潮之战开端，以旧港沉没告终。" },
+    });
+
+    expect(parsed.eraDigest).toEqual({
+      closedEra: "破晓纪",
+      text: "破晓纪以盐潮之战开端，以旧港沉没告终。",
+    });
   });
 });

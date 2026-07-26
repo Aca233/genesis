@@ -380,6 +380,172 @@ describe("WorldDeck 能力与主要人物引用", () => {
 
 });
 
+function canonEventsFixture() {
+  return [
+    {
+      ref: "canon-event-1",
+      title: "旧神苏醒的前兆",
+      timeLabel: "三年后的血月",
+      ordinal: 1,
+      epoch: "future",
+      summary: "旧神在裂隙深处半睁开眼",
+      participantRefs: ["god-major-1", "place-city"],
+      prerequisites: [
+        { kind: "entity_status", entityRef: "faction-court", requiredStatus: ["动摇"] },
+      ],
+      blockers: [],
+      expectedConsequences: [
+        { kind: "status_change", targetRef: "faction-court", toStatus: "分裂" },
+      ],
+      status: "pending",
+      visibility: "author_only",
+    },
+    {
+      ref: "canon-event-2",
+      title: "晨钟异响",
+      timeLabel: "血月之后",
+      ordinal: 2,
+      epoch: "future",
+      summary: "晨钟城的钟声开始逆响",
+      participantRefs: ["character-1"],
+      prerequisites: [
+        { kind: "prior_event_occurred", canonEventRef: "canon-event-1" },
+      ],
+      status: "pending",
+      visibility: "author_only",
+    },
+    {
+      ref: "canon-event-3",
+      title: "星图残缺",
+      timeLabel: "数年之后",
+      ordinal: 5,
+      epoch: "future",
+      summary: "星图学会发现天穹缺了一角",
+      participantRefs: ["faction-archive"],
+      prerequisites: [
+        {
+          kind: "relation_status",
+          sourceRef: "faction-archive",
+          targetRef: "god-major-2",
+          requiredStatus: ["决裂"],
+        },
+        { kind: "ordinal_window", notBeforeOrdinal: 2 },
+      ],
+      blockers: [
+        { kind: "custom", description: "若旧神重新沉睡则此事不临" },
+      ],
+      expectedConsequences: [
+        {
+          kind: "relation_change",
+          sourceRef: "faction-archive",
+          targetRef: "faction-court",
+          toStatus: "同盟",
+        },
+      ],
+      status: "pending",
+      visibility: "author_only",
+    },
+  ] as Array<Record<string, unknown>>;
+}
+
+describe("将临之事（canonEvents）", () => {
+  const deckWith = (events: Array<Record<string, unknown>>) => ({
+    ...completeDeck(),
+    canonEvents: events,
+  });
+  const issueAt = (result: ReturnType<typeof WorldDeckSchema.safeParse>, path: string) => {
+    if (result.success) throw new Error("预期解析失败");
+    return result.error.issues.some((issue) => issue.path.join(".") === path);
+  };
+
+  it("不携带 canonEvents 的卡组照常解析（兼容旧卡组与既有草稿）", () => {
+    const parsed = WorldDeckSchema.parse(completeDeck());
+    expect(parsed.canonEvents).toBeUndefined();
+  });
+
+  it("解析合法 canonEvents 并补齐 blockers/expectedConsequences 默认值", () => {
+    const parsed = WorldDeckSchema.parse(deckWith(canonEventsFixture()));
+    expect(parsed.canonEvents).toHaveLength(3);
+    expect(parsed.canonEvents![1]).toMatchObject({
+      ref: "canon-event-2",
+      blockers: [],
+      expectedConsequences: [],
+      status: "pending",
+      visibility: "author_only",
+    });
+  });
+
+  it("拒绝重复或非递增的 ordinal 并定位到 canonEvents[i].ordinal", () => {
+    const duplicated = canonEventsFixture();
+    duplicated[1]!.ordinal = 1;
+    expect(issueAt(WorldDeckSchema.safeParse(deckWith(duplicated)), "canonEvents.1.ordinal")).toBe(true);
+
+    const descending = canonEventsFixture();
+    descending[2]!.ordinal = 1;
+    expect(issueAt(WorldDeckSchema.safeParse(deckWith(descending)), "canonEvents.2.ordinal")).toBe(true);
+  });
+
+  it("拒绝未解析到任何卡组 ref 的 participantRef 与条件引用", () => {
+    const participants = canonEventsFixture();
+    participants[0]!.participantRefs = ["missing-card"];
+    expect(issueAt(
+      WorldDeckSchema.safeParse(deckWith(participants)),
+      "canonEvents.0.participantRefs.0",
+    )).toBe(true);
+
+    const conditions = canonEventsFixture();
+    conditions[0]!.prerequisites = [
+      { kind: "entity_status", entityRef: "missing-entity", requiredStatus: ["动摇"] },
+    ];
+    expect(issueAt(
+      WorldDeckSchema.safeParse(deckWith(conditions)),
+      "canonEvents.0.prerequisites.0.entityRef",
+    )).toBe(true);
+  });
+
+  it("拒绝 prior_event_occurred 引用更晚或自身的事件", () => {
+    const forward = canonEventsFixture();
+    forward[0]!.prerequisites = [
+      { kind: "prior_event_occurred", canonEventRef: "canon-event-3" },
+    ];
+    expect(issueAt(
+      WorldDeckSchema.safeParse(deckWith(forward)),
+      "canonEvents.0.prerequisites.0.canonEventRef",
+    )).toBe(true);
+
+    const self = canonEventsFixture();
+    self[1]!.prerequisites = [
+      { kind: "prior_event_occurred", canonEventRef: "canon-event-2" },
+    ];
+    expect(issueAt(
+      WorldDeckSchema.safeParse(deckWith(self)),
+      "canonEvents.1.prerequisites.0.canonEventRef",
+    )).toBe(true);
+  });
+
+  it("canonEvent ref 与卡 ref 共用命名空间：与主神撞 ref 被拒", () => {
+    const events = canonEventsFixture();
+    events[0]!.ref = "god-major-1";
+    expect(issueAt(WorldDeckSchema.safeParse(deckWith(events)), "canonEvents.0.ref")).toBe(true);
+  });
+
+  it("键存在时少于 3 个或多于 5 个事件都被拒", () => {
+    const events = canonEventsFixture();
+    expect(WorldDeckSchema.safeParse(deckWith(events.slice(0, 2))).success).toBe(false);
+
+    const six = [
+      ...canonEventsFixture(),
+      ...canonEventsFixture().map((event, index) => ({
+        ...event,
+        ref: `canon-extra-${index + 1}`,
+        ordinal: 10 + index,
+        prerequisites: [{ kind: "custom", description: "备用条件" }],
+      })),
+    ];
+    expect(WorldDeckSchema.safeParse(deckWith(six)).success).toBe(false);
+  });
+});
+
 it("为当前能力版旧草稿中缺少 ref 的地点补确定性引用", () => {
   const raw = completeDeck();
   delete (raw.places[0] as Partial<(typeof raw.places)[number]>).ref;

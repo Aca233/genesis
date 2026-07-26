@@ -29,6 +29,7 @@ async function sourceGraph(timelineId: string) {
       },
       chronicles: { orderBy: [{ chapterIndex: "asc" }, { id: "asc" }] },
       omens: { orderBy: { id: "asc" } },
+      canonEvents: { orderBy: { ordinal: "asc" } },
       worldEvents: { orderBy: { createdAt: "asc" } },
       worldActivities: { orderBy: { createdAt: "asc" } },
       entityRelations: { orderBy: { id: "asc" } },
@@ -359,6 +360,36 @@ async function fixture() {
   await prisma.omenQueue.create({
     data: { timelineId: timeline.id, godId: duskGod.id, text: "暮色将遮蔽星图", consumed: false },
   });
+  await prisma.canonEvent.createMany({
+    data: [
+      {
+        timelineId: timeline.id,
+        ref: "canon-blood-moon",
+        title: "血月蚀星",
+        timeLabel: "三年后的血月",
+        ordinal: 1,
+        summary: "暮色将借血月遮蔽整幅星图。",
+        participantRefs: ["god-dusk", "faction-star-watchers"],
+        prerequisites: [{ kind: "custom", description: "星图绘制过半" }],
+        blockers: [],
+        expectedConsequences: [
+          { kind: "status_change", targetRef: "faction-star-watchers", toStatus: "离散" },
+        ],
+      },
+      {
+        timelineId: timeline.id,
+        ref: "canon-star-return",
+        title: "群星归位",
+        timeLabel: "血月之后",
+        ordinal: 2,
+        summary: "群星重新排列成古老的名字。",
+        participantRefs: ["god-dawn"],
+        prerequisites: [{ kind: "prior_event_occurred", canonEventRef: "canon-blood-moon" }],
+        status: "eligible",
+        divergenceNote: "冲突提前爆发，星轨偏移",
+      },
+    ],
+  });
   const originActivity = await prisma.worldActivity.create({
     data: {
       id: `activity-${crypto.randomUUID()}`,
@@ -517,6 +548,7 @@ describe("cloneTimelineGraph", () => {
       expect(cloned.timeline.abilities).toHaveLength(3);
       expect(cloned.timeline.chronicles).toHaveLength(1);
       expect(cloned.timeline.omens).toHaveLength(1);
+      expect(cloned.timeline.canonEvents).toHaveLength(2);
       expect(cloned.timeline.worldEvents).toHaveLength(2);
       expect(cloned.timeline.worldActivities).toHaveLength(2);
       expect(cloned.timeline.entityRelations).toHaveLength(1);
@@ -535,6 +567,7 @@ describe("cloneTimelineGraph", () => {
       expect(cloned.timeline.abilities.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.chronicles.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.omens.every((row) => row.timelineId === result.timelineId)).toBe(true);
+      expect(cloned.timeline.canonEvents.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.worldEvents.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.worldActivities.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.entityRelations.every((row) => row.timelineId === result.timelineId)).toBe(true);
@@ -565,6 +598,7 @@ describe("cloneTimelineGraph", () => {
       expectDisjointIds(before.memberships, cloned.memberships);
       expectDisjointIds(before.timeline.chronicles, cloned.timeline.chronicles);
       expectDisjointIds(before.timeline.omens, cloned.timeline.omens);
+      expectDisjointIds(before.timeline.canonEvents, cloned.timeline.canonEvents);
       expectDisjointIds(before.timeline.worldEvents, cloned.timeline.worldEvents);
       expectDisjointIds(before.timeline.worldActivities, cloned.timeline.worldActivities);
       expectDisjointIds(before.timeline.entityRelations, cloned.timeline.entityRelations);
@@ -716,6 +750,24 @@ describe("cloneTimelineGraph", () => {
       expect(cloned.timeline.chronicles[0]!.id).not.toBe(before.timeline.chronicles[0]!.id);
       expect(cloned.timeline.omens[0]).toMatchObject({ godId: clonedDusk.id, text: "暮色将遮蔽星图" });
       expect(cloned.timeline.omens[0]!.id).not.toBe(before.timeline.omens[0]!.id);
+
+      // 将临之事逐字段照抄（refs 是卡组稳定字符串，无 ID 重映射），状态与分歧标注保留。
+      const canonComparable = (rows: typeof cloned.timeline.canonEvents) =>
+        rows.map((row) => {
+          const { id: _id, timelineId: _timelineId, updatedAt: _updatedAt, ...rest } = row;
+          void _id; void _timelineId; void _updatedAt;
+          return rest;
+        });
+      expect(canonComparable(cloned.timeline.canonEvents))
+        .toEqual(canonComparable(before.timeline.canonEvents));
+      expect(cloned.timeline.canonEvents[1]).toMatchObject({
+        ref: "canon-star-return",
+        ordinal: 2,
+        status: "eligible",
+        divergenceNote: "冲突提前爆发，星轨偏移",
+        participantRefs: ["god-dawn"],
+        prerequisites: [{ kind: "prior_event_occurred", canonEventRef: "canon-blood-moon" }],
+      });
 
       const clonedParentEvent = cloned.timeline.worldEvents.find((event) =>
         event.id === result.maps.eventIds.get(data.parentWorldEvent.id)

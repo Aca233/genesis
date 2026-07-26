@@ -34,7 +34,7 @@ export const PantheonTurnSchema = z.object({
   proactiveEvent: z
     .object({
       type: z.string().describe("dream|envoy|miracle|summons|other"),
-      openingHook: z.string().describe("下章开场演出此事件的钩子（中文）"),
+      openingHook: z.string().describe("下章将正面登台演出此事件的开场钩子（中文，写明该神以何种形态、以何事由接触玩家神）"),
     })
     .nullable()
     .describe("若行动指向玩家神则非空——将成为下章开场事件"),

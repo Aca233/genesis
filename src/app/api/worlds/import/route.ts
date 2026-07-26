@@ -239,7 +239,32 @@ const OmenSchema = z
     timelineId: OptionalIdSchema,
     godId: IdSchema,
     text: TextSchema,
+    kind: z.enum(["omen", "proactive"]).default("omen"),
     consumed: z.boolean().default(false),
+    createdAt: z.coerce.date().optional(),
+  })
+  .strict();
+
+// 将临之事：participantRefs 与条件 JSON 内的引用是卡组稳定 ref（字符串），
+// 不参与 DB id 重映射；default 值保证旧版（无该键）v4 存档照常导入。
+const CanonEventArchiveSchema = z
+  .object({
+    id: OptionalIdSchema,
+    timelineId: OptionalIdSchema,
+    ref: ShortStringSchema,
+    title: ShortStringSchema,
+    timeLabel: ShortStringSchema,
+    ordinal: z.number().int(),
+    epoch: z.enum(["past", "future"]).default("future"),
+    summary: TextSchema,
+    participantRefs: z.array(ShortStringSchema).max(16).default([]),
+    prerequisites: BoundedJsonSchema,
+    blockers: BoundedJsonSchema.nullish(),
+    expectedConsequences: BoundedJsonSchema.nullish(),
+    status: z.enum(["pending", "eligible", "altered", "cancelled", "occurred"]).default("pending"),
+    visibility: z.literal("author_only").default("author_only"),
+    divergenceNote: TextSchema.nullish(),
+    occurredChapterIndex: z.number().int().nullish(),
     createdAt: z.coerce.date().optional(),
   })
   .strict();
@@ -346,6 +371,7 @@ const TimelineSchema = z
     memberships: z.array(MembershipSchema).max(MAX_COLLECTION_ITEMS).default([]),
     chronicles: z.array(ChronicleSchema).max(MAX_COLLECTION_ITEMS).default([]),
     omens: z.array(OmenSchema).max(MAX_COLLECTION_ITEMS).default([]),
+    canonEvents: z.array(CanonEventArchiveSchema).max(MAX_COLLECTION_ITEMS).default([]),
     worldEvents: z.array(WorldEventSchema).max(MAX_COLLECTION_ITEMS).default([]),
     worldActivities: z.array(WorldActivitySchema).max(MAX_COLLECTION_ITEMS).default([]),
     entityRelations: z.array(EntityRelationSchema).max(MAX_COLLECTION_ITEMS).default([]),
@@ -672,6 +698,10 @@ async function validateTimelineReferences(
   for (const omen of timeline.omens) {
     assertDeclaredOwner(omen.timelineId, timeline.id, "征兆");
     requireTimelineRecord(indexes.gods, omen.godId, timeline.id, "征兆神明");
+  }
+  for (const event of timeline.canonEvents) {
+    // 引用全部是卡组稳定 ref，无需记录级解析，只校验归属声明。
+    assertDeclaredOwner(event.timelineId, timeline.id, "将临之事");
   }
   const relationPairs = new Set<string>();
   for (const relation of timeline.entityRelations) {
@@ -1126,6 +1156,7 @@ export async function POST(request: Request) {
     const eventRows: Prisma.AbilityEventCreateManyInput[] = [];
     const chronicleRows: Prisma.ChronicleEntryCreateManyInput[] = [];
     const omenRows: Prisma.OmenQueueCreateManyInput[] = [];
+    const canonEventRows: Prisma.CanonEventCreateManyInput[] = [];
     const rewriteRows: Prisma.RealityRewriteCreateManyInput[] = [];
     const worldEventRows: Prisma.WorldEventCreateManyInput[] = [];
     const worldActivityRows: Prisma.WorldActivityCreateManyInput[] = [];
@@ -1371,8 +1402,34 @@ export async function POST(request: Request) {
           timelineId: newTlId,
           godId: remapRequired(godMap, omen.godId, "征兆神明"),
           text: omen.text,
+          kind: omen.kind,
           consumed: omen.consumed,
           createdAt: omen.createdAt,
+        });
+      }
+
+      for (const event of tl.canonEvents) {
+        // 将临之事没有跨记录引用（refs 是卡组稳定字符串），一律换发新 id。
+        canonEventRows.push({
+          id: crypto.randomUUID(),
+          timelineId: newTlId,
+          ref: event.ref,
+          title: event.title,
+          timeLabel: event.timeLabel,
+          ordinal: event.ordinal,
+          epoch: event.epoch,
+          summary: event.summary,
+          participantRefs: event.participantRefs,
+          prerequisites: event.prerequisites == null
+            ? Prisma.JsonNull
+            : (event.prerequisites as Prisma.InputJsonValue),
+          blockers: json(event.blockers),
+          expectedConsequences: json(event.expectedConsequences),
+          status: event.status,
+          visibility: event.visibility,
+          divergenceNote: event.divergenceNote ?? null,
+          occurredChapterIndex: event.occurredChapterIndex ?? null,
+          createdAt: event.createdAt,
         });
       }
 
@@ -1571,6 +1628,7 @@ export async function POST(request: Request) {
       await tx.abilityEvent.createMany({ data: eventRows });
       await tx.chronicleEntry.createMany({ data: chronicleRows });
       await tx.omenQueue.createMany({ data: omenRows });
+      await tx.canonEvent.createMany({ data: canonEventRows });
       await tx.realityRewrite.createMany({ data: rewriteRows });
       const deferredEventRows = worldEventRows.map((row) => ({
         ...row,

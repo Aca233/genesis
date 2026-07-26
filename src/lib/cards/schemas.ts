@@ -235,6 +235,77 @@ export const EpochConflictCardSchema = z.object({
   hiddenCurrents: z.array(z.string()).describe("暗流（对玩家隐藏，作为诸神议程种子）"),
 });
 
+export const EventConditionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("entity_status"),
+    entityRef: StableRefSchema,
+    requiredStatus: z.array(z.string().min(1)).min(1).max(4),
+  }).strict(),
+  z.object({
+    kind: z.literal("relation_status"),
+    sourceRef: StableRefSchema,
+    targetRef: StableRefSchema,
+    requiredStatus: z.array(z.string().min(1)).min(1).max(4),
+  }).strict(),
+  z.object({
+    kind: z.literal("prior_event_occurred"),
+    canonEventRef: StableRefSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal("ordinal_window"),
+    notBeforeOrdinal: z.number().int().min(0).optional(),
+    notAfterOrdinal: z.number().int().min(0).optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("custom"),
+    description: z.string().min(1).describe("AI 判定条件，判定时必须给出依据"),
+  }).strict(),
+]);
+
+export const EventConsequenceSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("status_change"),
+    targetRef: StableRefSchema,
+    toStatus: z.string().min(1),
+  }).strict(),
+  z.object({
+    kind: z.literal("relation_change"),
+    sourceRef: StableRefSchema,
+    targetRef: StableRefSchema,
+    toStatus: z.string().min(1),
+  }).strict(),
+  z.object({
+    kind: z.literal("custom"),
+    description: z.string().min(1),
+  }).strict(),
+]);
+
+/**
+ * 将临之事（CanonFutureEvent）：作者侧未来候选事件，对玩家隐藏。
+ * 形状严格遵循时间一致设计稿的 future 档 CanonEvent
+ * （docs/superpowers/specs/2026-07-26-temporal-consistent-world-generation-design.md §5.3/§8.4）：
+ * 整数 ordinal 承担全部先后序（timeLabel 仅展示），开局时刻为隐式 ordinal 0，
+ * 所有条目 ordinal >= 1；epoch 固定 "future"，status 恒 "pending"，visibility 恒 "author_only"。
+ * 注：设计稿 §6.2 对 basis=original 世界排除未来正史事件，但 worldSource/basis 字段尚不存在，
+ * 且已批准的提案明确覆盖原创世界（候选自 epochConflict 派生）；待时间轴阶段 1 引入 basis 后，
+ * 降级档可以再关闭原创世界的生成。
+ */
+export const CanonFutureEventSchema = z.object({
+  ref: StableRefSchema.describe("稳定引用"),
+  title: z.string().min(1),
+  timeLabel: z.string().describe("展示用自由时间标签，如「三年后的血月」"),
+  ordinal: z.number().int().min(1).describe("全局唯一整数先后序；开局时刻为 0"),
+  epoch: z.literal("future"),
+  summary: z.string().describe("作者侧事件概要（中文）"),
+  participantRefs: z.array(StableRefSchema).max(8),
+  prerequisites: z.array(EventConditionSchema).min(1).max(3),
+  blockers: z.array(EventConditionSchema).max(3).default([]),
+  expectedConsequences: z.array(EventConsequenceSchema).max(3).default([]),
+  status: z.literal("pending"),
+  visibility: z.literal("author_only"),
+}).strict();
+export type CanonFutureEvent = z.infer<typeof CanonFutureEventSchema>;
+
 export const StyleCardSchema = z.object({
   preset: z.enum(["epic", "webnovel", "grimdark", "lightnovel", "canon"]),
   presetName: z.string().describe("预设中文名"),
@@ -273,6 +344,8 @@ const SharedWorldDeckShape = {
   majorCharacters: z.array(MajorCharacterCardSchema).min(6).max(12),
   places: z.array(PlaceCardSchema),
   epochConflict: EpochConflictCardSchema,
+  canonEvents: z.array(CanonFutureEventSchema).min(3).max(5).optional()
+    .describe("将临之事：作者侧未来候选事件，对玩家隐藏"),
   style: StyleCardSchema,
   theme: ThemeCardSchema,
 };
@@ -333,6 +406,7 @@ type DeckReferenceGraph = {
     racialOverrides: Array<{ ref: string }>;
   }>;
   places: Array<{ ref: string }>;
+  canonEvents?: Array<{ ref: string }>;
 };
 
 function addUniqueRef(
@@ -397,14 +471,113 @@ function validateModeAwareDeckReferenceUniqueness(
       addAbility(override, ["majorCharacters", characterIndex, "racialOverrides", overrideIndex, "ref"]),
     );
   });
+  deck.canonEvents?.forEach((event, index) =>
+    addUniqueRef(ctx, cardRefs, event.ref, ["canonEvents", index, "ref"]),
+  );
+}
+
+/** Structural view of the deck fields the canon future axis validator reads. */
+type CanonAxisDeckView = {
+  playerGod?: { ref: string };
+  majorGods: Array<{ ref: string }>;
+  races: Array<{ ref: string }>;
+  factions: Array<{ ref: string }>;
+  places: Array<{ ref: string }>;
+  majorCharacters: Array<{ ref: string }>;
+  canonEvents?: CanonFutureEvent[];
+};
+
+/**
+ * 将临之事整轴校验：ordinal 严格递增（同时保证唯一）、每个参与者与条件引用
+ * 都必须解析到既有卡组稳定 ref、prior_event_occurred 只准指向数组中更早的事件。
+ */
+function validateCanonFutureAxis(deck: CanonAxisDeckView, ctx: z.RefinementCtx): void {
+  const events = deck.canonEvents;
+  if (events === undefined) return;
+
+  const cardRefs = new Set<string>([
+    ...(deck.playerGod === undefined ? [] : [deck.playerGod.ref]),
+    ...deck.majorGods.map((god) => god.ref),
+    ...deck.races.map((race) => race.ref),
+    ...deck.factions.map((faction) => faction.ref),
+    ...deck.places.map((place) => place.ref),
+    ...deck.majorCharacters.map((character) => character.ref),
+  ]);
+  const requireCardRef = (ref: string, path: (string | number)[]) => {
+    if (cardRefs.has(ref)) return;
+    ctx.addIssue({
+      code: "custom",
+      path,
+      message: `将临之事引用 "${ref}" 未解析到任何卡组稳定 ref`,
+    });
+  };
+
+  let previousOrdinal: number | null = null;
+  const earlierEventRefs = new Set<string>();
+  events.forEach((event, index) => {
+    if (previousOrdinal !== null && event.ordinal <= previousOrdinal) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["canonEvents", index, "ordinal"],
+        message: `将临之事 ordinal 必须按数组顺序严格递增：${previousOrdinal} 之后出现 ${event.ordinal}`,
+      });
+    }
+    previousOrdinal = event.ordinal;
+
+    event.participantRefs.forEach((ref, refIndex) =>
+      requireCardRef(ref, ["canonEvents", index, "participantRefs", refIndex]),
+    );
+    for (const [groupKey, group] of [
+      ["prerequisites", event.prerequisites],
+      ["blockers", event.blockers],
+    ] as const) {
+      group.forEach((condition, conditionIndex) => {
+        const path = ["canonEvents", index, groupKey, conditionIndex] as (string | number)[];
+        if (condition.kind === "entity_status") {
+          requireCardRef(condition.entityRef, [...path, "entityRef"]);
+        } else if (condition.kind === "relation_status") {
+          requireCardRef(condition.sourceRef, [...path, "sourceRef"]);
+          requireCardRef(condition.targetRef, [...path, "targetRef"]);
+        } else if (
+          condition.kind === "prior_event_occurred"
+          && !earlierEventRefs.has(condition.canonEventRef)
+        ) {
+          ctx.addIssue({
+            code: "custom",
+            path: [...path, "canonEventRef"],
+            message: `prior_event_occurred 只能引用数组中更早的将临之事："${condition.canonEventRef}"`,
+          });
+        }
+      });
+    }
+    event.expectedConsequences.forEach((consequence, consequenceIndex) => {
+      const path = ["canonEvents", index, "expectedConsequences", consequenceIndex] as (string | number)[];
+      if (consequence.kind === "status_change") {
+        requireCardRef(consequence.targetRef, [...path, "targetRef"]);
+      } else if (consequence.kind === "relation_change") {
+        requireCardRef(consequence.sourceRef, [...path, "sourceRef"]);
+        requireCardRef(consequence.targetRef, [...path, "targetRef"]);
+      }
+    });
+    earlierEventRefs.add(event.ref);
+  });
+}
+
+/** Single superRefine entry combining reference uniqueness and the canon future axis. */
+function validateDeckIntegrity(
+  deck: DeckReferenceGraph & { canonEvents?: CanonFutureEvent[] },
+  ctx: z.RefinementCtx,
+): void {
+  validateModeAwareDeckReferenceUniqueness(deck, ctx);
+  validateCanonFutureAxis(deck, ctx);
 }
 
 /** Strict contracts for new Genesis output and rerolls. */
 export const PantheonWorldDeckSchema = PantheonWorldDeckObjectSchema.superRefine(
-  validateModeAwareDeckReferenceUniqueness,
+  validateDeckIntegrity,
 );
 export const CreatorWorldDeckSchema = CreatorWorldDeckObjectSchema.superRefine(
-  validateModeAwareDeckReferenceUniqueness,
+  validateDeckIntegrity,
 );
 const StrictWorldDeckSchema = z.discriminatedUnion("mode", [
   PantheonWorldDeckSchema,

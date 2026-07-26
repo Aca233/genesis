@@ -19,7 +19,8 @@ const SHARED_RULES = `Rules:
    STABLE REFS AND ABILITIES (hard constraints): every major god, race, faction, place, major character and ability MUST have a unique non-empty stable ref. Every raceRef, factionRef, keyCharacterRefs[].ref, sourceAbilityRef, ability reference, and god relation target MUST resolve to an existing matching card; never use display names as relationship keys. Generate 2–5 race abilities per race, limited to racial_innate or racial_tradition. Generate 3–6 divine abilities for each major god. Generate 6–12 majorCharacters; each has 2–5 personal abilities. A character may only learn a racial_tradition explicitly referenced from that character's primary race. Do not duplicate ordinary inherited racial abilities on a character card; use racialOverrides only for exceptions. Hidden or rumored abilities are allowed only when they serve a concrete secret, era undercurrent, or divine agenda; all other abilities are known.
 5. STYLE: infer the narrative style from the decree's phrasing (epic 史诗 / webnovel 网文爽文 / grimdark 黑深残 / lightnovel 轻小说 / canon 仿原IP文风). THEME: era naming, rank vocabulary matching the world's flavor (map every internal rank key to an in-world term), and typeNames — an in-world Chinese label for each codex category (faction/character/race/place/artifact/cult). Fill the style card completely: rhythm, narrationNotes, 2-3 dictionExamples written in the world's own voice, and tabooPhrases listing the overused AI-writing cliches this world must ration (e.g. 仿佛/似乎 hedges, 一丝/一抹 quantifiers, 眼中闪过, 空气仿佛凝固, inflated intensifiers like 极度/终极).
 6. If lorebook excerpts are provided, they are AUTHORITATIVE over your own knowledge on any conflict.
-7. ALL user-facing string values must be written in Chinese. Keys stay English per schema.`;
+7. ALL user-facing string values must be written in Chinese. Keys stay English per schema.
+8. CANON FUTURE EVENTS (将临之事): fill canonEvents with 3-5 author-only candidate future events that loom beyond the opening moment. For an existing IP, use genuine not-yet-happened canon beats that lie after the current moment; for an original world, derive looming candidates from epochConflict.overtConflicts and hiddenCurrents. Order the array by ordinal starting at 1, strictly increasing; the opening moment is ordinal 0. Every participantRef and condition ref must resolve to an existing card ref, and prior_event_occurred may only reference an earlier canonEvents entry. Give each event 1-3 prerequisites from the closed condition kinds, preferring concrete entity_status / relation_status / prior_event_occurred over custom. These are pressure, not a script: status is always "pending", visibility always "author_only", and no other card may state them as已定之事.`;
 
 const MODE_RULES: Record<WorldMode, string> = {
   pantheon: `PANTHEON MODE (hard constraints):
@@ -38,8 +39,8 @@ const MODE_RULES: Record<WorldMode, string> = {
 };
 
 const TOP_LEVEL_ORDER: Record<WorldMode, string> = {
-  pantheon: "mode, worldName, cosmology, fusionAxiom, playerGod, majorGods, minorGods, factions, races, places, majorCharacters, epochConflict, style, theme",
-  creator: "mode, worldName, cosmology, fusionAxiom, majorGods, minorGods, factions, races, places, majorCharacters, epochConflict, style, theme",
+  pantheon: "mode, worldName, cosmology, fusionAxiom, playerGod, majorGods, minorGods, factions, races, places, majorCharacters, epochConflict, canonEvents, style, theme",
+  creator: "mode, worldName, cosmology, fusionAxiom, majorGods, minorGods, factions, races, places, majorCharacters, epochConflict, canonEvents, style, theme",
 };
 
 export function genesisSystem(mode: WorldMode): string {

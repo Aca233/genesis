@@ -46,7 +46,12 @@ const CHRONICLE_KEYS = [
   "id", "timelineId", "chapterIndex", "yearLabel", "text", "entityIds", "godIds", "revealed",
   "revealedAtChapter", "source", "createdAt",
 ] as const;
-const OMEN_KEYS = ["id", "timelineId", "godId", "text", "consumed", "createdAt"] as const;
+const OMEN_KEYS = ["id", "timelineId", "godId", "text", "kind", "consumed", "createdAt"] as const;
+const CANON_EVENT_KEYS = [
+  "id", "timelineId", "ref", "title", "timeLabel", "ordinal", "epoch", "summary",
+  "participantRefs", "prerequisites", "blockers", "expectedConsequences", "status",
+  "visibility", "divergenceNote", "occurredChapterIndex", "createdAt",
+] as const;
 const TIMELINE_KEYS = ["id", "worldId", "parentId", "forkChapter", "createdAt"] as const;
 const ICON_ASSIGNMENT_KEYS = [
   "id", "timelineId", "subjectType", "subjectId", "token", "source", "playerLocked",
@@ -95,6 +100,7 @@ function projectTimeline(value: unknown): UnknownRecord {
     memberships: Array.from(memberships.values()),
     chronicles: list(timeline.chronicles).map((chronicle) => project(chronicle, CHRONICLE_KEYS)),
     omens: list(timeline.omens).map((omen) => project(omen, OMEN_KEYS)),
+    canonEvents: list(timeline.canonEvents).map((event) => project(event, CANON_EVENT_KEYS)),
     iconAssignments: list(timeline.iconAssignments).map((assignment) =>
       project(assignment, ICON_ASSIGNMENT_KEYS)),
   };

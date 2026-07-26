@@ -68,6 +68,14 @@ describe("TopLevelJsonProgressScanner", () => {
     expect(GENESIS_TOP_LEVEL_KEYS).toContain("majorCharacters");
   });
 
+  it("canonEvents 数组值完整闭合后才被报告", () => {
+    const scanner = new TopLevelJsonProgressScanner();
+
+    expect(scanner.push('{"canonEvents":[{"ref":"canon-1","ordinal":1}')).toEqual([]);
+    expect(scanner.push("]")).toEqual(["canonEvents"]);
+    expect(GENESIS_TOP_LEVEL_KEYS).toContain("canonEvents");
+  });
+
   it("支持数字、布尔值和 null 这类原始值", () => {
     const scanner = new TopLevelJsonProgressScanner();
     const completed = scanner.push('{"worldName":123,"cosmology":true,"fusionAxiom":null,"theme":false}');

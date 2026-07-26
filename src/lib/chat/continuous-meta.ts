@@ -60,6 +60,12 @@ export const AbilityRevealSchema = z.object({
   evidence: z.string().trim().min(1),
 }).strict();
 
+/** 神谕结果申报：本轮叙事对玩家神权行使/神谕的裁定结果（narrator META 自报） */
+export const OutcomeSchema = z.object({
+  result: z.enum(["fulfilled", "partial", "thwarted", "backfired"]),
+  note: z.string().trim().min(1).max(200),
+}).strict();
+
 export const ContinuousNarratorMetaSchema = z.object({
   suggestions: z.array(z.string().trim().min(1)).max(4).default([]),
   operation: z.enum(["continue", "retroactive_rewrite"]).default("continue"),
@@ -70,11 +76,14 @@ export const ContinuousNarratorMetaSchema = z.object({
   importantEventMutation: ImportantEventMutationSchema.optional(),
   significantEvent: z.boolean().default(false),
   settlementReasons: z.array(SettlementReasonSchema).max(9).default([]),
+  probeAttempted: z.boolean().optional(),
   revealedEventIds: z.array(z.string()).optional(),
   abilityReveals: z.array(AbilityRevealSchema).optional(),
+  outcome: OutcomeSchema.optional(),
 }).strict();
 
 export type ContinuousNarratorMeta = z.infer<typeof ContinuousNarratorMetaSchema>;
+export type Outcome = z.infer<typeof OutcomeSchema>;
 export type ImmediateChange = z.infer<typeof ImmediateChangeSchema>;
 export type SettlementReason = z.infer<typeof SettlementReasonSchema>;
 

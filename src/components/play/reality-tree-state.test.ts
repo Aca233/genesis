@@ -100,6 +100,7 @@ describe("reality tree state", () => {
       ["activity", "动态"],
       ["starmap", "星图"],
       ["chronicle", "年表"],
+      ["realities", "往昔"],
       ["god", "神格"],
       ["lore", "设定集"],
       ["codex", "众生录"],
@@ -187,7 +188,7 @@ it("RuneRail exposes the exact creator labels and the unchanged pantheon labels"
     expect(creator).toContain(`aria-label="${label}"`);
   }
   expect(creator).not.toContain("本尊神格");
-  for (const label of ["动态", "星图", "年表", "神格", "设定集", "众生录"]) {
+  for (const label of ["动态", "星图", "年表", "往昔", "神格", "设定集", "众生录"]) {
     expect(pantheon).toContain(`aria-label="${label}"`);
   }
   expect(creator).toContain('aria-label="12 条未读动态"');

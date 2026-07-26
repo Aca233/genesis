@@ -91,6 +91,7 @@ model Timeline {
   abilities   Ability[]
   chronicles  ChronicleEntry[]
   omens       OmenQueue[]
+  canonEvents CanonEvent[]
   worldEvents     WorldEvent[]
   worldActivities WorldActivity[]
   entityRelations EntityRelation[]
@@ -455,12 +456,43 @@ model ChronicleEntry {
   @@map("chronicle_entries")
 }
 
+// 将临之事：作者侧未来候选事件（时间一致世界生成设计稿 §5.3/§8 阶段3）。
+// participantRefs 与 prerequisites/blockers/expectedConsequences 内的引用一律是
+// 卡组稳定 ref（字符串），绝不落库 DB id——行因此可被克隆/导演内核零重映射携带。
+model CanonEvent {
+  id                   String   @id @default(cuid())
+  timelineId           String   @map("timeline_id")
+  timeline             Timeline @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  ref                  String
+  title                String
+  timeLabel            String   @map("time_label")
+  ordinal              Int
+  epoch                String   @default("future")
+  summary              String   @db.Text
+  participantRefs      String[] @map("participant_refs")
+  prerequisites        Json
+  blockers             Json?
+  expectedConsequences Json?    @map("expected_consequences")
+  status               String   @default("pending") // pending | eligible | altered | cancelled | occurred
+  visibility           String   @default("author_only")
+  divergenceNote       String?  @map("divergence_note")
+  occurredChapterIndex Int?     @map("occurred_chapter_index")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@unique([timelineId, ref])
+  @@unique([timelineId, ordinal])
+  @@index([timelineId, status])
+  @@map("canon_events")
+}
+
 model OmenQueue {
   id         String   @id @default(cuid())
   timelineId String   @map("timeline_id")
   timeline   Timeline @relation(fields: [timelineId], references: [id], onDelete: Cascade)
   godId      String   @map("god_id")
   text       String // 征兆：将润物细无声织入下章
+  kind       String   @default("omen") // omen | proactive
   consumed   Boolean  @default(false)
   createdAt  DateTime @default(now()) @map("created_at")
 

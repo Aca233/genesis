@@ -201,6 +201,17 @@ export const ExtractionBaseSchema = z.object({
     evidenceMessageIndex: z.number().int().nonnegative(),
     evidence: z.string().trim().min(12),
   })).optional().default([]).describe("正文明确使既有人物成为主线关键人物时晋升；逐项提供正文证据"),
+  // optional+default：旧 pendingSettlement 快照经 readPendingSettlement safeParse 继续通过，断点续跑零影响。
+  chosenLifespanChecks: z
+    .array(z.object({
+      name: z.string().trim().min(1).describe("神选者正名"),
+      verdict: z.enum(["updated", "unchanged", "nearing_end", "deceased"]),
+      note: z.string().trim().min(1).max(200).describe("一句中文依据；nearing_end 时写成可织入下章的世间征兆原文"),
+    }).strict())
+    .max(20)
+    .optional()
+    .default([])
+    .describe("对输入 CHOSEN MORTALS 块逐一表态；未提供该块时返回空数组"),
   abilityChanges: z
     .array(z.unknown())
     .max(50)
@@ -337,6 +348,10 @@ export const ChronicleSchema = z.object({
     .max(4),
   epilogue: z.string().describe("章末小结一段（100-200字，史官口吻）"),
   chapterTitle: z.string().describe("遗留兼容字段：恒返回空字符串"),
+  eraDigest: z.object({
+    closedEra: z.string().describe("刚落幕纪元的名称（沿用主题卡纪年体系）"),
+    text: z.string().describe("纪元总纲：150-400字史官笔法，概括该纪元的定局冲突、兴衰与遗产；只写世界公开可知之事，不含隐藏行动"),
+  }).nullish().describe("仅当输入含 == ERA TO CLOSE == 块时输出；否则省略或 null"),
 });
 
 export type ChronicleOutput = z.infer<typeof ChronicleSchema>;

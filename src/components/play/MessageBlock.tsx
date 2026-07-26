@@ -29,6 +29,14 @@ const SETTLEMENT_REASON_LABELS: Record<string, string> = {
   multi_entity_change: "众象俱变",
 };
 
+/** 神谕结果 → 中文措辞（continuous-meta OutcomeSchema 枚举） */
+const OUTCOME_LABELS: Record<string, string> = {
+  fulfilled: "如愿",
+  partial: "部分如愿",
+  thwarted: "受挫",
+  backfired: "反噬",
+};
+
 export const MessageBlock = memo(function MessageBlock({
   message,
   readonly,
@@ -80,8 +88,10 @@ export const MessageBlock = memo(function MessageBlock({
   );
   const abilityReveals = meta?.abilityReveals ?? [];
   const settlementReasons = meta?.settlementReasons ?? [];
+  const outcome = meta?.outcome ?? null;
   const changeCount =
     (temporalChange ? 1 : 0) +
+    (outcome ? 1 : 0) +
     visibleActions.length +
     visibleEntries.length +
     abilityReveals.length +
@@ -253,6 +263,17 @@ export const MessageBlock = memo(function MessageBlock({
                 ◈ 本轮变化 · {changeCount} 项
               </summary>
               <ul className="mt-1.5 space-y-1 border-l border-line pl-3">
+                {outcome && (
+                  <li
+                    className={
+                      outcome.result === "thwarted" || outcome.result === "backfired"
+                        ? "text-cinnabar"
+                        : undefined
+                    }
+                  >
+                    神谕{OUTCOME_LABELS[outcome.result] ?? outcome.result}——{outcome.note}
+                  </li>
+                )}
                 {temporalChange && (
                   <li>
                     时间推至{" "}

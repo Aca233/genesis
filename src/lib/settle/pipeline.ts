@@ -21,6 +21,7 @@ import {
   chapterSettlementSchema,
   settlementSystem,
   settlementUserPrompt,
+  type ChapterSettlement,
   type ModeAwareChapterSettlement,
 } from "@/lib/prompts/settlement";
 import {
@@ -288,11 +289,17 @@ async function* settleChapterWithLease(
   const settlementTimeLabel = typeof observerTime === "string" && observerTime.trim()
     ? observerTime.trim()
     : "此刻";
+  const realityEra = timeline.realityState && typeof timeline.realityState === "object" && !Array.isArray(timeline.realityState)
+    ? (timeline.realityState as { currentEra?: unknown }).currentEra
+    : null;
+  const settlementEraLabel = typeof realityEra === "string" && realityEra.trim()
+    ? realityEra.trim()
+    : "未名纪元";
   assertActiveReality(world.activeTimelineId, timeline.id);
   const parsedReality = RealityStateSchema.safeParse(timeline.realityState);
   if (mode === "creator" && !parsedReality.success) throw new Error("创世主现实状态无效");
   const chapterText = await chapterProse(chapterId, mode);
-  const scaleNote = await dominantScale(chapterId);
+  const scaleInfo = await dominantScale(chapterId);
 
   // Database CAS makes the model request chapter-global: concurrent settlement runners
   // wait for the winner's persisted response instead of issuing their own request.
@@ -305,7 +312,8 @@ async function* settleChapterWithLease(
         const context = await buildSettlementContext(
           timeline.id,
           chapterText,
-          scaleNote,
+          scaleInfo.note,
+          scaleInfo.wide,
           world,
           mode,
           parsedReality.success ? parsedReality.data : undefined,
@@ -319,7 +327,8 @@ async function* settleChapterWithLease(
           maxAttempts: 1,
           transportMaxAttempts: 1,
           allowTransportFallback: false,
-          cache: { namespace: `settlement:v3:${mode}` },
+          // v4：输出 schema 新增 chronicle.eraDigest，防旧缓存响应缺该字段形状。
+          cache: { namespace: `settlement:v4:${mode}` },
         });
         await assertLeaseOwned();
         await assertTimelineStillActive(world.id, timeline.id);
@@ -395,16 +404,28 @@ async function* settleChapterWithLease(
     yield { step: "extract" };
     await assertLeaseOwned();
     await assertTimelineStillActive(world.id, timeline.id);
+    // 结算前在册的神选者名单：寿数检查覆盖率以此为准（本窗口新受印者下窗口才入列）。
+    const expectedChosenNames = (await prisma.entity.findMany({
+      where: { timelineId: timeline.id, isChosen: true },
+      select: { name: true },
+    })).map((entity) => entity.name);
     await withSettlementLeaseFence(worldId, token, async (tx) => {
-      await applyExtraction(
-        tx,
-        world.id,
-        timeline.id,
+      await applyExtraction(tx, {
+        worldId: world.id,
+        timelineId: timeline.id,
         chapterId,
+        chapterIndex: chapter.index,
+        timeLabel: settlementTimeLabel,
+        eraLabel: settlementEraLabel,
         chapterText,
-        settlement.extraction,
+        extraction: settlement.extraction,
         mode,
-      );
+        expectedChosenNames,
+        divineCostAudit: mode !== "creator"
+          ? (settlement as ChapterSettlement).divineCostAudit
+          : undefined,
+        wideScale: scaleInfo.wide,
+      });
       await setState(tx, chapterId, "chronicle");
     });
   }
@@ -431,6 +452,16 @@ async function* settleChapterWithLease(
         worldActivity: settlement.worldActivity,
         chronicleEntries,
       });
+      // 将临之事状态维护属编年史应用的一部分，不设独立 SettleStep——
+      // SSE 阶段契约与前端结算状态映射保持不变。?? [] 防御引入前的旧 pendingSettlement 快照。
+      await applyCanonEventUpdates(
+        tx,
+        timeline.id,
+        chapterId,
+        chapter.index,
+        chapterText.messages.at(-1)?.id ?? chapterId,
+        settlement.canonEventUpdates ?? [],
+      );
       await setState(tx, chapterId, "decay");
     });
   }
@@ -480,18 +511,47 @@ async function* settleChapterWithLease(
     await assertLeaseOwned();
     await assertTimelineStillActive(world.id, timeline.id);
     await withSettlementLeaseFence(worldId, token, async (tx) => {
-      const [gods, entities] = await Promise.all([
+      // 快照 v2：补齐能力/关系/事件/征兆/时间态，使万神殿检查点回溯可完整还原。
+      // 现有读者只取 pendingSettlement（readPendingSettlement）；克隆时整份 JSON 经
+      // remapRuntimeJson 重映射图内 ID（征兆行 ID 刻意不存——clone 不预映射征兆 ID）。
+      const [gods, entities, abilities, entityRelations, worldEvents, omens, canonEvents, timelineState] = await Promise.all([
         tx.god.findMany({ where: { timelineId: timeline.id } }),
         tx.entity.findMany({
           where: { timelineId: timeline.id },
           include: { sections: true },
+        }),
+        tx.ability.findMany({ where: { timelineId: timeline.id } }),
+        tx.entityRelation.findMany({ where: { timelineId: timeline.id } }),
+        tx.worldEvent.findMany({ where: { timelineId: timeline.id } }),
+        tx.omenQueue.findMany({
+          where: { timelineId: timeline.id },
+          select: { godId: true, text: true, kind: true, consumed: true, createdAt: true },
+        }),
+        tx.canonEvent.findMany({ where: { timelineId: timeline.id } }),
+        tx.timeline.findUniqueOrThrow({
+          where: { id: timeline.id },
+          select: { realityState: true, observerState: true },
         }),
       ]);
       await assertSettlementOwnerInTransaction(tx, worldId, token);
       await tx.chapter.update({
         where: { id: chapterId },
         data: {
-          snapshot: { gods, entities, pendingSettlement: settlement } as unknown as Prisma.InputJsonValue,
+          snapshot: {
+            snapshotVersion: 2,
+            gods,
+            entities,
+            abilities,
+            entityRelations,
+            worldEvents,
+            omens,
+            canonEvents,
+            temporal: {
+              realityState: timelineState.realityState,
+              observerState: timelineState.observerState,
+            },
+            pendingSettlement: settlement,
+          } as unknown as Prisma.InputJsonValue,
           settleState: "settled",
         },
       });
@@ -599,11 +659,12 @@ async function buildSettlementContext(
   timelineId: string,
   chapterText: Awaited<ReturnType<typeof chapterProse>>,
   scaleNote: string,
+  wide: boolean,
   world: SettlementWorld,
   mode: WorldMode,
   reality?: RealityState,
 ): Promise<Parameters<typeof settlementUserPrompt>[0]> {
-  const [entities, gods, abilities, lastEntry, worldActivity, pantheonHistory] = await Promise.all([
+  const [entities, gods, abilities, lastEntry, worldActivity, pantheonHistory, entityRelations, canonEventRows, chosenMortalRows] = await Promise.all([
     prisma.entity.findMany({
       where: { timelineId },
       select: {
@@ -656,7 +717,54 @@ async function buildSettlementContext(
       orderBy: { createdAt: "desc" },
       take: 60,
     }),
+    // 关系图谱回喂：已存关系随实体卡注入，抽取端只报增量，不复读未变关系
+    prisma.entityRelation.findMany({
+      where: { timelineId },
+      select: { sourceEntityId: true, targetEntityId: true, label: true, note: true },
+      orderBy: { updatedAt: "desc" },
+      take: 300,
+    }),
+    // 将临之事回喂：仅取 pending/eligible——altered/cancelled/occurred 已裁决，
+    // 线头不再消耗上下文预算；author_only 内容只进结算审计面，绝不入叙事上下文。
+    prisma.canonEvent.findMany({
+      where: { timelineId, status: { in: ["pending", "eligible"] } },
+      orderBy: { ordinal: "asc" },
+    }),
+    // 神选者寿数确定性检查：连同 lifespan 栏目（含迷雾中的）供结算逐一表态
+    prisma.entity.findMany({
+      where: { timelineId, isChosen: true },
+      select: {
+        id: true,
+        name: true,
+        sections: {
+          where: { key: "lifespan" },
+          select: { content: true, revealed: true },
+        },
+      },
+    }),
   ]);
+  // 纪元落幕检测：窗口内叙述者消息带纪元变更信号时，装配 ERA TO CLOSE 语料供总纲压缩
+  let eraToClose: string | undefined;
+  if (eraClosedInWindow(chapterText.messages)) {
+    const lastDigest = await prisma.chronicleEntry.findFirst({
+      where: { timelineId, source: "era_digest" },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    });
+    const eraEntries = await prisma.chronicleEntry.findMany({
+      where: {
+        timelineId,
+        revealed: true,
+        source: { not: "era_digest" },
+        ...(lastDigest ? { createdAt: { gt: lastDigest.createdAt } } : {}),
+      },
+      orderBy: { createdAt: "asc" },
+      take: 120,
+      select: { yearLabel: true, text: true },
+    });
+    // 开局首个检查点就换纪元时无可总纲
+    if (eraEntries.length) eraToClose = assembleEraToClose(eraEntries);
+  }
   const theme = mode === "creator" && reality
     ? reality.theme
     : (world.themeCard ?? {}) as { eraSystem?: string };
@@ -664,6 +772,19 @@ async function buildSettlementContext(
     ? reality.fusionAxiom
     : world.fusionAxiom;
   const raceName = new Map(entities.map((entity) => [entity.id, entity.name]));
+  // 与 formatEntitySectionContext 同款的 text 提取；缺栏或非文本内容记「未记」
+  const lifespanText = (content: Prisma.JsonValue): string | null => {
+    if (!content || typeof content !== "object" || Array.isArray(content)) return null;
+    const text = (content as { text?: unknown }).text;
+    return typeof text === "string" && text.trim()
+      ? text.trim().slice(0, ENTITY_CONTEXT_MAX_SECTION_TEXT_LENGTH)
+      : null;
+  };
+  const chosenMortals = chosenMortalRows.map((mortal) => {
+    const section = mortal.sections[0];
+    const text = section ? lifespanText(section.content) : null;
+    return `${mortal.name} [${mortal.id}] lifespan=${text ?? "未记"}${section?.revealed === false ? "（迷雾中）" : ""}`;
+  }).join("\n");
 
   return {
     mode,
@@ -679,9 +800,18 @@ async function buildSettlementContext(
         .filter((section) => !locked.has(section.key))
         .map((section) => formatEntitySectionContext(section.key, section.content))
         .filter((section): section is string => section !== null);
+      // raceName 即已加载实体的 id→name 映射；关系目标不在映射内（未入取数窗口）则不展示
+      const relationRows = entity.type === "character"
+        ? entityRelations
+          .filter((relation) => relation.sourceEntityId === entity.id && raceName.has(relation.targetEntityId))
+          .slice(0, 6)
+        : [];
       return [
         `${entity.name} [${entity.id}] (${entity.type}) race=${entity.raceId ? raceName.get(entity.raceId) ?? entity.raceId : "—"} aliases=[${entity.aliases.join("、")}] present=${entity.scenePresence}: ${entity.summary}`,
         ...(sections.length ? ["  EXISTING VISIBLE UNLOCKED SECTIONS:", ...sections] : []),
+        ...(relationRows.length
+          ? [`  EXISTING RELATIONS (current stored graph — emit relationChanges ONLY for a change to or departure from these): ${relationRows.map((relation) => `→(${relation.label}) ${raceName.get(relation.targetEntityId)}：${relation.note.slice(0, 60)}`).join("；")}`]
+          : []),
       ].join("\n");
     }).join("\n\n"),
     gods: gods.filter((god) => god.tier === "major" && !god.isPlayer).map((god) => {
@@ -704,7 +834,60 @@ async function buildSettlementContext(
     lockedPaths: entities.flatMap((entity) => entity.lockedPaths.map((path) => `${entity.name}.${path}`)).join(", "),
     worldActivity,
     fusionAxiom: fusionAxiom ? JSON.stringify(fusionAxiom) : undefined,
+    eraToClose,
+    canonEvents: canonEventRows.length
+      ? canonEventRows.map((event) =>
+        `[${event.ref}] ordinal=${event.ordinal} status=${event.status} | ${event.title}（${event.timeLabel}）: ${event.summary} | prerequisites=${JSON.stringify(event.prerequisites)}${event.blockers ? ` | blockers=${JSON.stringify(event.blockers)}` : ""}`,
+      ).join("\n")
+      : undefined,
+    timeBudget: wide ? scaleNote : undefined,
+    chosenMortals: chosenMortalRows.length ? chosenMortals : undefined,
   };
+}
+
+/**
+ * 检查点窗口内是否发生纪元落幕：任一叙述者消息的 meta 带 temporalState.era
+ * 或 settlementReasons 含 era_change（两信号均由 finalize 落库）。
+ */
+function eraClosedInWindow(
+  messages: Awaited<ReturnType<typeof chapterProse>>["messages"],
+): boolean {
+  return messages.some((message) => {
+    if (message.role !== "narrator") return false;
+    const meta = message.meta;
+    if (!meta || typeof meta !== "object" || Array.isArray(meta)) return false;
+    const record = meta as Record<string, unknown>;
+    const temporal = record.temporalState;
+    if (
+      temporal && typeof temporal === "object" && !Array.isArray(temporal)
+      && typeof (temporal as { era?: unknown }).era === "string"
+      && (temporal as { era: string }).era.trim()
+    ) return true;
+    return Array.isArray(record.settlementReasons)
+      && record.settlementReasons.includes("era_change");
+  });
+}
+
+const ERA_TO_CLOSE_HEADER = "The chronicle lines below belong to the era that ended within this checkpoint. Distill them into chronicle.eraDigest.";
+const ERA_TO_CLOSE_MAX_CHARS = 8000;
+const ERA_TO_CLOSE_HEAD_LINES = 20;
+
+/** 超预算时保留前 20 行 + 从尾部回填，两段之间以单独一行 `…` 标记省略。 */
+function assembleEraToClose(entries: { yearLabel: string; text: string }[]): string {
+  const lines = entries.map((entry) => `[${entry.yearLabel}] ${entry.text}`);
+  const full = [ERA_TO_CLOSE_HEADER, ...lines].join("\n");
+  if (full.length <= ERA_TO_CLOSE_MAX_CHARS) return full;
+  const head = lines.slice(0, ERA_TO_CLOSE_HEAD_LINES);
+  const rest = lines.slice(ERA_TO_CLOSE_HEAD_LINES);
+  let budget = ERA_TO_CLOSE_MAX_CHARS - [ERA_TO_CLOSE_HEADER, ...head, "…"].join("\n").length;
+  const tail: string[] = [];
+  for (let i = rest.length - 1; i >= 0; i--) {
+    const cost = rest[i]!.length + 1; // 换行
+    if (cost > budget) break;
+    tail.unshift(rest[i]!);
+    budget -= cost;
+  }
+  return [ERA_TO_CLOSE_HEADER, ...head, "…", ...tail].join("\n");
 }
 
 function formatEntitySectionContext(key: string, content: Prisma.JsonValue): string | null {
@@ -797,15 +980,19 @@ async function applyPantheonTurns(
         entityIds: [], godIds: [god.id], revealed: false, source: "pantheon",
       },
     });
-    const omens = [
-      turn.omen,
-      turn.proactiveEvent
-        ? `【主动事件·${turn.proactiveEvent.type}】${turn.proactiveEvent.openingHook}`
-        : null,
-    ].filter((value): value is string => Boolean(value));
-    if (omens.length) {
+    // 主动事件与普通征兆分型入队：kind 列承担判别，type 风味留在钩子行文本身，
+    // 队列文本不再携带任何前缀标记。
+    const queueRows = [
+      ...(turn.omen ? [{ text: turn.omen, kind: "omen" }] : []),
+      ...(turn.proactiveEvent
+        ? [{ text: turn.proactiveEvent.openingHook, kind: "proactive" }]
+        : []),
+    ];
+    if (queueRows.length) {
       await db.omenQueue.createMany({
-        data: omens.map((text) => ({ timelineId, godId: god.id, text })),
+        data: queueRows.map((row) => ({
+          timelineId, godId: god.id, text: row.text, kind: row.kind,
+        })),
       });
     }
     const agenda = (god.agenda ?? {}) as Record<string, unknown>;
@@ -879,13 +1066,125 @@ async function applyChronicle(
         title: null,
       },
     });
+    // 纪元总纲入库：幂等键 = source + yearLabel，结算断点重跑不重写。
+    // digest 不并入返回的 activityEntries——它不是检查点动态，不进 applySettlementActivity。
+    const digest = chronicle.eraDigest;
+    if (digest?.text?.trim()) {
+      const dup = await db.chronicleEntry.findMany({
+        where: { timelineId, source: "era_digest", yearLabel: digest.closedEra.slice(0, 120) },
+        take: 1,
+        select: { yearLabel: true },
+      });
+      if (!dup.length) {
+        await db.chronicleEntry.create({
+          data: {
+            timelineId,
+            chapterIndex,
+            yearLabel: digest.closedEra.slice(0, 120),
+            text: digest.text.slice(0, 600),
+            entityIds: [],
+            godIds: [],
+            revealed: true,
+            source: "era_digest",
+          },
+        });
+      }
+    }
   }
   return activityEntries;
 }
 
+/**
+ * 将临之事状态机应用（canon_events 由卡组物化，结算侧只做状态维护）：
+ * - 合法迁移：pending→eligible/altered/cancelled/occurred；eligible→occurred/altered/cancelled。
+ *   非法迁移静默跳过——这同时使结算断点重跑幂等：重跑看到已迁移的状态即跳过。
+ * - eligible 且带 rumor 时落一条 public 传闻 WorldActivity（稳定 ID 幂等守卫），
+ *   它经 buildWorldActivityContext 流入叙事者 CURRENT WORLD ACTIVITY 块与动态抽屉，
+ *   即玩家侧半透出的全部——author_only 字段本身永不进入叙事上下文（docs §3.4/§8.1）。
+ * 刻意不做（导演内核接手前的边界）：occurred 不自动建 WorldEvent——事件经正文与
+ * 结算 worldActivity 机制自然成真；altered/cancelled 不产传闻——改道说明留在
+ * divergenceNote 作者侧；任何 canon 字段都不注入叙事者提示词。
+ */
+async function applyCanonEventUpdates(
+  db: SettlementTransaction,
+  timelineId: string,
+  chapterId: string,
+  chapterIndex: number,
+  sourceMessageId: string,
+  updates: readonly {
+    ref: string;
+    status: "eligible" | "altered" | "cancelled" | "occurred";
+    note: string;
+    rumor?: string | null;
+  }[],
+): Promise<void> {
+  if (!updates.length) return;
+  const LEGAL: Record<string, ReadonlySet<string>> = {
+    pending: new Set(["eligible", "altered", "cancelled", "occurred"]),
+    eligible: new Set(["occurred", "altered", "cancelled"]),
+  };
+  // 传闻行的纪元/时刻标签解析与 world-activity/settlement.ts createProgressOnce 同款
+  // （helpers 为私有作用域，此处内联同构实现，不跨模块引私有函数）。
+  const timelineRow = await db.timeline.findUnique({
+    where: { id: timelineId },
+    select: { realityState: true, observerState: true },
+  });
+  const jsonRecord = (value: unknown): Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+  const labelOr = (value: unknown, fallback: string): string =>
+    typeof value === "string" && value.trim() ? value.trim() : fallback;
+  const eraLabel = labelOr(jsonRecord(timelineRow?.realityState).currentEra, "未名纪元");
+  const timeLabel = labelOr(jsonRecord(timelineRow?.observerState).timeLabel, "此刻");
+
+  for (const update of updates) {
+    const row = await db.canonEvent.findUnique({
+      where: { timelineId_ref: { timelineId, ref: update.ref } },
+    });
+    if (!row) {
+      console.error("将临之事更新被拒绝", { chapterId, ref: update.ref, reason: "不存在" });
+      continue;
+    }
+    if (!LEGAL[row.status]?.has(update.status)) continue;
+    await db.canonEvent.update({
+      where: { id: row.id },
+      data: {
+        status: update.status,
+        ...(update.status === "altered" || update.status === "cancelled"
+          ? { divergenceNote: update.note }
+          : {}),
+        ...(update.status === "occurred" ? { occurredChapterIndex: chapterIndex } : {}),
+      },
+    });
+    if (update.status === "eligible" && update.rumor) {
+      const rumorId = `canon-rumor:${chapterId}:${row.ref}`;
+      if (!await db.worldActivity.findUnique({ where: { id: rumorId } })) {
+        await db.worldActivity.create({
+          data: {
+            id: rumorId,
+            timelineId,
+            eventId: null,
+            recordType: "activity",
+            kind: "rumor",
+            text: update.rumor,
+            visibility: "public",
+            actorId: null,
+            targetIds: [],
+            subjectIds: [],
+            sourceMessageId,
+            eraLabel,
+            timeLabel,
+          },
+        });
+      }
+    }
+  }
+}
+
 // ───────────────────────── 辅助 ─────────────────────────
 
-async function dominantScale(chapterId: string): Promise<string> {
+async function dominantScale(chapterId: string): Promise<{ note: string; wide: boolean }> {
   const msgs = await prisma.message.findMany({
     where: { chapterId },
     select: { scale: true },
@@ -900,7 +1199,7 @@ async function dominantScale(chapterId: string): Promise<string> {
     era: "数十年跨度",
     epoch: "百年以上跨度",
   };
-  return zh[top] ?? top;
+  return { note: zh[top] ?? top, wide: ["years", "era", "epoch"].includes(top) };
 }
 
 async function entityNameMap(timelineId: string): Promise<Map<string, string>> {
@@ -976,17 +1275,28 @@ async function godNameMap(timelineId: string): Promise<Map<string, string>> {
 /** 应用单次模型响应中的状态抽取；不再发起模型调用。 */
 async function applyExtraction(
   db: SettlementTransaction,
-  worldId: string,
-  timelineId: string,
-  chapterId: string,
-  chapterText: Awaited<ReturnType<typeof chapterProse>>,
-  extraction: Extraction,
-  mode: WorldMode,
+  opts: {
+    worldId: string;
+    timelineId: string;
+    chapterId: string;
+    chapterIndex: number;
+    timeLabel: string;
+    eraLabel: string;
+    chapterText: Awaited<ReturnType<typeof chapterProse>>;
+    extraction: Extraction;
+    mode: WorldMode;
+    /** 结算前在册的神选者正名；寿数检查覆盖率据此审计 */
+    expectedChosenNames: string[];
+    divineCostAudit?: ChapterSettlement["divineCostAudit"];
+    wideScale: boolean;
+  },
 ) {
+  const { worldId, timelineId, chapterId, chapterText, extraction, mode } = opts;
   const normalizedExtraction: Extraction = {
     ...extraction,
     newGods: extraction.newGods ?? [],
     majorCharacterPromotions: extraction.majorCharacterPromotions ?? [],
+    chosenLifespanChecks: extraction.chosenLifespanChecks ?? [],
   };
   const tx = db;
     const entityRecords = await tx.entity.findMany({
@@ -1286,6 +1596,87 @@ async function applyExtraction(
       });
     }
 
+    // ── 成长里程碑入史：觉醒/异变/迈入 expert·master 的公开能力事件落编年史与动态 ──
+    // 幂等：milestoneId 复用能力事件 dedupeKey；断点重跑（replay applied=false）
+    // 与 worldActivity 幂等守卫双保险，与 setState("chronicle") 同事务原子提交。
+    const playerGod = godRecords.find((god) => god.isPlayer) ?? null;
+    const entityById = new Map(currentEntities.map((entity) => [entity.id, entity] as const));
+    const chosenNameSet = new Set(opts.expectedChosenNames);
+    for (const change of result.applied) {
+      if (change.applied !== true) continue;
+      const event = change.event;
+      const masteryMilestone = event.after.mastery !== event.before.mastery
+        && (event.after.mastery === "expert" || event.after.mastery === "master");
+      if (event.type !== "awakened" && event.type !== "mutated" && !masteryMilestone) continue;
+      const abilityRow = await tx.ability.findUnique({ where: { id: event.abilityId } });
+      if (!abilityRow || abilityRow.visibility !== "known") continue;
+      const ownerEntity = abilityRow.entityId ? entityById.get(abilityRow.entityId) : undefined;
+      const chosenOwner = ownerEntity !== undefined && chosenNameSet.has(ownerEntity.name);
+      const playerGodOwner = playerGod !== null && abilityRow.godId === playerGod.id;
+      if (!chosenOwner && !playerGodOwner) continue;
+      const milestoneId = `milestone:${event.dedupeKey}`;
+      if (await tx.worldActivity.findUnique({ where: { id: milestoneId } })) continue;
+      const ownerName = chosenOwner ? ownerEntity!.name : playerGod!.name;
+      const abilityName = event.after.name;
+      const text = event.type === "awakened"
+        ? `${ownerName}觉醒「${abilityName}」，自此非复往日。`
+        : event.type === "mutated"
+          ? `${ownerName}之「${abilityName}」发生异变，祸福未可知。`
+          : event.after.mastery === "expert"
+            ? `${ownerName}修习「${abilityName}」有成，技近乎道。`
+            : `${ownerName}之「${abilityName}」臻于化境，当世无出其右。`;
+      await tx.chronicleEntry.create({
+        data: {
+          timelineId,
+          chapterIndex: opts.chapterIndex,
+          yearLabel: opts.timeLabel,
+          text,
+          entityIds: chosenOwner ? [ownerEntity!.id] : [],
+          godIds: playerGodOwner ? [abilityRow.godId!] : [],
+          revealed: true,
+          source: "narrative",
+        },
+      });
+      await tx.worldActivity.create({
+        data: {
+          id: milestoneId,
+          timelineId,
+          eventId: null,
+          recordType: "activity",
+          kind: "discovery",
+          text,
+          visibility: "public",
+          actorId: chosenOwner ? ownerEntity!.id : null,
+          targetIds: [],
+          subjectIds: chosenOwner ? [ownerEntity!.id] : [],
+          sourceMessageId: chapterText.messages.at(-1)?.id ?? chapterId,
+          eraLabel: opts.eraLabel,
+          timeLabel: opts.timeLabel,
+        },
+      });
+    }
+
+    // ── 神选者寿数钩子：nearing_end 的世间征兆原文入玩家神征兆队列（kind 默认 omen）──
+    // deceased/updated/unchanged 不做数据库动作：寿数栏目更新走既有 entityUpdates 通道。
+    for (const check of normalizedExtraction.chosenLifespanChecks ?? []) {
+      if (check.verdict !== "nearing_end" || playerGod === null) continue;
+      await tx.omenQueue.create({
+        data: { timelineId, godId: playerGod.id, text: check.note },
+      });
+    }
+    if (opts.wideScale) {
+      const covered = new Set((normalizedExtraction.chosenLifespanChecks ?? []).map((check) => check.name));
+      const missing = opts.expectedChosenNames.filter((name) => !covered.has(name));
+      if (missing.length) console.warn("神选者寿数检查缺席", { missing });
+    }
+
+    // ── 神权代价审计：dodged 的暗记原样入征兆队列，让逃掉的代价日后在世间显形 ──
+    for (const audit of opts.divineCostAudit ?? []) {
+      if (audit.verdict !== "dodged" || playerGod === null) continue;
+      await tx.omenQueue.create({
+        data: { timelineId, godId: playerGod.id, text: audit.note },
+      });
+    }
 }
 
 function emblemSeed(name: string): string {

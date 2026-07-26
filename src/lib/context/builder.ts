@@ -18,6 +18,7 @@ const LOREBOOK_BUDGET = 4000; // 世界书命中条目预算（字符）
 const WINDOW_BUDGET = 12000; // 正文窗口预算（字符），超出从最旧裁剪
 const RECENT_FOR_LORE = 6; // 参与世界书匹配的最近消息条数
 const CREATOR_HIDDEN_CHRONICLE_LIMIT = 30; // creator 模式作者视角隐藏编年史注入上限（条）
+const REENTRY_ABSENCE_MS = 12 * 60 * 60 * 1000; // 离席重入阈值：现实时间离席 ≥ 12 小时
 
 export type NarratorMode = "say" | "continue" | "opening";
 
@@ -154,30 +155,55 @@ function proseWindow(
 
 /** 查探语义检测：占卜/洞察/审问/窥探/追查（角色内主动揭雾手段） */
 const PROBE_RE =
-  /占卜|卜算|窥探|洞察|洞见|审问|拷问|追查|探查|查探|侦查|神览|天眼|推演|感知.{0,6}(真相|幕后|阴谋)|谁在(背后|暗中)/;
+  /占卜|卜算|窥探|洞察|洞见|审问|拷问|盘问|追查|探查|查探|侦查|细察|审视|探明|勘破|回溯|神览|天眼|推演|查看.{0,8}(记忆|真相|秘密|过往|痕迹)|感知.{0,6}(真相|幕后|阴谋)|追问.{0,6}真相|谁在(背后|暗中)|何人所为/;
 
 /**
- * 租借征兆队列：取未消费的至多 2 条（与 prompt「至多织入 1-2 条」对齐）。
+ * 租借征兆队列：至多 1 条 proactive（FIFO）+ 至多 2 条普通征兆（与 prompt
+ * 「至多织入 1-2 条」对齐），仍由 finalize 两阶段消费。
  * 此处不标记消费——由 finalizeNarration 在叙事成功落库后按 id 标记，
- * 生成失败/搁笔/变体重掷不再永久丢失征兆。
+ * 生成失败/搁笔/变体重掷不再永久丢失征兆，主动事件下轮自动重试登台。
  */
 async function consumeOmens(
   timelineId: string,
-): Promise<{ texts: string[]; ids: string[] }> {
-  const omens = await prisma.omenQueue.findMany({
-    where: { timelineId, consumed: false },
-    orderBy: { createdAt: "asc" },
-    take: 2,
-  });
-  return { texts: omens.map((o) => o.text), ids: omens.map((o) => o.id) };
+  resolveGodName: (id: string) => string | undefined,
+): Promise<{
+  texts: string[];
+  ids: string[];
+  proactive: { godName: string; text: string } | null;
+}> {
+  const [proactiveRow, omens] = await Promise.all([
+    prisma.omenQueue.findFirst({
+      where: { timelineId, consumed: false, kind: "proactive" },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.omenQueue.findMany({
+      where: { timelineId, consumed: false, kind: "omen" },
+      orderBy: { createdAt: "asc" },
+      take: 2,
+    }),
+  ]);
+  return {
+    texts: omens.map((o) => o.text),
+    ids: [...omens.map((o) => o.id), ...(proactiveRow ? [proactiveRow.id] : [])],
+    proactive: proactiveRow
+      ? {
+          godName: resolveGodName(proactiveRow.godId) ?? "未知神明",
+          text: proactiveRow.text,
+        }
+      : null,
+  };
 }
 
-/** 查探命中：玩家在查探时，检索隐藏大事记供裁决 */
+/**
+ * 查探命中：查探门开启时（本轮输入命中查探语义，或上一条叙事 META 自报
+ * probe_attempted）检索隐藏大事记供裁决；点名优先逻辑仍使用 probeText。
+ */
 async function hiddenEntriesForProbe(
   timelineId: string,
   probeText: string,
+  active: boolean,
 ): Promise<{ id: string; text: string; godName: string }[]> {
-  if (!PROBE_RE.test(probeText)) return [];
+  if (!active) return [];
   const [hidden, gods] = await Promise.all([
     prisma.chronicleEntry.findMany({
       where: { timelineId, revealed: false },
@@ -225,8 +251,24 @@ async function entityCardsBlock(
       [e.name, ...e.aliases].some((n) => n && searchText.includes(n)),
   );
 
+  // 关系行：仅当上下文内存在 character 实体才查询
+  // （EntityRelation 仅有 character 源写入路径，见 settle pipeline 的 upsert）
+  const contextIds = new Set([...present, ...mentioned].map((e) => e.id));
+  const hasCharacter = [...present, ...mentioned].some((e) => e.type === "character");
+  const relations = hasCharacter
+    ? await prisma.entityRelation.findMany({
+        where: { timelineId, sourceEntityId: { in: [...contextIds] } },
+        select: { sourceEntityId: true, targetEntityId: true, label: true, note: true },
+        orderBy: { updatedAt: "desc" },
+        take: 100,
+      })
+    : [];
+  const nameById = new Map(entities.map((e) => [e.id, e.name]));
+
   const BUDGET = 6000;
+  const REL_BUDGET = 600; // 关系行全局字符预算：累计超出后后续卡不再附关系行
   let used = 0;
+  let relUsed = 0;
   const blocks: string[] = [];
   // 在场实体全卡 > 命中实体（active 全卡 / dormant 摘要）
   for (const e of [...present, ...mentioned]) {
@@ -243,7 +285,21 @@ async function entityCardsBlock(
           })
           .join("\n")
       : "";
-    const card = `--- ${e.name} [${e.id}] (${e.type})${e.isChosen ? "【神选者】" : ""}${e.scenePresence ? "【在场】" : ""} ---\n${e.summary}${secs ? `\n${secs}` : ""}`;
+    let relLine = "";
+    if (e.type === "character" && relUsed <= REL_BUDGET) {
+      // 仅限当前上下文内实体之间的关系；每实体至多 4 条，note 截 40 字
+      const rows = relations
+        .filter((r) => r.sourceEntityId === e.id && contextIds.has(r.targetEntityId))
+        .slice(0, 4);
+      if (rows.length) {
+        const joined = rows
+          .map((r) => `→(${r.label}) ${nameById.get(r.targetEntityId) ?? "?"}：${r.note.slice(0, 40)}`)
+          .join("；");
+        relLine = `\nrelations: ${joined}`;
+        relUsed += joined.length;
+      }
+    }
+    const card = `--- ${e.name} [${e.id}] (${e.type})${e.isChosen ? "【神选者】" : ""}${e.scenePresence ? "【在场】" : ""} ---\n${e.summary}${secs ? `\n${secs}` : ""}${relLine}`;
     if (used + card.length > BUDGET) break;
     blocks.push(card);
     used += card.length;
@@ -256,36 +312,88 @@ async function entityCardsBlock(
   };
 }
 
-/** 相关编年史注入：命中实体的近期已揭示条目 */
+/** 相关编年史注入：纪元总纲常驻 + 命中实体相关条目优先 + 近期条目兜底 */
 async function chronicleBlock(
   timelineId: string,
   searchText: string,
 ): Promise<string | null> {
-  const entries = await prisma.chronicleEntry.findMany({
-    where: { timelineId, revealed: true },
-    orderBy: { createdAt: "desc" },
-    take: 60,
-  });
-  if (!entries.length) return null;
+  // 实体名索引先行：候选名过滤为长度 ≥ 2（一字别名防误命中）
   const entities = await prisma.entity.findMany({
     where: { timelineId },
     select: { id: true, name: true, aliases: true },
   });
   const hitIds = new Set(
     entities
-      .filter((e) => [e.name, ...e.aliases].some((n) => n && searchText.includes(n)))
+      .filter((e) =>
+        [e.name, ...e.aliases].some((n) => n && n.length >= 2 && searchText.includes(n)),
+      )
       .map((e) => e.id),
   );
-  const related = entries
-    .filter((c) => c.entityIds.some((id) => hitIds.has(id)))
-    .slice(0, 8);
-  // 兜底：最近 4 条全局编年史保证时间连续感
-  const recent = entries.slice(0, 4);
+  const [related, recent, digests] = await Promise.all([
+    hitIds.size
+      ? prisma.chronicleEntry.findMany({
+          where: {
+            timelineId,
+            revealed: true,
+            source: { not: "era_digest" },
+            entityIds: { hasSome: [...hitIds] },
+          },
+          orderBy: { createdAt: "desc" },
+          take: 8,
+        })
+      : Promise.resolve([]),
+    // 兜底：最近 4 条全局编年史保证时间连续感
+    prisma.chronicleEntry.findMany({
+      where: { timelineId, revealed: true, source: { not: "era_digest" } },
+      orderBy: { createdAt: "desc" },
+      take: 4,
+    }),
+    // 纪元总纲常驻：入库端已限单条 600 字内、此处上限 20 条，无需再截断
+    prisma.chronicleEntry.findMany({
+      where: { timelineId, source: "era_digest" },
+      orderBy: { createdAt: "asc" },
+      take: 20,
+    }),
+  ]);
   const merged = [...new Map([...related, ...recent].map((c) => [c.id, c])).values()];
-  if (!merged.length) return null;
-  return `CHRONICLE (what history records so far):\n${merged
-    .map((c) => c.yearLabel ? `[${c.yearLabel}] ${c.text}` : c.text)
-    .join("\n")}`;
+  if (!merged.length && !digests.length) return null;
+  const line = (c: { yearLabel: string; text: string }) =>
+    c.yearLabel ? `[${c.yearLabel}] ${c.text}` : c.text;
+  if (!digests.length) {
+    return `CHRONICLE (what history records so far):\n${merged.map(line).join("\n")}`;
+  }
+  return `CHRONICLE (what history records so far):\nERA DIGESTS (one line per closed era, oldest first — binding long-memory):\n${digests
+    .map(line)
+    .join("\n")}\nRECENT & RELATED ENTRIES:\n${merged.length ? merged.map(line).join("\n") : "—"}`;
+}
+
+/**
+ * 「离席之间」重入导演块。
+ *
+ * 纯函数、无副作用——故意如此导出，以便 world-director 内核在运行时切换
+ * （runtime cutover）后可以直接重挂此函数。
+ *
+ * 线索完全由既有 OmenQueue / WorldEvent 数据逐字派生（pantheon：本轮已租借的
+ * 未消费征兆原文；creator：活跃世界事件标题），不新增 LLM 调用、也没有
+ * completeStructured 任务：可发展线索本就逐字可得，LLM 摘要器只会为零信息
+ * 增益付出额外时延。
+ */
+export function buildReentryBlock(input: {
+  mode: WorldMode;
+  absenceMs: number;
+  threads: string[];
+}): string | null {
+  if (input.absenceMs < REENTRY_ABSENCE_MS) return null;
+  const absenceLabel = input.absenceMs >= 48 * 60 * 60 * 1000
+    ? `约 ${Math.round(input.absenceMs / (24 * 60 * 60 * 1000))} 天`
+    : `约 ${Math.round(input.absenceMs / (60 * 60 * 1000))} 小时`;
+  const threads = input.threads.slice(0, 2);
+  const threadSection = threads.length
+    ? threads.map((thread) => `- ${thread}`).join("\n")
+    : "No specific thread is supplied — invent one small, concrete offstage development consistent with CURRENT WORLD ACTIVITY.";
+  return `== RE-ENTRY AFTER ABSENCE ==
+The player returns after a real-world absence of ${absenceLabel}. Open this reply from the world's own motion: in-fiction time has visibly passed, and the threads below have quietly developed while no one was watching. Never explain or acknowledge the pause; let changed details, aged consequences and moved pieces show it.
+${threadSection}`;
 }
 
 export async function buildNarratorContext(opts: BuildOpts): Promise<NarratorContext> {
@@ -328,6 +436,24 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<NarratorCon
   });
   const prevTail = (prevChapter?.messages ?? []).reverse();
 
+  // ── PREVIOUSLY 前情回注：既往检查点的史官小结（结算无差别写入 chapter.summary）──
+  const recapChapters = await prisma.chapter.findMany({
+    where: {
+      timelineId: chapter.timelineId,
+      index: { lt: chapter.index },
+      summary: { not: null },
+    },
+    orderBy: { index: "desc" },
+    take: 3,
+    select: { index: true, summary: true },
+  });
+  const previouslyBlock = recapChapters.length
+    ? `== PREVIOUSLY (chronicler's recaps of earlier checkpoints, oldest to newest) ==\n${recapChapters
+        .reverse()
+        .map((c) => (c.summary ?? "").slice(0, 400))
+        .join("\n")}`
+    : null;
+
   const gods = await prisma.god.findMany({
     where: { timelineId: chapter.timelineId },
     orderBy: { createdAt: "asc" },
@@ -336,9 +462,26 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<NarratorCon
 
   // ── 征兆消费 + 查探检测 ──
   const probeText = opts.playerInput ?? "";
+  // 查探双门：本轮输入命中查探语义，或上一条叙事 META 自报 probe_attempted
+  // （由 narrator 输出、finalize 落库）。carry 只看最后一条 narrator 消息——
+  // 下一条叙事落库后自然熄灭，无需额外守卫；chapter.messages 已按 beforeIndex
+  // 过滤，变体重掷语义自动正确。
+  const lastNarrator = [...chapter.messages].reverse().find((m) => m.role === "narrator");
+  const lm = lastNarrator?.meta;
+  const probeCarry = !!(
+    lm
+    && typeof lm === "object"
+    && !Array.isArray(lm)
+    && (lm as Record<string, unknown>).probeAttempted === true
+  );
+  const probeActive = PROBE_RE.test(probeText) || probeCarry;
   const [omens, hiddenEntries] = mode === "creator"
     ? await Promise.all([
-        Promise.resolve({ texts: [] as string[], ids: [] as string[] }),
+        Promise.resolve({
+          texts: [] as string[],
+          ids: [] as string[],
+          proactive: null as { godName: string; text: string } | null,
+        }),
         prisma.chronicleEntry.findMany({
           where: { timelineId: chapter.timelineId, revealed: false },
           orderBy: { createdAt: "desc" },
@@ -346,8 +489,8 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<NarratorCon
         }),
       ])
     : await Promise.all([
-        consumeOmens(chapter.timelineId),
-        hiddenEntriesForProbe(chapter.timelineId, probeText),
+        consumeOmens(chapter.timelineId, (id) => gods.find((g) => g.id === id)?.name),
+        hiddenEntriesForProbe(chapter.timelineId, probeText, probeActive),
       ]);
 
   // ── Stable cache prefix: global rules, then world-specific cards. ──
@@ -384,7 +527,9 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<NarratorCon
           ? (world.draftDeck as { epochConflict?: { yearLabel?: string } }).epochConflict?.yearLabel
           : undefined) || "此刻"),
     },
+    playerGodRank: mode === "pantheon" ? playerGod?.rank : undefined,
     omens: omens.texts,
+    proactiveEvent: omens.proactive ?? undefined,
     hiddenEntries: mode === "pantheon"
       ? hiddenEntries.map((entry) => ({ id: entry.id, text: entry.text, godName: "godName" in entry ? entry.godName : "未知" }))
       : undefined,
@@ -434,6 +579,31 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
     ? `CURRENT WORLD ACTIVITY\n${JSON.stringify(worldActivityContext)}`
     : null;
 
+  // ── 离席重入（服务端派生，自限性）──
+  // 自限性：重入后生成的第一条叙事落库即带新鲜 createdAt，下一轮判定自动失效——
+  // 无客户端状态、无标记位；隐藏征兆原文也永不出服务端（这正是采用服务端派生、
+  // 而非提案中前端指令变体的原因）。
+  // pantheon 线索复用本轮 consumeOmens 已租借的 1-2 条征兆原文：不重复取数，
+  // 两阶段消费契约不变（finalize 在叙事成功落库后才标记 omens.ids）；此块只改变
+  // 本轮「如何」搬演这些征兆（作为停顿期间已推进的幕后发展），narratorTurnSystem
+  // 的标准织入指令依旧生效。creator 线索使用活跃事件标题。
+  const lastMessageAt = [...prevTail, ...chapter.messages].reduce<Date | null>(
+    (latest, message) =>
+      latest === null || message.createdAt > latest ? message.createdAt : latest,
+    null,
+  );
+  const reentryBlock = opts.mode !== "opening"
+    && lastMessageAt
+    && Date.now() - lastMessageAt.getTime() >= REENTRY_ABSENCE_MS
+    ? buildReentryBlock({
+        mode,
+        absenceMs: Date.now() - lastMessageAt.getTime(),
+        threads: mode === "pantheon"
+          ? omens.texts
+          : worldActivityContext.events.slice(0, 2).map((event) => event.title),
+      })
+    : null;
+
   // ── 正文窗口 + 本轮输入，拼成单条 user（防中转站丢多轮） ──
   const windowText = proseWindow(windowMessages, mode);
   const parts: string[] = [];
@@ -462,7 +632,10 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
   if (worldActivityBlock) messages.push({ role: "system", content: worldActivityBlock, cacheScope: "dynamic" });
   messages.push({ role: "system", content: abilityContext, cacheScope: "dynamic" });
   if (lore) messages.push({ role: "system", content: lore, cacheScope: "dynamic" });
+  if (previouslyBlock) messages.push({ role: "system", content: previouslyBlock, cacheScope: "dynamic" });
   if (chronicle) messages.push({ role: "system", content: chronicle, cacheScope: "dynamic" });
+  // 离席重入块固定为 user 前的最后一条 system，确保导演指令压轴生效
+  if (reentryBlock) messages.push({ role: "system", content: reentryBlock, cacheScope: "dynamic" });
   messages.push({ role: "user", content: parts.join("\n\n"), cacheScope: "dynamic" });
   return Object.assign(messages, {
     allowedEventIds: [...worldActivityContext.actionableEventIds],

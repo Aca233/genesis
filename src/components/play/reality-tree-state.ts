@@ -40,6 +40,7 @@ export const pantheonDrawerTabs: readonly DrawerTabDefinition[] = [
   { tab: "activity", iconToken: "world.activity", label: "动态", title: "世界动态" },
   { tab: "starmap", iconToken: "cosmos.constellation", label: "星图", title: "星图" },
   { tab: "chronicle", iconToken: "chronicle.archive", label: "年表", title: "编年史" },
+  { tab: "realities", iconToken: "reality.branch", label: "往昔", title: "往昔诸相" },
   { tab: "god", iconToken: "divinity.pantheon", label: "神格", title: "本尊神格" },
   { tab: "lore", iconToken: "knowledge.codex", label: "设定集", title: "世界设定集" },
   { tab: "codex", iconToken: "people.collective", label: "众生录", title: "众生录" },

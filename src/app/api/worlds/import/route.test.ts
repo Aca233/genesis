@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => {
       abilityEvent: model(),
       chronicleEntry: model(),
       omenQueue: model(),
+      canonEvent: model(),
       realityRewrite: model(),
       worldEvent: model(),
       worldActivity: model(),

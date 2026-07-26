@@ -353,3 +353,179 @@ describe("creator unified narration contract", () => {
     expect(world).not.toContain("PLAYER GOD (the protagonist");
   });
 });
+
+describe("proactive divine event staging", () => {
+  it("提供 proactiveEvent 时渲染正面登台块：点名神明并禁止降格为暗示", () => {
+    const prompt = narratorTurnSystem({
+      mode: "pantheon",
+      scale: "scene",
+      omens: ["潮声倒流"],
+      proactiveEvent: { godName: "潮神", text: "潮神遣使者入梦" },
+    });
+    expect(prompt).toContain("== PROACTIVE DIVINE EVENT (stage this openly) ==");
+    expect(prompt).toContain("潮神 moves toward the player god this very reply: 潮神遣使者入梦");
+    expect(prompt).toContain("never as a passing hint");
+    expect(prompt).toContain("never explained away as an omen or a system event");
+    expect(prompt).toContain("Do not decide the player god's response");
+  });
+
+  it("未提供 proactiveEvent 时不出现登台块", () => {
+    const prompt = narratorTurnSystem({
+      mode: "pantheon",
+      scale: "scene",
+      omens: ["潮声倒流"],
+    });
+    expect(prompt).not.toContain("PROACTIVE DIVINE EVENT");
+  });
+
+  it("PENDING OMENS 织入指令保持原文（与登台块互为对立面）", () => {
+    const prompt = narratorTurnSystem({
+      mode: "pantheon",
+      scale: "scene",
+      omens: ["潮声倒流"],
+      proactiveEvent: { godName: "潮神", text: "潮神遣使者入梦" },
+    });
+    expect(prompt).toContain("== PENDING OMENS (offstage divine actions' worldly echoes) ==");
+    expect(prompt).toContain(
+      "Weave AT MOST 1-2 of these into your reply as passing, unexplained details. NEVER flag or explain them:",
+    );
+  });
+});
+
+describe("META probe_attempted 自报契约与神权建议回流", () => {
+  it("pantheon 版声明查探自报规则并要求建议锚定已列神赋能力", () => {
+    const prompt = narratorGlobalSystem("pantheon");
+    expect(prompt).toContain("probe_attempted");
+    expect(prompt).toContain("\"probe_attempted\":false");
+    expect(prompt).toContain("arms adjudication for the next turn");
+    expect(prompt).toContain("Never mention this flag in prose");
+    expect(prompt).toContain("ground at least one option in a specific listed ability");
+  });
+
+  it("creator 版查探规则恒为 false 且不含 pantheon 版语句", () => {
+    const prompt = narratorGlobalSystem("creator");
+    expect(prompt).toContain("probe_attempted");
+    expect(prompt).toContain("omniscient creator narration needs no probe adjudication");
+    expect(prompt).not.toContain("arms adjudication for the next turn");
+    expect(prompt).not.toContain("ground at least one option in a specific listed ability");
+  });
+
+  it("splitMetaBlock 仅在 probe_attempted === true 时收取，false/缺失/非布尔一律 undefined", () => {
+    const withProbe = (value: unknown) => JSON.stringify({
+      suggestions: [],
+      operation: "continue",
+      immediate_changes: [],
+      world_actions: [],
+      activity_entries: [],
+      important_event_mutation: null,
+      significant_event: false,
+      settlement_reasons: [],
+      probe_attempted: value,
+    });
+
+    expect(splitMetaBlock(`正文\n<<<META\n${withProbe(true)}\nMETA>>>`).meta.probeAttempted)
+      .toBe(true);
+    expect(splitMetaBlock(`正文\n<<<META\n${withProbe(false)}\nMETA>>>`).meta.probeAttempted)
+      .toBeUndefined();
+    expect(splitMetaBlock(`正文\n<<<META\n${withProbe("yes")}\nMETA>>>`).meta.probeAttempted)
+      .toBeUndefined();
+    expect(splitMetaBlock(`正文\n<<<META\n${meta}\nMETA>>>`).meta.probeAttempted)
+      .toBeUndefined();
+  });
+
+  it("非布尔 probe_attempted 不破坏其余 META 字段的剥离", () => {
+    const drifted = JSON.stringify({
+      suggestions: ["追问"],
+      operation: "continue",
+      immediate_changes: [],
+      world_actions: [],
+      activity_entries: [],
+      important_event_mutation: null,
+      significant_event: false,
+      settlement_reasons: [],
+      probe_attempted: "yes",
+    });
+    expect(splitMetaBlock(`正文\n<<<META\n${drifted}\nMETA>>>`)).toMatchObject({
+      prose: "正文",
+      meta: { suggestions: ["追问"] },
+    });
+  });
+});
+
+describe("神谕结果申报 META 通道", () => {
+  it("splitMetaBlock 保留合法 outcome", () => {
+    const withOutcome = JSON.stringify({
+      suggestions: ["追问"],
+      operation: "continue",
+      immediate_changes: [],
+      world_actions: [],
+      activity_entries: [],
+      important_event_mutation: null,
+      outcome: { result: "backfired", note: "潮水反噬了神的行宫" },
+      significant_event: false,
+      settlement_reasons: [],
+    });
+    expect(splitMetaBlock(`正文\n<<<META\n${withOutcome}\nMETA>>>`).meta.outcome)
+      .toEqual({ result: "backfired", note: "潮水反噬了神的行宫" });
+  });
+
+  it("损坏的 outcome（字符串形态）静默丢弃，其余字段保留", () => {
+    const drifted = JSON.stringify({
+      suggestions: ["追问"],
+      operation: "continue",
+      immediate_changes: [],
+      world_actions: [],
+      activity_entries: [],
+      important_event_mutation: null,
+      outcome: "fulfilled",
+      significant_event: false,
+      settlement_reasons: [],
+    });
+    const result = splitMetaBlock(`正文\n<<<META\n${drifted}\nMETA>>>`);
+    expect(result.meta.outcome).toBeUndefined();
+    expect(result).toMatchObject({
+      prose: "正文",
+      meta: { suggestions: ["追问"] },
+    });
+  });
+
+  it("outputContract 声明 outcome 字段与不得虚构裁定", () => {
+    for (const mode of ["pantheon", "creator"] as const) {
+      const prompt = narratorGlobalSystem(mode);
+      expect(prompt).toContain("\"outcome\":null");
+      expect(prompt).toContain("never fabricate an outcome");
+    }
+  });
+});
+
+describe("余烬低谷文体块（EMBER REGISTER）", () => {
+  it("playerGodRank=ember 时注入低谷文体块与回燃线索", () => {
+    const prompt = narratorTurnSystem({
+      mode: "pantheon",
+      scale: "scene",
+      playerGodRank: "ember",
+    });
+    expect(prompt).toContain("EMBER REGISTER");
+    expect(prompt).toContain("萤火视角");
+    expect(prompt).toContain("rekindling");
+    expect(prompt).not.toContain("陨灭");
+  });
+
+  it("playerGodRank=fallen 时以陨灭边缘收束", () => {
+    const prompt = narratorTurnSystem({
+      mode: "pantheon",
+      scale: "scene",
+      playerGodRank: "fallen",
+    });
+    expect(prompt).toContain("EMBER REGISTER");
+    expect(prompt).toContain("陨灭");
+    expect(prompt).not.toContain("rekindling");
+  });
+
+  it("未传 rank 或 rank=nascent 不出现低谷块", () => {
+    expect(narratorTurnSystem({ mode: "pantheon", scale: "scene" }))
+      .not.toContain("EMBER REGISTER");
+    expect(narratorTurnSystem({ mode: "pantheon", scale: "scene", playerGodRank: "nascent" }))
+      .not.toContain("EMBER REGISTER");
+  });
+});

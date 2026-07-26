@@ -4,6 +4,7 @@ import {
   AbilityRevealSchema,
   ContinuousNarratorMetaSchema,
   ImmediateChangeSchema,
+  OutcomeSchema,
   SettlementReasonSchema,
   TemporalPatchSchema,
   emptyContinuousMeta,
@@ -69,6 +70,7 @@ export function splitMetaBlock(full: string): { prose: string; meta: NarratorMet
       ? json.revealed_event_ids.filter((item): item is string => typeof item === "string")
       : undefined;
     const abilityReveals = validItems(json.ability_reveals, AbilityRevealSchema, 12);
+    const outcome = OutcomeSchema.safeParse(json.outcome);
     const candidate = {
       suggestions,
       operation: json.operation === "retroactive_rewrite"
@@ -85,8 +87,10 @@ export function splitMetaBlock(full: string): { prose: string; meta: NarratorMet
         SettlementReasonSchema,
         9,
       ),
+      ...(json.probe_attempted === true ? { probeAttempted: true } : {}),
       ...(revealedEventIds ? { revealedEventIds } : {}),
       ...(abilityReveals.length ? { abilityReveals } : {}),
+      ...(outcome.success ? { outcome: outcome.data } : {}),
     };
     const parsed = ContinuousNarratorMetaSchema.parse(candidate);
     return { prose, meta: parsed };
@@ -193,15 +197,18 @@ function section(title: string, value: unknown): string {
 function outputContract(mode: WorldMode): string {
   const suggestions = mode === "creator"
     ? "Suggest observation, focus, viewpoint, ordinary world action, or time-advance choices at the unresolved world-internal beat; never expose internal operation names or state an outcome as already achieved."
-    : "Suggest only actions or attitudes the player god may choose at the unresolved beat; never add unprovided abilities, decide for the player, and never state the outcome as already achieved.";
+    : "Suggest only actions or attitudes the player god may choose at the unresolved beat; never add unprovided abilities, decide for the player, and never state the outcome as already achieved. When KNOWN ABILITIES lists the player god's divine abilities, ground at least one option in a specific listed ability the player has not just used, or in an unresolved omen thread from this reply, phrased naturally in Chinese.";
   const revealedEvents = mode === "creator"
     ? "ids of hidden chronicle entries revealed through an explicit in-world investigation adjudication; creator observations must omit or use []."
     : "ids of hidden chronicle entries you revealed this reply (only when an INVESTIGATION ADJUDICATION block was provided; otherwise omit or []).";
+  const probeRule = mode === "creator"
+    ? "always false or omitted; omniscient creator narration needs no probe adjudication."
+    : "true only when the current player input is an in-fiction attempt to uncover hidden truths or hidden pasts (divination, interrogation, inspecting memories or traces, tracing who acted in the dark), including attempts that received no INVESTIGATION ADJUDICATION block this turn — the flag arms adjudication for the next turn. Otherwise false or omit. Never mention this flag in prose.";
   return `OUTPUT CONTRACT (strict):
 1) Write the narrative prose in Chinese.
 2) After the prose, on a NEW line, output exactly: ${META_START}
 3) Then output ONE JSON object:
-{"suggestions":["…","…"],"operation":"continue","temporal_state":{"era":"…","time":"…"},"immediate_changes":[],"world_actions":[],"activity_entries":[],"important_event_mutation":null,"significant_event":false,"settlement_reasons":[],"revealed_event_ids":[],"ability_reveals":[]}
+{"suggestions":["…","…"],"operation":"continue","temporal_state":{"era":"…","time":"…"},"immediate_changes":[],"world_actions":[],"activity_entries":[],"important_event_mutation":null,"outcome":null,"significant_event":false,"settlement_reasons":[],"probe_attempted":false,"revealed_event_ids":[],"ability_reveals":[]}
    - suggestions: 2-4 SHORT Chinese options. Make the options meaningfully different in kind (bold vs cautious, action vs inquiry, different targets); never four variants of the same move. ${suggestions}
    - operation: ${mode === "creator" ? `"continue" or "retroactive_rewrite" under UNIFIED CREATOR INTENT.` : `always "continue"; this mode cannot rewrite established history.`}
    - temporal_state: omit unless era or time truly changed. Either field may be supplied alone. Use free-form in-world Chinese labels.
@@ -212,8 +219,10 @@ function outputContract(mode: WorldMode): string {
    - Render accepted world activity consequences naturally in the prose, but return world_actions, activity_entries, and important_event_mutation inside this same single META. Never request or imply a second backstage model call.
    - significant_event: true only for a change needing full world settlement.
    - settlement_reasons: zero or more of major_event, ability_change, important_death, faction_change, rank_change, identity_change, relation_restructure, era_change, multi_entity_change. If this reply makes a reusable new skill real in 本轮 prose through 成功研发, 正式命名, or 首次稳定施展, settlement_reasons MUST contain ability_change even when the skill is absent from KNOWN ABILITIES, so same-turn settlement can register it.
+   - probe_attempted: ${probeRule}
    - revealed_event_ids: ${revealedEvents}
    - ability_reveals: only abilities clearly witnessed in this prose or supported by a reasonable investigation. Each item is {"abilityId":"exact supplied id","visibility":"rumored|known","evidence":"concise Chinese evidence from this reply"}. Use rumored for indirect signs and known for clear manifestation; otherwise omit or [].
+   - outcome: only when this reply resolves a current or earlier use of the player god's divine power or a directed divine decree, declare {"result":"fulfilled|partial|thwarted|backfired","note":"一句中文因由"}. Judge from what the prose actually shows: costs paid, limitations hit, rival interference, mortal defiance. fulfilled = as willed; partial = achieved at a price or incompletely; thwarted = blocked by the world; backfired = the attempt itself harmed the player god's interests. Omit for observation, conversation or undirected drift — never fabricate an outcome to fill the field.
 4) Close with a final line: ${META_END}
 Nothing may follow ${META_END}. Never mention or explain this block inside the prose.`;
 }
@@ -269,7 +278,9 @@ export function narratorTurnSystem(opts: {
   scale: Scale;
   playerInput?: string;
   temporal?: { era: string; time: string };
+  playerGodRank?: string;
   omens?: string[];
+  proactiveEvent?: { godName: string; text: string };
   hiddenEntries?: { id: string; text: string; godName: string }[];
 }): string {
   const blocks = [`== CURRENT SCALE ==\n${SCALE_RULES[opts.scale]}`];
@@ -280,8 +291,24 @@ Time: ${opts.temporal.time}
 The dial is the default span. Any explicit time wording in the current player input overrides the dial for this reply only and must not change the dial itself. Never report or ask about a conflict.
 Write every year label in exactly the established era format supplied above; never emit a variant spelling or ad-hoc abbreviation of the same calendar.`);
   }
+  if (opts.playerGodRank === "ember" || opts.playerGodRank === "fallen") {
+    const tail = opts.playerGodRank === "fallen"
+      ? `- The god stands at the brink of 陨灭: every remaining act may be the last. Let weight, memory and consequence dominate the register.`
+      : `- A road back exists: let faint chances of rekindling appear through mortal faith, but never grant them for free.`;
+    blocks.push(`== EMBER REGISTER (the player god has guttered low) ==
+The player god's rank is ${opts.playerGodRank}. Narrate from the trough:
+- Divine media are nearly gone. The player god acts only through faint residual media — a last believer's dream, a relic's dying glow, a half-remembered prayer. Full-scale miracles, direct manifestation and pantheon-scale voice are unavailable; if attempted they must fail or fall short on stage.
+- Render the world large and the player god small: 萤火视角 — close to the ground, among mortals who have mostly forgotten this god's name.
+- suggestions must offer only indirect, small-scale means (a whisper in one dream, a sign in cooling embers, guiding a single mortal's hand); never offer restored divine might.
+${tail}`);
+  }
   if (opts.playerInput?.trim()) {
     blocks.push(`== CURRENT PLAYER WORDING (for time-span adjudication) ==\n${opts.playerInput.trim()}`);
+  }
+  if (opts.proactiveEvent) {
+    blocks.push(`== PROACTIVE DIVINE EVENT (stage this openly) ==
+${opts.proactiveEvent.godName} moves toward the player god this very reply: ${opts.proactiveEvent.text}
+Open with or prominently feature this event: the named god actively contacts the player god as described. Play it onstage as a dramatic beat in that god's unmistakable voice — never as a passing hint, never explained away as an omen or a system event. Do not decide the player god's response; end at the beat that invites it.`);
   }
   if (opts.omens?.length) {
     blocks.push(`== PENDING OMENS (offstage divine actions' worldly echoes) ==
@@ -300,6 +327,7 @@ ${opts.hiddenEntries.map((entry) => `[${entry.id}] (${entry.godName}) ${entry.te
 export function narratorSystem(opts: NarratorWorldOptions & {
   scale: Scale;
   omens?: string[];
+  proactiveEvent?: { godName: string; text: string };
   hiddenEntries?: { id: string; text: string; godName: string }[];
 }): string {
   return [

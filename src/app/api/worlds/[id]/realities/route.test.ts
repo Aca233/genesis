@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   undoReality: vi.fn(),
   renameReality: vi.fn(),
   deleteRealitySubtree: vi.fn(),
+  forkPantheonCheckpoint: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -21,6 +22,11 @@ vi.mock("@/lib/reality/tree", () => ({
   undoReality: mocks.undoReality,
   renameReality: mocks.renameReality,
   deleteRealitySubtree: mocks.deleteRealitySubtree,
+}));
+vi.mock("@/lib/reality/checkpoint-fork", () => ({
+  CheckpointForkConflictError: class CheckpointForkConflictError extends Error {},
+  CheckpointForkNotFoundError: class CheckpointForkNotFoundError extends Error {},
+  forkPantheonCheckpoint: mocks.forkPantheonCheckpoint,
 }));
 
 import { DELETE, GET, PATCH, POST } from "./route";
@@ -43,6 +49,7 @@ describe("/api/worlds/[id]/realities", () => {
     mocks.undoReality.mockResolvedValue({ activeId: "root" });
     mocks.renameReality.mockResolvedValue({ id: "child", branchName: "新现实" });
     mocks.deleteRealitySubtree.mockResolvedValue({ deletedIds: ["child"] });
+    mocks.forkPantheonCheckpoint.mockResolvedValue({ activeId: "fork-1", timelineId: "fork-1" });
   });
 
   it("GET returns nodes and active ID without creator-only gating", async () => {
@@ -56,11 +63,10 @@ describe("/api/worlds/[id]/realities", () => {
     ["POST", () => POST(request("POST", { action: "undo", expectedActiveId: "child" }), context)],
     ["PATCH", () => PATCH(request("PATCH", { timelineId: "child", branchName: "新现实" }), context)],
     ["DELETE", () => DELETE(request("DELETE", { timelineId: "child", expectedActiveId: "root" }), context)],
-  ])("%s rejects pantheon mutations with 403", async (_method, call) => {
+  ])("%s allows pantheon mutations over its fork tree", async (_method, call) => {
     mocks.worldFindUnique.mockResolvedValue({ id: "world-1", mode: "pantheon" });
     const response = await call();
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({ error: "仅创世主模式可管理现实树" });
+    expect(response.status).toBe(200);
   });
 
   it("POST dispatches switch and undo with expectedActiveId", async () => {
@@ -85,6 +91,49 @@ describe("/api/worlds/[id]/realities", () => {
       worldId: "world-1",
       expectedActiveId: "child",
     });
+  });
+
+  it("POST fork runs the pantheon checkpoint fork and returns the new active reality", async () => {
+    mocks.worldFindUnique.mockResolvedValue({ id: "world-1", mode: "pantheon" });
+    const response = await POST(request("POST", {
+      action: "fork",
+      sourceChapterId: "chapter-2",
+      expectedActiveId: "root",
+      idempotencyKey: "checkpoint-fork-key-1",
+    }), context);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ activeId: "fork-1" });
+    expect(mocks.forkPantheonCheckpoint).toHaveBeenCalledWith(expect.anything(), {
+      worldId: "world-1",
+      sourceChapterId: "chapter-2",
+      expectedActiveId: "root",
+      branchName: undefined,
+      idempotencyKey: "checkpoint-fork-key-1",
+    });
+  });
+
+  it("POST fork rejects creator worlds with 403 (creator uses decree rewrites)", async () => {
+    const response = await POST(request("POST", {
+      action: "fork",
+      sourceChapterId: "chapter-2",
+      expectedActiveId: "root",
+      idempotencyKey: "checkpoint-fork-key-1",
+    }), context);
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "仅万神殿模式可回溯检查点" });
+    expect(mocks.forkPantheonCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("POST fork validates the body (idempotencyKey length)", async () => {
+    mocks.worldFindUnique.mockResolvedValue({ id: "world-1", mode: "pantheon" });
+    const response = await POST(request("POST", {
+      action: "fork",
+      sourceChapterId: "chapter-2",
+      expectedActiveId: "root",
+      idempotencyKey: "short",
+    }), context);
+    expect(response.status).toBe(400);
+    expect(mocks.forkPantheonCheckpoint).not.toHaveBeenCalled();
   });
 
   it("PATCH and DELETE dispatch validated mutation DTOs", async () => {

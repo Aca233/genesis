@@ -253,6 +253,30 @@ export async function materializeEmbarkDeck(
 
   await materializeDeckAbilities(tx, timeline.id, deck, ids);
 
+  // 将临之事：参与者/条件引用保持卡组稳定 ref 原样落库（author_only，对玩家隐藏）。
+  // 旧草稿与既有卡组没有 canonEvents 键，开局流程不变。
+  if (deck.canonEvents?.length) {
+    for (const event of deck.canonEvents) {
+      await tx.canonEvent.create({
+        data: {
+          timelineId: timeline.id,
+          ref: event.ref,
+          title: event.title,
+          timeLabel: event.timeLabel,
+          ordinal: event.ordinal,
+          epoch: event.epoch,
+          summary: event.summary,
+          participantRefs: event.participantRefs,
+          prerequisites: event.prerequisites as unknown as Prisma.InputJsonValue,
+          blockers: event.blockers as unknown as Prisma.InputJsonValue,
+          expectedConsequences: event.expectedConsequences as unknown as Prisma.InputJsonValue,
+          status: "pending",
+          visibility: "author_only",
+        },
+      });
+    }
+  }
+
   const chapter = await tx.chapter.create({
     data: {
       timelineId: timeline.id,

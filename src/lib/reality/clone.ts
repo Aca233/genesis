@@ -232,6 +232,7 @@ export async function cloneTimelineGraph(
       },
       chronicles: { orderBy: [{ chapterIndex: "asc" }, { createdAt: "asc" }] },
       omens: { orderBy: { createdAt: "asc" } },
+      canonEvents: { orderBy: { ordinal: "asc" } },
       worldEvents: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       worldActivities: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       entityRelations: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
@@ -566,8 +567,34 @@ export async function cloneTimelineGraph(
         timelineId: child.id,
         godId: requireMapped(maps.godIds, omen.godId, "征兆神明"),
         text: omen.text,
+        kind: omen.kind,
         consumed: omen.consumed,
         createdAt: omen.createdAt,
+      },
+    });
+  }
+
+  // 将临之事只携带卡组稳定 ref（不含任何图 ID），因此不进 TimelineCloneMaps/idMap，
+  // 逐字段照抄即可；新 id 由 cuid 默认生成。
+  for (const canonEvent of source.canonEvents) {
+    await tx.canonEvent.create({
+      data: {
+        timelineId: child.id,
+        ref: canonEvent.ref,
+        title: canonEvent.title,
+        timeLabel: canonEvent.timeLabel,
+        ordinal: canonEvent.ordinal,
+        epoch: canonEvent.epoch,
+        summary: canonEvent.summary,
+        participantRefs: [...canonEvent.participantRefs],
+        prerequisites: deepCopyJson(canonEvent.prerequisites) as Prisma.InputJsonValue,
+        blockers: nullableJson(canonEvent.blockers),
+        expectedConsequences: nullableJson(canonEvent.expectedConsequences),
+        status: canonEvent.status,
+        visibility: canonEvent.visibility,
+        divergenceNote: canonEvent.divergenceNote,
+        occurredChapterIndex: canonEvent.occurredChapterIndex,
+        createdAt: canonEvent.createdAt,
       },
     });
   }

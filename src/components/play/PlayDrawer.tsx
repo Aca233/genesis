@@ -17,6 +17,7 @@ import { CodexPanel } from "./CodexPanel";
 import { ChroniclePanel } from "./ChroniclePanel";
 import { StarmapPanel } from "./StarmapPanel";
 import { CreatorViewPanel } from "./CreatorViewPanel";
+import { PantheonPastPanel } from "./PantheonPastPanel";
 import { RealityTreePanel } from "./RealityTreePanel";
 import { WorldActivityPanel, type WorldActivityResponse } from "./WorldActivityPanel";
 import { drawerTabsForMode } from "./reality-tree-state";
@@ -189,12 +190,21 @@ export function PlayDrawer({
                   onChanged={onStateChanged ?? (async () => undefined)}
                 />
               ) : tab === "realities" ? (
-                <RealityTreePanel
-                  worldId={world.id}
-                  activeTimelineId={timeline.id}
-                  busy={busyKinds}
-                  onTimelineChanged={onTimelineChanged ?? (async () => undefined)}
-                />
+                world.mode === "pantheon" ? (
+                  <PantheonPastPanel
+                    worldId={world.id}
+                    activeTimelineId={timeline.id}
+                    busy={busyKinds}
+                    onTimelineChanged={onTimelineChanged ?? (async () => undefined)}
+                  />
+                ) : (
+                  <RealityTreePanel
+                    worldId={world.id}
+                    activeTimelineId={timeline.id}
+                    busy={busyKinds}
+                    onTimelineChanged={onTimelineChanged ?? (async () => undefined)}
+                  />
+                )
               ) : (
                 <StarmapPanel gods={gods} theme={world.themeCard} />
               )}

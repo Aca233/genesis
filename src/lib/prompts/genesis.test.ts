@@ -29,6 +29,15 @@ describe("genesis mode prompts", () => {
     expect(prompt).not.toContain('"playerGod"');
   });
 
+  it("两种模式都注入将临之事规则并把 canonEvents 排在 epochConflict 与 style 之间", () => {
+    for (const mode of ["pantheon", "creator"] as const) {
+      const prompt = genesisSystem(mode);
+      expect(prompt).toContain("CANON FUTURE EVENTS (将临之事)");
+      expect(prompt).toContain("ordinal starting at 1, strictly increasing");
+      expect(prompt).toContain("epochConflict, canonEvents, style, theme");
+    }
+  });
+
   it("用户与修补提示词显式冻结模式", () => {
     expect(genesisUserPrompt({ mode: "creator", decree: "造一个世界" })).toContain('mode="creator"');
     const repair = genesisRepairPrompt({

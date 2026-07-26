@@ -11,6 +11,7 @@ export const GENESIS_TOP_LEVEL_KEYS = [
   "places",
   "majorCharacters",
   "epochConflict",
+  "canonEvents",
   "style",
   "theme",
 ] as const;

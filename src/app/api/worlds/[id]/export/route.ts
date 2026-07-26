@@ -190,6 +190,7 @@ export async function GET(
           },
           chronicles: { orderBy: { createdAt: "asc" } },
           omens: { orderBy: { createdAt: "asc" } },
+          canonEvents: { orderBy: { ordinal: "asc" } },
           worldEvents: { orderBy: { createdAt: "asc" } },
           worldActivities: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
           entityRelations: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },

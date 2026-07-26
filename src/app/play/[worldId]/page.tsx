@@ -1,9 +1,10 @@
 "use client";
 
-import { use, useCallback, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { Scale } from "@/lib/cards/schemas";
 import type {
+  AbilityView,
   DrawerTab,
   MessageMeta,
   MessageRow,
@@ -12,6 +13,7 @@ import type {
 import { streamNarration } from "@/components/play/sse-client";
 import { StoryStream } from "@/components/play/StoryStream";
 import { InputDeck } from "@/components/play/InputDeck";
+import { FinaleGate } from "@/components/play/FinaleGate";
 import {
   enrichRewriteResultMessages,
   followRealityRewriteEvents,
@@ -469,6 +471,8 @@ export default function PlayPage({
   // 异常恢复：已开局现实完全无正文时，续跑同一 opening。
   useEffect(() => {
     if (!state || !chapterId || openingChapterId === chapterId) return;
+    // 防守性：已成史世界只读，绝不自动开场（正常已被 messages.length>0 拦截）
+    if (state.world.status === "concluded") return;
     if (state.messages.length > 0) return;
     const t = setTimeout(() => {
       setOpeningChapterId(chapterId);
@@ -619,6 +623,30 @@ export default function PlayPage({
   const lastMeta: MessageMeta = lastNarrator?.meta ?? {};
   const isLatest = lastNarrator && lastNarrator.index === messages.at(-1)?.index;
   const suggestions = isLatest ? (lastMeta.suggestions ?? []) : [];
+
+  // 神权提示条：玩家神的神赋能力（仅万神殿模式；封印/失落/废弃不列）
+  const powerHints = useMemo(() => {
+    if (state?.world.mode !== "pantheon") return [];
+    const player = state.gods.find((g) => g.isPlayer);
+    return (player?.abilities ?? [])
+      .filter((a): a is Extract<AbilityView, { effect: string }> =>
+        a.kind === "divine"
+        && "effect" in a
+        && !["sealed", "lost", "deprecated"].includes(a.state))
+      .slice(0, 6)
+      .map((a) => ({
+        id: a.id,
+        name: a.name,
+        effect: a.effect,
+        cost: "cost" in a ? a.cost : undefined,
+      }));
+  }, [state]);
+
+  // 陨灭终章派生量：玩家神 / 已成史 / 主题卡陨灭措辞
+  const playerGod = state?.gods.find((g) => g.isPlayer) ?? null;
+  const concluded = state?.world.status === "concluded";
+  const fallenLabel = state?.world.themeCard?.rankNames?.fallen ?? "陨灭";
+
   const retrySettlement = useCallback(() => {
     if (settlementState.status !== "failed") return;
     const segmentId = settlementState.segmentId;
@@ -716,31 +744,56 @@ export default function PlayPage({
             onSwitchVariant={switchVariant}
           />
 
-          <InputDeck
-            mode={state.world.mode}
-            scale={scale}
-            onScaleChange={setScale}
-            suggestions={suggestions}
-            busyKind={settling
-              ? "settling"
-              : rewriteBusy
-                ? "rewriting"
-                : busy ? "narrating" : "idle"}
-            canContinue={messages.length > 0}
-            onSend={send}
-            onContinue={doContinue}
-            onStop={stopGen}
-            settlementError={settlementState.status === "failed"
-              ? settlementState.error
-              : null}
-            onRetrySettlement={retrySettlement}
-            settlementStage={settlementState.status === "running"
-              ? settlementState.stage
-              : null}
-            taskProgress={taskProgress}
-            onRetryTask={retry}
-            onRefreshWorld={() => { void safeReload(); }}
-          />
+          {/* 陨灭终章确认流：玩家神陨灭且未成史时于输入区上方提示 */}
+          {!concluded && (
+            <FinaleGate
+              worldId={state.world.id}
+              worldStatus={state.world.status}
+              playerGodRank={playerGod?.rank ?? null}
+              fallenLabel={fallenLabel}
+              busy={anyBusy}
+              onConcluded={() => { void safeReload(); }}
+            />
+          )}
+
+          {concluded ? (
+            /* 已成史：输入区替换为只读横条（览史模式，抽屉面板全部保留） */
+            <FinaleGate
+              worldId={state.world.id}
+              worldStatus="concluded"
+              playerGodRank={playerGod?.rank ?? null}
+              fallenLabel={fallenLabel}
+              busy={anyBusy}
+              onConcluded={() => { void safeReload(); }}
+            />
+          ) : (
+            <InputDeck
+              mode={state.world.mode}
+              scale={scale}
+              onScaleChange={setScale}
+              suggestions={suggestions}
+              powerHints={powerHints}
+              busyKind={settling
+                ? "settling"
+                : rewriteBusy
+                  ? "rewriting"
+                  : busy ? "narrating" : "idle"}
+              canContinue={messages.length > 0}
+              onSend={send}
+              onContinue={doContinue}
+              onStop={stopGen}
+              settlementError={settlementState.status === "failed"
+                ? settlementState.error
+                : null}
+              onRetrySettlement={retrySettlement}
+              settlementStage={settlementState.status === "running"
+                ? settlementState.stage
+                : null}
+              taskProgress={taskProgress}
+              onRetryTask={retry}
+              onRefreshWorld={() => { void safeReload(); }}
+            />
+          )}
         </div>
 
         {/* 右缘符文列 + 抽屉 */}

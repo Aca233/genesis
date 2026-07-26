@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { resolveCompareRelationship } from "@/lib/reality/compare";
+import { RealityDiffView } from "./RealityDiffView";
 import {
   buildRealityTreeRows,
   getRealityTreeKeyboardTarget,
@@ -18,11 +20,14 @@ export function RealityTreePanel({
   busy,
   onTimelineChanged,
   initialTree = null,
+  mode = "creator",
 }: {
   worldId: string;
   activeTimelineId: string;
   busy: BusyKinds;
   initialTree?: RealityTreeView | null;
+  /** 仅影响文案：万神殿以"往昔诸相/回溯"措辞呈现同一棵现实树 */
+  mode?: "creator" | "pantheon";
   onTimelineChanged: (timelineId: string) => Promise<void>;
 }) {
   const [tree, setTree] = useState<RealityTreeView | null>(initialTree);
@@ -31,7 +36,30 @@ export function RealityTreePanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inspected, setInspected] = useState<RealityNodeView | null>(null);
+  // 分歧对照：先「对照」选定一界，再于另一界「与之对照」；只读，不受 busy 限制
+  const [comparePick, setComparePick] = useState<string | null>(null);
+  const [compareView, setCompareView] = useState<{ leftId: string; rightId: string } | null>(null);
+  const [compareError, setCompareError] = useState<string | null>(null);
   const navigationDisabled = isRealityNavigationDisabled(busy) || loading;
+
+  function handleCompareClick(nodeId: string) {
+    setCompareError(null);
+    if (comparePick === nodeId) {
+      setComparePick(null);
+      return;
+    }
+    if (comparePick === null) {
+      setComparePick(nodeId);
+      return;
+    }
+    try {
+      resolveCompareRelationship(tree?.nodes ?? [], comparePick, nodeId);
+      setCompareView({ leftId: comparePick, rightId: nodeId });
+      setComparePick(null);
+    } catch (reason) {
+      setCompareError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
 
   const reload = useCallback(async () => {
     const response = await fetch(`/api/worlds/${worldId}/realities`);
@@ -92,9 +120,25 @@ export function RealityTreePanel({
     <section className="space-y-4" aria-label="现实树">
       <div>
         <p className="text-xs tracking-[0.25em] text-gilt">现实树</p>
-        <h3 className="mt-1 text-xl text-ink" style={{ fontFamily: "var(--font-display)" }}>诸界分枝</h3>
-        <p className="mt-2 text-sm text-ink-soft">每一道敕令都生成独立子现实；原现实冻结保留，可随时返回。</p>
+        <h3 className="mt-1 text-xl text-ink" style={{ fontFamily: "var(--font-display)" }}>
+          {mode === "pantheon" ? "往昔诸相" : "诸界分枝"}
+        </h3>
+        <p className="mt-2 text-sm text-ink-soft">
+          {mode === "pantheon"
+            ? "每次回溯都会从那一刻分出新的现实；原现实冻结保留，可随时回望。"
+            : "每一道敕令都生成独立子现实；原现实冻结保留，可随时返回。"}
+        </p>
       </div>
+
+      {compareView !== null && tree !== null ? (
+        <RealityDiffView
+          worldId={worldId}
+          leftId={compareView.leftId}
+          rightId={compareView.rightId}
+          nodes={tree.nodes}
+          onBack={() => setCompareView(null)}
+        />
+      ) : (<>
 
       {isRealityNavigationDisabled(busy) && (
         <p className="rounded border border-gilt/30 bg-gilt/5 px-3 py-2 text-xs text-gilt">
@@ -110,6 +154,8 @@ export function RealityTreePanel({
       >
         ↶ 撤回父现实
       </button>
+
+      {compareError && <p role="alert" className="text-sm text-cinnabar">{compareError}</p>}
 
       <div role="tree" aria-label="现实分支" className="space-y-2">
         {tree === null && !error ? <p className="text-sm text-ink-faint">展开现实树中…</p> : rows.map(({ node, depth }) => {
@@ -152,6 +198,13 @@ export function RealityTreePanel({
                       const name = window.prompt("重命名现实", node.branchName);
                       if (name !== null) void request("PATCH", { timelineId: node.id, branchName: name });
                     }} disabled={loading} className="text-ink-soft hover:text-gilt disabled:opacity-40">重命名</button>
+                    <button
+                      type="button"
+                      onClick={() => handleCompareClick(node.id)}
+                      className={comparePick === node.id ? "text-gilt" : "text-ink-soft hover:text-gilt"}
+                    >
+                      {comparePick === node.id ? "取消对照" : comparePick === null ? "对照" : "与之对照"}
+                    </button>
                     {node.rewriteDecree && <button onClick={() => setInspected(node)} className="text-ink-soft hover:text-gilt">敕令</button>}
                     {node.parentId !== null && !current && <button disabled={navigationDisabled} onClick={() => {
                       if (window.confirm(`删除「${node.branchName}」及其全部子现实？`)) {
@@ -171,6 +224,7 @@ export function RealityTreePanel({
           <blockquote className="mt-2 whitespace-pre-wrap leading-relaxed text-ink">{inspected.rewriteDecree}</blockquote>
         </div>
       )}
+      </>)}
       {error && <p role="alert" className="text-sm text-cinnabar">{error}</p>}
     </section>
   );
