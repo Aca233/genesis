@@ -1,7 +1,7 @@
 import type { MaterialVersion, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import type { WorldDeck } from "@/lib/cards/schemas";
-import { extractDeckMaterials } from "./extract-deck";
+import { extractDeckMaterials, type ExtractedMaterial } from "./extract-deck";
 import { MATERIAL_SCHEMA_VERSION, parseMaterialVersionContent, type MaterialVersionContent } from "./schemas";
 import { MaterialDependencySchema, type MaterialDependency } from "./types";
 
@@ -9,32 +9,63 @@ export async function archiveInitialDeck(
   tx: Prisma.TransactionClient,
   input: { worldId: string; worldName: string; deck: WorldDeck },
 ): Promise<void> {
+  // 与逐条 upsert 语义一致：同一 (sourceKind, sourceRef) 以先出现的素材为准
+  const cardKey = (sourceKind: string, sourceRef: string) => `${sourceKind}\u0000${sourceRef}`;
+  const entries = new Map<string, { material: ExtractedMaterial; sourceRef: string }>();
   for (const material of extractDeckMaterials(input.deck)) {
     const sourceRef = `${input.worldId}:${material.sourceKind}:${material.sourceRef}`;
-    const card = await tx.materialCard.upsert({
-      where: { userId_sourceKind_sourceRef: { userId: "local", sourceKind: material.sourceKind, sourceRef } },
-      create: {
+    const key = cardKey(material.sourceKind, sourceRef);
+    if (!entries.has(key)) entries.set(key, { material, sourceRef });
+  }
+  if (entries.size === 0) return;
+
+  // 1) 批量定位已有素材卡，一次性补齐缺失的卡（原 upsert 的 update 为空对象，已存在的卡无需改写）
+  const cardSelect = { id: true, sourceKind: true, sourceRef: true, defaultVersionId: true } as const;
+  const existingCards = await tx.materialCard.findMany({
+    where: { userId: "local", OR: [...entries.values()].map(({ material, sourceRef }) => ({ sourceKind: material.sourceKind, sourceRef })) },
+    select: cardSelect,
+  });
+  const cardByKey = new Map(existingCards.map((card) => [cardKey(card.sourceKind, card.sourceRef), card]));
+  const missingEntries = [...entries].filter(([key]) => !cardByKey.has(key));
+  if (missingEntries.length > 0) {
+    const createdCards = await tx.materialCard.createManyAndReturn({
+      data: missingEntries.map(([, { material, sourceRef }]) => ({
         userId: "local", kind: material.kind, name: material.name, summary: material.summary,
         sourceWorldId: input.worldId, sourceWorldName: input.worldName,
         sourceKind: material.sourceKind, sourceRef,
-      },
-      update: {},
+      })),
+      select: cardSelect,
     });
-    let initial = await tx.materialVersion.findFirst({ where: { cardId: card.id, isInitial: true } });
-    if (!initial) {
-      initial = await tx.materialVersion.create({
-        data: {
-          cardId: card.id, version: 1, name: "初始版 · 创世时", isInitial: true,
-          schemaVersion: MATERIAL_SCHEMA_VERSION,
-          content: material.content as unknown as Prisma.InputJsonValue,
-          dependencies: material.dependencies as unknown as Prisma.InputJsonValue,
-        },
-      });
-    }
-    if (!card.defaultVersionId) {
-      await tx.materialCard.update({ where: { id: card.id }, data: { defaultVersionId: initial.id } });
-    }
+    for (const card of createdCards) cardByKey.set(cardKey(card.sourceKind, card.sourceRef), card);
   }
+
+  // 2) 批量查已有初始版本，缺失的一次性创建（原 create 无嵌套写入，可安全批量插入）
+  const initialIdByCardId = new Map<string, string>();
+  const existingInitials = await tx.materialVersion.findMany({
+    where: { cardId: { in: [...cardByKey.values()].map((card) => card.id) }, isInitial: true },
+    select: { id: true, cardId: true },
+  });
+  for (const version of existingInitials) {
+    if (!initialIdByCardId.has(version.cardId)) initialIdByCardId.set(version.cardId, version.id);
+  }
+  const versionEntries = [...entries].filter(([key]) => !initialIdByCardId.has(cardByKey.get(key)!.id));
+  if (versionEntries.length > 0) {
+    const createdVersions = await tx.materialVersion.createManyAndReturn({
+      data: versionEntries.map(([key, { material }]) => ({
+        cardId: cardByKey.get(key)!.id, version: 1, name: "初始版 · 创世时", isInitial: true,
+        schemaVersion: MATERIAL_SCHEMA_VERSION,
+        content: material.content as unknown as Prisma.InputJsonValue,
+        dependencies: material.dependencies as unknown as Prisma.InputJsonValue,
+      })),
+      select: { id: true, cardId: true },
+    });
+    for (const version of createdVersions) initialIdByCardId.set(version.cardId, version.id);
+  }
+
+  // 3) 回填缺失的默认版本指针（同一事务连接上排队执行）
+  await Promise.all([...cardByKey.values()]
+    .filter((card) => !card.defaultVersionId)
+    .map((card) => tx.materialCard.update({ where: { id: card.id }, data: { defaultVersionId: initialIdByCardId.get(card.id)! } })));
 }
 
 export async function createMaterialVersion(input: {

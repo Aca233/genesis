@@ -36,8 +36,12 @@ export async function PATCH(
     where: { id },
     include: {
       chapter: {
-        include: {
-          timeline: { include: { world: true } },
+        select: {
+          settleState: true,
+          timelineId: true,
+          timeline: {
+            select: { world: { select: { activeTimelineId: true } } },
+          },
         },
       },
     },
@@ -96,8 +100,12 @@ export async function DELETE(
     where: { id },
     include: {
       chapter: {
-        include: {
-          timeline: { include: { world: true } },
+        select: {
+          settleState: true,
+          timelineId: true,
+          timeline: {
+            select: { world: { select: { activeTimelineId: true } } },
+          },
         },
       },
     },

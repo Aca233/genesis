@@ -19,7 +19,8 @@ export async function GET(request: Request) {
   };
   const materials = await prisma.materialCard.findMany({
     where,
-    include: { defaultVersion: true, versions: { orderBy: { version: "desc" }, select: { id: true, version: true, name: true, note: true, isInitial: true, createdAt: true } } },
+    // 列表只需卡片标量（含 defaultVersionId）与版本索引；重量级 content JSON 由详情端点按需返回
+    include: { versions: { orderBy: { version: "desc" }, select: { id: true, version: true, name: true, note: true, isInitial: true, createdAt: true } } },
     orderBy: [{ favorite: "desc" }, { lastUsedAt: "desc" }, { updatedAt: "desc" }],
   });
   return NextResponse.json({ materials });
