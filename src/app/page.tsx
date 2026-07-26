@@ -8,6 +8,7 @@ import { useTheme } from "@/components/theme/useTheme";
 import { MaterialPicker } from "@/components/materials/MaterialPicker";
 import { PlayBackground } from "@/components/play/PlayBackground";
 import { GenesisModeBackground } from "@/components/genesis/GenesisModeBackground";
+import { OperationIcon } from "@/components/icons/OperationIcon";
 import type { MaterialSelectionItem } from "@/lib/materials/types";
 import { buildGenesisTaskPayload, defaultGenesisMode } from "@/lib/genesis/create-request";
 import { WORLD_MODES, WORLD_MODE_PRESENTATION, type WorldMode } from "@/lib/world-mode";
@@ -200,30 +201,30 @@ export default function Home() {
           />
           {lorebook ? (
             <span className="flex items-center gap-2 text-gilt">
-              📜 已携典籍：{lorebook.name}
+              <OperationIcon name="scroll" size={14} /> 已携典籍：{lorebook.name}
               <button
                 onClick={() => setLorebook(null)}
                 disabled={creating}
                 className="text-ink-faint transition hover:text-cinnabar"
                 title="移除典籍"
               >
-                ✕
+                <OperationIcon name="close" size={12} />
               </button>
             </span>
           ) : (
             <button
               onClick={() => fileRef.current?.click()}
               disabled={creating}
-              className="text-ink-faint transition hover:text-gilt disabled:opacity-50"
+              className="flex items-center gap-1.5 text-ink-faint transition hover:text-gilt disabled:opacity-50"
               title="上传 SillyTavern 世界书 JSON，作为创世的设定依据"
             >
-              📜 携带典籍（可选：SillyTavern 世界书）
+              <OperationIcon name="scroll" size={14} /> 携带典籍（可选：SillyTavern 世界书）
             </button>
           )}
         </div>
 
-        <button type="button" onClick={() => setMaterialPickerOpen(true)} disabled={creating} className="mt-3 rounded border border-line px-3 py-1.5 text-sm text-gilt hover:border-gilt/50">
-          ✦ 引用创世素材（已选 {materialSelections.length} 项）
+        <button type="button" onClick={() => setMaterialPickerOpen(true)} disabled={creating} className="mt-3 flex items-center gap-1.5 rounded border border-line px-3 py-1.5 text-sm text-gilt hover:border-gilt/50">
+          <OperationIcon name="materials" size={14} /> 引用创世素材（已选 {materialSelections.length} 项）
         </button>
 
         {error && <p className="mt-2 text-sm text-cinnabar">{error}</p>}
@@ -231,9 +232,11 @@ export default function Home() {
         <div className="mt-3 flex items-center justify-between">
           <button
             onClick={() => setMode(candle ? "day" : "candle")}
-            className="text-sm text-ink-faint transition hover:text-gilt"
+            className="flex items-center gap-1.5 text-sm text-ink-faint transition hover:text-gilt"
           >
-            {candle ? "☀ 展卷于日" : "🕯 燃烛夜读"}
+            {candle
+              ? <><OperationIcon name="sun" size={14} /> 展卷于日</>
+              : <><OperationIcon name="candle" size={14} /> 燃烛夜读</>}
           </button>
           <button
             onClick={create}
@@ -266,14 +269,14 @@ export default function Home() {
 
       <footer className="relative flex flex-col items-center gap-3 text-xs text-ink-faint">
         <nav className="flex gap-8">
-          <Link href="/archives" className="transition hover:text-gilt">
-            📜 往昔诸界
+          <Link href="/archives" className="flex items-center gap-1.5 transition hover:text-gilt">
+            <OperationIcon name="archives" size={14} /> 往昔诸界
           </Link>
-          <Link href="/materials" className="transition hover:text-gilt">
-            ✦ 万象藏库
+          <Link href="/materials" className="flex items-center gap-1.5 transition hover:text-gilt">
+            <OperationIcon name="materials" size={14} /> 万象藏库
           </Link>
-          <Link href="/settings" className="transition hover:text-gilt">
-            ⚱ 香炉
+          <Link href="/settings" className="flex items-center gap-1.5 transition hover:text-gilt">
+            <OperationIcon name="censer" size={14} /> 香炉
           </Link>
         </nav>
         <p>——此界之史，由汝亲书——</p>
