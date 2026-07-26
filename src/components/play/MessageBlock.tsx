@@ -16,7 +16,8 @@ function chosenIndex(variants: Variant[] | null): number {
   return i === -1 ? variants.length - 1 : i;
 }
 
-/** 结算缘由 → 徽章中文措辞（continuous-meta SettlementReasonSchema 枚举） */
+/** 结算缘由 → 徽章中文措辞（continuous-meta SettlementReasonSchema 枚举
+ *  + settlement-policy 判定性缘由，机器枚举不落书页） */
 const SETTLEMENT_REASON_LABELS: Record<string, string> = {
   major_event: "重大事件",
   ability_change: "能力变迁",
@@ -27,6 +28,8 @@ const SETTLEMENT_REASON_LABELS: Record<string, string> = {
   relation_restructure: "关系重构",
   era_change: "纪元更替",
   multi_entity_change: "众象俱变",
+  six_reply_checkpoint: "章回既满",
+  time_advance: "岁月推移",
 };
 
 /** 神谕结果 → 中文措辞（continuous-meta OutcomeSchema 枚举） */
@@ -147,13 +150,14 @@ export const MessageBlock = memo(function MessageBlock({
       {/* 悬停操作排（右上浮现） */}
       {canAct && (onEdit || onCut || onReroll) && (
         <div className="pointer-events-none absolute -top-3 right-0 z-10 flex items-center gap-1 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-sm:pointer-events-auto max-sm:opacity-70">
-          <div className="flex items-center gap-1 rounded border border-line bg-paper-raised px-1.5 py-0.5 text-xs shadow-sm">
+          {/* 黄铜小件排：鎏金细框 + 暖影，按钮悬停微焕 */}
+          <div className="flex items-center gap-0.5 rounded-md border border-gilt/30 bg-paper-raised/95 px-1 py-0.5 text-xs shadow-[0_2px_10px_var(--shadow-warm)]">
             {!isPlayer && vCount > 1 && (
               <span className="flex items-center gap-0.5 text-ink-faint">
                 <button
                   onClick={() => void switchVariant(-1)}
                   disabled={acting || vIndex <= 0}
-                  className="px-1 text-ink-soft transition hover:text-gilt disabled:opacity-30"
+                  className="rounded px-1.5 py-0.5 text-ink-soft transition hover:bg-gilt/10 hover:text-gilt disabled:opacity-30"
                   title="上一异文"
                 >
                   ‹
@@ -162,7 +166,7 @@ export const MessageBlock = memo(function MessageBlock({
                 <button
                   onClick={() => void switchVariant(1)}
                   disabled={acting || vIndex >= vCount - 1}
-                  className="px-1 text-ink-soft transition hover:text-gilt disabled:opacity-30"
+                  className="rounded px-1.5 py-0.5 text-ink-soft transition hover:bg-gilt/10 hover:text-gilt disabled:opacity-30"
                   title="下一异文"
                 >
                   ›
@@ -174,7 +178,7 @@ export const MessageBlock = memo(function MessageBlock({
               <button
                 onClick={() => onReroll(message.id)}
                 disabled={acting}
-                className="px-1 text-ink-soft transition hover:text-gilt disabled:opacity-30"
+                className="rounded px-1.5 py-0.5 text-ink-soft transition hover:bg-gilt/10 hover:text-gilt disabled:opacity-30"
                 title="另掷一段异文"
               >
                 另掷
@@ -187,7 +191,7 @@ export const MessageBlock = memo(function MessageBlock({
                   setEditing(true);
                 }}
                 disabled={acting}
-                className="px-1 text-ink-soft transition hover:text-cinnabar disabled:opacity-30"
+                className="rounded px-1.5 py-0.5 text-ink-soft transition hover:bg-cinnabar/10 hover:text-cinnabar disabled:opacity-30"
                 title="朱批修订"
               >
                 朱批
@@ -197,7 +201,7 @@ export const MessageBlock = memo(function MessageBlock({
               <button
                 onClick={() => setConfirmCut(true)}
                 disabled={acting}
-                className="px-1 text-ink-soft transition hover:text-cinnabar disabled:opacity-30"
+                className="rounded px-1.5 py-0.5 text-ink-soft transition hover:bg-cinnabar/10 hover:text-cinnabar disabled:opacity-30"
                 title="裁去此条及其后诸行"
               >
                 裁去
@@ -247,8 +251,15 @@ export const MessageBlock = memo(function MessageBlock({
           </button>
         </article>
       ) : isPlayer ? (
-        <blockquote className="decree my-4 whitespace-pre-wrap leading-loose">
-          <span className="text-gilt/70">
+        /* 敕谕引文：墨书正文 + 鎏金左律（.decree），衬凹纸底如御笔原件 */
+        <blockquote className="decree my-5 whitespace-pre-wrap rounded-r-lg bg-paper-sunken/50 py-2.5 pr-4 leading-loose text-ink!">
+          <span
+            className="select-none text-gilt"
+            style={{
+              fontFamily: "var(--font-display)",
+              textShadow: "0 0 8px var(--gilt-glow)",
+            }}
+          >
             {mode === "creator" ? "你颁下敕令：" : "你降下神谕："}
           </span>
           {content}
@@ -258,11 +269,13 @@ export const MessageBlock = memo(function MessageBlock({
           <Prose text={content} />
           {isStreaming && <span className="animate-pulse text-gilt">▍</span>}
           {!isStreaming && changeCount > 0 && (
-            <details className="mt-2 text-xs text-ink-faint">
-              <summary className="cursor-pointer select-none transition hover:text-gilt">
-                ◈ 本轮变化 · {changeCount} 项
+            /* 结算账目行：上缘发丝线的静默账册条，展开得内衬纸色 */
+            <details className="mt-3 text-xs text-ink-faint">
+              <summary className="letterpress flex cursor-pointer select-none list-none items-center gap-1.5 border-t border-line/70 pt-2 transition hover:text-gilt! [&::-webkit-details-marker]:hidden">
+                <span aria-hidden="true" className="text-gilt/65">◈</span>
+                本轮变化 · {changeCount} 项
               </summary>
-              <ul className="mt-1.5 space-y-1 border-l border-line pl-3">
+              <ul className="mt-2 space-y-1 rounded-md border border-line/60 bg-paper-sunken/55 px-3 py-2">
                 {outcome && (
                   <li
                     className={
@@ -298,7 +311,7 @@ export const MessageBlock = memo(function MessageBlock({
                     {settlementReasons.map((reason) => (
                       <span
                         key={reason}
-                        className="rounded border border-line bg-paper-sunken px-1.5 py-0.5"
+                        className="rounded-full border border-gilt/30 bg-paper-raised/80 px-2 py-0.5 text-ink-soft"
                       >
                         {SETTLEMENT_REASON_LABELS[reason] ?? reason}
                       </span>
@@ -316,7 +329,12 @@ export const MessageBlock = memo(function MessageBlock({
         <div className="-mt-2 mb-2 text-right text-xs text-cinnabar/60">朱批</div>
       )}
       {readonly && !editing && (
-        <div className="-mt-2 mb-2 text-right text-xs text-ink-faint/60">已入史册</div>
+        /* 入史钤记：细朱框小印，微侧如手钤 */
+        <div className="-mt-2 mb-2 flex justify-end">
+          <span className="-rotate-2 select-none rounded-[0.2rem] border border-cinnabar/45 px-1.5 py-0.5 text-[10px] leading-none tracking-[0.25em] text-cinnabar/70">
+            已入史册
+          </span>
+        </div>
       )}
 
       {/* 裁去二次确认 */}

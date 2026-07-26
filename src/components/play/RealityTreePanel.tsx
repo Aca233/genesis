@@ -119,8 +119,8 @@ export function RealityTreePanel({
   return (
     <section className="space-y-4" aria-label="现实树">
       <div>
-        <p className="text-xs tracking-[0.25em] text-gilt">现实树</p>
-        <h3 className="mt-1 text-xl text-ink" style={{ fontFamily: "var(--font-display)" }}>
+        <p className="letterpress text-xs text-gilt!">现实树</p>
+        <h3 className="display-md mt-1 text-ink">
           {mode === "pantheon" ? "往昔诸相" : "诸界分枝"}
         </h3>
         <p className="mt-2 text-sm text-ink-soft">
@@ -150,7 +150,7 @@ export function RealityTreePanel({
         type="button"
         disabled={navigationDisabled || undoTarget === null}
         onClick={() => void request("POST", { action: "undo", expectedActiveId: currentId }, undoTarget ?? undefined)}
-        className="rounded border border-line px-3 py-1.5 text-sm text-ink-soft hover:border-gilt hover:text-gilt disabled:opacity-40"
+        className="rounded-md border border-line bg-paper-raised/55 px-3 py-1.5 text-sm text-ink-soft shadow-[inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_75%,transparent)] transition hover:border-gilt hover:text-gilt disabled:opacity-40"
       >
         ↶ 撤回父现实
       </button>
@@ -175,7 +175,11 @@ export function RealityTreePanel({
                 aria-expanded={node.childCount > 0 ? true : undefined}
                 aria-current={current ? "true" : undefined}
                 aria-selected={current}
-                className={`rounded border p-3 ${current ? "border-gilt bg-gilt/5" : "border-line"}`}
+                className={`rounded-lg border p-3 transition [background-image:var(--fiber-noise)] ${
+                  current
+                    ? "border-gilt/70 bg-gilt/10 shadow-[0_0_0.7rem_var(--gilt-glow),0_2px_10px_var(--shadow-warm),inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_80%,transparent)]"
+                    : "border-line bg-paper-raised/45 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_75%,transparent)] hover:border-gilt/40"
+                }`}
                 style={{ marginLeft: `${depth * 1.1}rem` }}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -219,9 +223,21 @@ export function RealityTreePanel({
       </div>
 
       {inspected && (
-        <div className="rounded border border-gilt/30 bg-paper-sunken p-4" role="note">
-          <div className="flex items-center justify-between"><p className="text-xs text-gilt">分叉敕令 · {inspected.branchName}</p><button onClick={() => setInspected(null)} aria-label="关闭敕令">✕</button></div>
-          <blockquote className="mt-2 whitespace-pre-wrap leading-relaxed text-ink">{inspected.rewriteDecree}</blockquote>
+        <div
+          className="rounded-lg border border-gilt/30 bg-paper-sunken p-4 shadow-[inset_0_1px_3px_color-mix(in_srgb,var(--ink)_10%,transparent)] [background-image:var(--fiber-noise)]"
+          role="note"
+        >
+          <div className="flex items-center justify-between">
+            <p className="letterpress text-xs text-gilt!">分叉敕令 · {inspected.branchName}</p>
+            <button
+              onClick={() => setInspected(null)}
+              aria-label="关闭敕令"
+              className="text-ink-faint transition hover:text-gilt"
+            >
+              ✕
+            </button>
+          </div>
+          <blockquote className="decree mt-2 whitespace-pre-wrap text-sm leading-relaxed">{inspected.rewriteDecree}</blockquote>
         </div>
       )}
       </>)}

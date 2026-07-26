@@ -89,10 +89,10 @@ function EntityRow({
   const dormant = entity.heat === "dormant";
   return (
     <li
-      className={`flex items-center gap-3 rounded-lg border p-3 transition hover:border-gilt/40 ${
+      className={`flex items-center gap-3 rounded-lg border p-3 transition [background-image:var(--fiber-noise)] hover:border-gilt/45 hover:shadow-[0_4px_14px_var(--shadow-warm),inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_85%,transparent)] ${
         entity.isChosen
-          ? "border-gilt/50 bg-paper-raised"
-          : "border-line bg-paper-raised"
+          ? "border-gilt/55 bg-paper-raised shadow-[0_0_0.6rem_var(--gilt-glow),0_2px_10px_var(--shadow-warm),inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_85%,transparent)]"
+          : "border-line bg-paper-raised shadow-[0_2px_10px_var(--shadow-warm),inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_85%,transparent)]"
       } ${dormant ? "opacity-55" : ""}`}
     >
       <button
@@ -151,7 +151,7 @@ function EntityRow({
 function SectionBlock({ s }: { s: SectionRow }) {
   return (
     <section className="border-t border-line pt-2.5">
-      <h4 className="mb-1 flex items-center gap-2 text-xs tracking-widest text-ink-faint">
+      <h4 className="letterpress mb-1 flex items-center gap-2">
         {s.content?.title || sectionName(s.key)}
         {s.playerLocked && (
           <span className="text-[10px] text-gilt/60" title="手书已锁，史官不改">
@@ -228,7 +228,7 @@ export function CharacterRelations({
   ];
   return (
     <div>
-      <h4 className="mb-2 text-xs tracking-widest text-ink-faint">人物关系</h4>
+      <h4 className="letterpress mb-2">人物关系</h4>
       {rows.length > 0 ? (
         <ul className="grid gap-2">
           {rows.map((relation) => (
@@ -250,7 +250,7 @@ export function EntityChronicle({ chronicle }: { chronicle: readonly ChronicleRo
   if (chronicle.length === 0) return null;
   return (
     <div className="border-t border-line pt-3">
-      <h4 className="mb-2 text-xs tracking-widest text-ink-faint">其史</h4>
+      <h4 className="letterpress mb-2">其史</h4>
       <ul className="grid gap-2">
         {chronicle.map((entry) => (
           <li key={entry.id} className="flex gap-3 text-sm">
@@ -422,7 +422,7 @@ function EntityDetailView({
 
       {detail.type === "race" && (
         <section className="border-t border-line pt-3">
-          <h4 className="mb-3 text-xs tracking-widest text-ink-faint">种族能力</h4>
+          <h4 className="letterpress mb-3">种族能力</h4>
           <AbilityList
             abilities={detail.abilities}
             historyByAbilityId={abilityHistory}
@@ -435,7 +435,7 @@ function EntityDetailView({
       {detail.type === "character" && (
         <section className="grid gap-4 border-t border-line pt-3">
           <div>
-            <h4 className="mb-2 text-xs tracking-widest text-ink-faint">出身与归属</h4>
+            <h4 className="letterpress mb-2">出身与归属</h4>
             <div className="grid gap-2 text-sm text-ink-soft">
               {detail.race ? (
                 <p>
@@ -620,7 +620,7 @@ export function CodexPanel({
         onChange={(e) => setFilter(e.target.value)}
         aria-label="检索众生"
         placeholder="检索众生（名讳 / 别称 / 摘要）…"
-        className="w-full rounded-md border border-line bg-paper-sunken px-3 py-1.5 text-sm text-ink outline-none placeholder:text-ink-faint/60 focus:border-gilt/50"
+        className="w-full rounded-md border border-line bg-paper-sunken px-3 py-1.5 text-sm text-ink shadow-[inset_0_1px_3px_color-mix(in_srgb,var(--ink)_10%,transparent)] outline-none placeholder:text-ink-faint/60 focus:border-gilt/50"
       />
 
       {listError && (
@@ -632,9 +632,10 @@ export function CodexPanel({
         if (group.length === 0) return null;
         return (
           <div key={type}>
-            <h3 className="mb-2 text-xs tracking-widest text-ink-faint">
-              {entityTypeName(theme, type)}
-              <span className="ml-1.5 text-ink-faint/60">{group.length}</span>
+            <h3 className="letterpress mb-2 flex items-center gap-2 text-xs">
+              <span>{entityTypeName(theme, type)}</span>
+              <span className="tracking-normal text-ink-faint/60">{group.length}</span>
+              <span aria-hidden className="h-px flex-1 bg-gradient-to-r from-line to-transparent" />
             </h3>
             <ul className="grid gap-2">
               {group.map((e) => (

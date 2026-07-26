@@ -40,7 +40,10 @@ export function ChronicleTimeline({ entries }: { entries: readonly EntryRow[] })
     <ol className="relative grid gap-6 border-l border-gilt/30 pl-5">
       {groups.map(([timeLabel, list]) => (
         <li key={timeLabel} className="relative">
-          <span className="absolute -left-[26px] top-1 h-2.5 w-2.5 rounded-full border border-gilt bg-paper" />
+          <span
+            aria-hidden
+            className="absolute -left-[26px] top-1 h-2.5 w-2.5 rotate-45 border border-gilt bg-paper shadow-[0_0_5px_var(--gilt-glow)]"
+          />
           <h3
             className="mb-2 text-sm text-gilt"
             style={{ fontFamily: "var(--font-display)" }}
@@ -137,7 +140,7 @@ export function ChroniclePanel({ timelineId }: { timelineId: string }) {
             value={godId}
             onChange={(e) => setGodId(e.target.value)}
             aria-label="按神明过滤"
-            className="rounded-md border border-line bg-paper-sunken px-2 py-1 text-ink outline-none focus:border-gilt/50"
+            className="scroll-select text-sm"
           >
             <option value="">诸神——不限</option>
             {gods.map((g) => (
@@ -150,7 +153,7 @@ export function ChroniclePanel({ timelineId }: { timelineId: string }) {
             value={entityId}
             onChange={(e) => setEntityId(e.target.value)}
             aria-label="按众生过滤"
-            className="max-w-56 rounded-md border border-line bg-paper-sunken px-2 py-1 text-ink outline-none focus:border-gilt/50"
+            className="scroll-select max-w-56 text-sm"
           >
             <option value="">众生——不限</option>
             {entities.map((en) => (

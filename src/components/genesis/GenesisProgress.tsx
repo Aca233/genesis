@@ -12,6 +12,10 @@ import {
 import { acceptTaskSnapshot } from "@/lib/genesis/client-state";
 import type { WorldMode } from "@/lib/world-mode";
 import { PlayBackground } from "@/components/play/PlayBackground";
+import { OperationIcon } from "@/components/icons/OperationIcon";
+
+/** 阶段序数镌记：未至之印以汉字序数浅刻 */
+const STAGE_NUMERALS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"] as const;
 
 type Task = {
   id: string;
@@ -169,18 +173,18 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
     <main className="play-shell relative flex min-h-screen w-full items-center justify-center overflow-hidden px-5 py-10">
       <PlayBackground variant="progress" />
       <div className="pointer-events-none absolute inset-0 opacity-60 [background:radial-gradient(circle_at_50%_25%,var(--gilt-glow),transparent_35%)]" />
-      <section className="relative grid w-full max-w-5xl gap-10 rounded-2xl border border-line bg-paper-raised/85 p-6 shadow-[0_24px_90px_rgba(46,36,24,0.12)] backdrop-blur-sm md:grid-cols-[0.9fr_1.1fr] md:p-10">
+      <section className="tome-plate tome-plate--corners grid w-full max-w-5xl gap-10 p-6 md:grid-cols-[0.9fr_1.1fr] md:p-10">
         <div className="flex flex-col justify-between gap-8">
           <div>
-            <p className="text-sm tracking-[0.35em] text-gilt">时之仪正在运转</p>
+            <p className="text-sm tracking-[0.35em] text-gilt [text-shadow:0_0_10px_var(--gilt-glow)]">时之仪正在运转</p>
             <h1 className="mt-4 text-4xl font-black tracking-wider text-ink md:text-5xl" style={{ fontFamily: "var(--font-display)" }}>
               世界正在凝聚
             </h1>
-            <p className="mt-5 text-xl text-gilt">{current.title}</p>
+            <p className="mt-5 text-xl text-gilt [text-shadow:0_0_12px_var(--gilt-glow)]" style={{ fontFamily: "var(--font-display)" }}>{current.title}</p>
             <p className="mt-2 leading-7 text-ink-soft">{current.description}</p>
           </div>
 
-          <div className="rounded-xl border border-line bg-paper-sunken/60 p-4 text-sm">
+          <div className="rounded-xl border border-line bg-paper-sunken/60 p-4 text-sm shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--ink)_8%,transparent)]">
             <div className="flex items-center justify-between gap-4">
               <span className="flex items-center gap-2 text-ink-soft">
                 <span className={`h-2.5 w-2.5 rounded-full ${connection === "live" ? "animate-pulse bg-gilt" : connection === "connecting" ? "animate-pulse bg-ink-faint" : "bg-cinnabar"}`} />
@@ -203,7 +207,7 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
               <p className="mt-2 break-words text-sm leading-6 text-ink-soft">{task?.error ?? pageError}</p>
               <div className="mt-4 flex gap-3">
                 {task?.status === "failed" && (
-                  <button onClick={retry} className="rounded-md border border-gilt/50 px-4 py-2 text-gilt transition hover:bg-gilt/10">
+                  <button onClick={retry} className="seal-button min-h-10! px-5! py-2! text-sm">
                     重新创世
                   </button>
                 )}
@@ -222,16 +226,38 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
             const failed = active && task?.status === "failed";
             return (
               <li key={stage.id} className="relative flex min-h-14 gap-4 pb-3">
+                {/* 鎏金进度丝线：已成阶段间的连线泛金微光 */}
                 {index < GENESIS_STAGES.length - 1 && (
-                  <span className={`absolute left-[11px] top-7 h-[calc(100%-1rem)] w-px ${done ? "bg-gilt/60" : "bg-line"}`} />
+                  <span
+                    className={`absolute left-[11px] top-7 h-[calc(100%-1rem)] w-px ${
+                      done
+                        ? "shadow-[0_0_6px_var(--gilt-glow)] [background:linear-gradient(180deg,color-mix(in_srgb,var(--gilt)_70%,transparent),color-mix(in_srgb,var(--gilt)_42%,transparent))]"
+                        : "bg-line"
+                    }`}
+                  />
                 )}
                 <span className={`relative z-10 mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs transition ${
                   failed ? "border-cinnabar bg-cinnabar text-paper" : done ? "border-gilt bg-gilt text-paper" : active ? "animate-pulse border-gilt bg-paper-raised text-gilt shadow-[0_0_18px_var(--gilt-glow)]" : "border-line bg-paper-raised text-ink-faint"
                 }`}>
-                  {failed ? "!" : done ? "✓" : active ? "◆" : ""}
+                  {failed ? (
+                    "!"
+                  ) : done ? (
+                    <OperationIcon name="check" size={12} />
+                  ) : active ? (
+                    "◆"
+                  ) : (
+                    <span className="text-[10px] opacity-70" style={{ fontFamily: "var(--font-display)" }} aria-hidden="true">
+                      {STAGE_NUMERALS[index] ?? ""}
+                    </span>
+                  )}
                 </span>
                 <div>
-                  <p className={`${active ? "font-bold text-gilt" : done ? "text-ink" : "text-ink-faint"}`}>{stage.title}</p>
+                  <p
+                    className={`tracking-[0.05em] ${active ? "font-bold text-gilt [text-shadow:0_0_10px_var(--gilt-glow)]" : done ? "text-ink" : "text-ink-faint"}`}
+                    style={{ fontFamily: "var(--font-display)" }}
+                  >
+                    {stage.title}
+                  </p>
                   <p className="mt-0.5 text-xs leading-5 text-ink-faint">{stage.description}</p>
                 </div>
               </li>

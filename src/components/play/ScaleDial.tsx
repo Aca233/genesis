@@ -91,7 +91,7 @@ export function ScaleDial({
         onClick={pick}
         onKeyDown={step}
         tabIndex={disabled ? -1 : 0}
-        className={`h-[60px] w-[112px] ${disabled ? "" : "cursor-pointer"}`}
+        className={`h-[78px] w-[146px] overflow-visible ${disabled ? "" : "cursor-pointer"}`}
         role="slider"
         aria-label="叙事时间尺度"
         aria-valuetext={current.label}
@@ -100,28 +100,35 @@ export function ScaleDial({
         aria-valuenow={stopIndex}
         aria-disabled={disabled || undefined}
       >
-        {/* 表盘弧 */}
+        {/* 表盘弧（深墨案面上以亮金弦线镌出） */}
         <path
           d={`M ${polar(-80, 40).x} ${polar(-80, 40).y} A 40 40 0 0 1 ${polar(80, 40).x} ${polar(80, 40).y}`}
           fill="none"
-          stroke="var(--line)"
+          stroke="color-mix(in srgb, var(--gilt-bright) 38%, transparent)"
           strokeWidth="2.5"
           strokeLinecap="round"
         />
-        {/* 刻度与档名 */}
+        {/* 刻度与档名：镌刻宋体，当前档鎏金微焕 */}
         {SCALE_STOPS.map((s) => {
           const o = polar(s.angle, 40);
           const i = polar(s.angle, 33);
           const t = polar(s.angle, 49);
           const active = s.key === scale;
           return (
-            <g key={s.key}>
+            <g
+              key={s.key}
+              style={active
+                ? { filter: "drop-shadow(0 0 3px var(--seal-glow))" }
+                : undefined}
+            >
               <line
                 x1={i.x}
                 y1={i.y}
                 x2={o.x}
                 y2={o.y}
-                stroke={active ? "var(--gilt)" : "var(--fog)"}
+                stroke={active
+                  ? "var(--gilt-bright)"
+                  : "color-mix(in srgb, var(--gilt-bright) 34%, transparent)"}
                 strokeWidth={active ? 2.5 : 1.5}
                 strokeLinecap="round"
               />
@@ -130,8 +137,12 @@ export function ScaleDial({
                 y={t.y}
                 textAnchor="middle"
                 dominantBaseline="middle"
-                fontSize="9"
-                fill={active ? "var(--gilt)" : "var(--ink-faint)"}
+                fontSize="10"
+                fontWeight={active ? 700 : 400}
+                style={{ fontFamily: "var(--font-display)" }}
+                fill={active
+                  ? "var(--gilt-bright)"
+                  : "color-mix(in srgb, var(--gilt-bright) 58%, transparent)"}
               >
                 {s.label}
               </text>
@@ -144,15 +155,21 @@ export function ScaleDial({
           y1={CY}
           x2={tipX}
           y2={tipY}
-          stroke="var(--gilt)"
+          stroke="var(--gilt-bright)"
           strokeWidth="2.5"
           strokeLinecap="round"
         />
-        {/* 轴心 */}
-        <circle cx={CX} cy={CY} r="3.5" fill="var(--gilt)" />
+        {/* 轴心：鎏金钮，微焕 */}
+        <circle
+          cx={CX}
+          cy={CY}
+          r="3.5"
+          fill="var(--gilt-bright)"
+          style={{ filter: "drop-shadow(0 0 2px var(--gilt-glow))" }}
+        />
       </svg>
-      {/* 窄屏可见档位提示（弥补 title 悬停在触屏不可达） */}
-      <span className="hidden text-[10px] text-ink-faint max-sm:block">
+      {/* 窄屏可见档位提示（弥补 title 悬停在触屏不可达；深墨案面上用亮金） */}
+      <span className="hidden text-[10px] text-gilt-bright/60 max-sm:block">
         {current.hint}
       </span>
     </div>

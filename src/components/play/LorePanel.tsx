@@ -9,11 +9,11 @@ import type { WorldInfo } from "./types";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-line bg-paper-raised p-4">
-      <h3
-        className="mb-2 text-base text-ink"
-        style={{ fontFamily: "var(--font-display)" }}
-      >
+    <section className="tome-plate p-4">
+      <h3 className="illuminated-header mb-3 text-base">
+        <span className="illuminated-header__glyph" aria-hidden="true">
+          ✦
+        </span>
         {title}
       </h3>
       <div className="grid gap-2 text-sm leading-relaxed text-ink-soft">{children}</div>

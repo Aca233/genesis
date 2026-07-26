@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { OperationIcon } from "@/components/icons/OperationIcon";
 
 /** 全屏古卷样式编辑 Modal：卡片全文逐字段编辑的容器 */
 export function CardEditorModal({
@@ -52,28 +53,30 @@ export function CardEditorModal({
             exit={{ opacity: 0, y: 16, scale: 0.98 }}
             transition={{ type: "spring", stiffness: 320, damping: 30 }}
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-gilt/30 bg-paper-raised shadow-[0_8px_40px_rgba(30,24,15,0.35)]"
+            className="tome-plate flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden"
           >
-            {/* 卷首 */}
-            <header className="flex items-center justify-between border-b border-line px-6 py-4">
+            {/* 卷首：泥金章题 + 合卷钮 */}
+            <header className="flex items-center gap-4 border-b border-line px-6 py-4">
               <h2
                 id="card-editor-title"
-                className="text-xl text-ink"
-                style={{ fontFamily: "var(--font-display)" }}
+                className="illuminated-header display-md min-w-0 flex-1"
               >
-                {title}
+                <span className="illuminated-header__glyph" aria-hidden="true">
+                  <OperationIcon name="scroll" size={18} />
+                </span>
+                <span className="min-w-0 truncate">{title}</span>
               </h2>
               <button
                 ref={closeRef}
                 type="button"
                 onClick={onClose}
-                className="rounded-md border border-line px-3 py-1 text-sm text-ink-faint transition hover:border-gilt/50 hover:text-gilt"
+                className="shrink-0 rounded-md border border-line px-3 py-1 text-sm text-ink-faint transition hover:border-gilt/50 hover:text-gilt"
               >
                 合卷
               </button>
             </header>
             {/* 卷身 */}
-            <div className="grid flex-1 content-start gap-4 overflow-y-auto px-6 py-5">
+            <div className="tome-scroll grid flex-1 content-start gap-4 overflow-y-auto px-6 py-5">
               {children}
             </div>
           </motion.div>

@@ -172,7 +172,13 @@ function AbilityCard({
     ability.iconAssignment,
   );
   return (
-    <li className={`rounded-md border p-3 ${ability.visibility === "rumored" ? "border-line bg-paper-sunken" : "border-line bg-paper-raised"}`}>
+    <li
+      className={`rounded-md border p-3 [background-image:var(--fiber-noise)] ${
+        ability.visibility === "rumored"
+          ? "border-dashed border-line bg-paper-sunken shadow-[inset_0_1px_3px_color-mix(in_srgb,var(--ink)_8%,transparent)]"
+          : "border-line bg-paper-raised shadow-[inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_80%,transparent)]"
+      }`}
+    >
       <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <span className="flex min-w-0 items-center gap-2">
           {iconAssignment && <WorldIcon icon={iconAssignment.icon} size={20} />}
@@ -238,7 +244,10 @@ export function AbilityList({
     <div className="grid gap-4">
       {groups.map((group) => (
         <section key={group.kind}>
-          <h4 className="mb-2 text-xs tracking-widest text-ink-faint">{group.label}</h4>
+          <h4 className="letterpress mb-2 flex items-center gap-2 text-xs">
+            <span>{group.label}</span>
+            <span aria-hidden className="h-px flex-1 bg-gradient-to-r from-line to-transparent" />
+          </h4>
           <ul className="grid gap-2">
             {group.abilities.map((ability) => (
               <AbilityCard

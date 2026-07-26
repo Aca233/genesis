@@ -769,7 +769,7 @@ export default function GenesisEditorPage({
       </div>
 
       {/* ── 底部固定条 ── */}
-      <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-paper-raised/95 backdrop-blur-sm">
+      <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-paper-raised/95 shadow-[0_-10px_30px_var(--shadow-warm)] backdrop-blur-sm">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3 px-6 py-3">
           <div className="flex items-center gap-4 text-sm">
             {notice && (
@@ -808,8 +808,7 @@ export default function GenesisEditorPage({
                     void embark();
                   }}
                   disabled={!canEmbarkMode(deck.mode) || saving || busy || ceremony?.phase === "pending"}
-                  className="rounded-md border border-gilt bg-gilt/10 px-10 py-2 text-lg tracking-widest text-gilt transition hover:bg-gilt/20 disabled:opacity-40"
-                  style={{ fontFamily: "var(--font-display)" }}
+                  className="seal-button px-10! text-lg"
                 >
                   确认创世
                 </button>
@@ -826,8 +825,7 @@ export default function GenesisEditorPage({
                 type="button"
                 onClick={() => setConfirmEmbark(true)}
                 disabled={!canEmbarkMode(deck.mode) || saving || busy || ceremony?.phase === "pending"}
-                className="rounded-md border border-gilt bg-gilt/10 px-10 py-2 text-lg tracking-widest text-gilt transition hover:bg-gilt/20 disabled:opacity-40"
-                style={{ fontFamily: "var(--font-display)" }}
+                className="seal-button px-10! text-lg"
               >
                 创　世
               </button>

@@ -73,7 +73,8 @@ export function StoryStream({
   }, [messages, deferredStreaming, deferredReroll, scrollToBottom]);
 
   return (
-    <div className="pb-4 pt-2">
+    /* 书页身段：陈年晕渍旧边 + 大屏收窄行长（xl 内缩至舒适字数） */
+    <div className="stain-vignette pb-4 pt-2 xl:px-10">
       {/* 正文消息流 */}
       {messages.map((m) => (
         <MessageBlock
@@ -138,7 +139,7 @@ export function StoryStream({
               setStickBottom(true);
               bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
             }}
-            className="fixed bottom-40 left-1/2 z-20 -translate-x-1/2 rounded-full border border-line bg-paper-raised px-4 py-1 text-xs text-ink-faint shadow transition hover:text-gilt"
+            className="fixed bottom-40 left-1/2 z-20 -translate-x-1/2 rounded-full border border-gilt/35 bg-paper-raised/95 px-4 py-1 text-xs text-ink-soft shadow-[0_2px_12px_var(--shadow-warm)] transition hover:border-gilt/60 hover:text-gilt"
           >
             ↓ 回到卷尾
           </motion.button>

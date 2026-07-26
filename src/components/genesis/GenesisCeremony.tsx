@@ -80,6 +80,10 @@ export function GenesisCeremony({
     [chars, tailStart],
   );
 
+  // 鎏金渐亮：神谕逐字铺开时金晕缓缓涨起（reduced-motion 下第一幕整体跳过）
+  const decreeProgress = chars.length > 0 ? Math.min(1, charCount / chars.length) : 1;
+  const decreeGlow = `0 0 ${(6 + 12 * decreeProgress).toFixed(1)}px var(--gilt-glow)`;
+
   // 第一幕：神谕逐字浮现
   useEffect(() => {
     if (act !== "decree") return;
@@ -142,7 +146,7 @@ export function GenesisCeremony({
                   exit={{ opacity: 0, y: 40, filter: "blur(3px)" }}
                   transition={{ duration: 1.1, ease: "easeIn" }}
                   className="text-center text-xl leading-loose text-gilt md:text-2xl"
-                  style={{ fontFamily: "var(--font-prose)" }}
+                  style={{ fontFamily: "var(--font-prose)", textShadow: decreeGlow }}
                 >
                   {committedText}
                   {chars.slice(tailStart, charCount).map((ch, i) => (
@@ -191,11 +195,11 @@ export function GenesisCeremony({
                   className="text-center text-ink"
                   style={{ fontFamily: "var(--font-display)" }}
                 >
-                  <h1 className="text-4xl tracking-[0.2em] md:text-5xl">{title.world}</h1>
+                  <h1 className="text-4xl tracking-[0.2em] [text-shadow:0_0_26px_var(--gilt-glow)] md:text-5xl">{title.world}</h1>
                   <p className="mt-5 text-base tracking-widest text-ink-soft">
                     {title.era} · {title.time}
                   </p>
-                  <p className="mt-4 text-sm tracking-[0.4em] text-gilt">{title.seal}</p>
+                  <p className="mt-4 text-sm tracking-[0.4em] text-gilt [text-shadow:0_0_14px_var(--gilt-glow)]">{title.seal}</p>
                 </motion.div>
               )}
             </AnimatePresence>

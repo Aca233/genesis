@@ -37,7 +37,7 @@ function GodIconControl({ god, worldId, timelineId }: { god: GodRow } & IconCont
 
 function PlayerGodCard({ god, theme, worldId, timelineId }: { god: GodRow; theme: ThemeCard | null } & IconContext) {
   return (
-    <section className="rounded-lg border border-gilt/40 bg-paper-raised p-5">
+    <section className="tome-plate tome-plate--corners p-5">
       <header className="flex items-baseline justify-between gap-3">
         <GodIconControl god={god} worldId={worldId} timelineId={timelineId} />
         <h3
@@ -89,7 +89,7 @@ function PlayerGodCard({ god, theme, worldId, timelineId }: { god: GodRow; theme
 function MajorGodCard({ god, theme, worldId, timelineId }: { god: GodRow; theme: ThemeCard | null } & IconContext) {
   const rel = god.relations?.player;
   return (
-    <li className="rounded-lg border border-line bg-paper-raised p-4">
+    <li className="tome-plate p-4">
       <header className="flex items-baseline justify-between gap-3">
         <GodIconControl god={god} worldId={worldId} timelineId={timelineId} />
         <h4 className="text-lg text-ink" style={{ fontFamily: "var(--font-display)" }}>
@@ -179,7 +179,7 @@ function CreatorGodDetail({
   const voice = readableValue(god.voice);
 
   return (
-    <article data-god-id={god.id} className="rounded-lg border border-gilt/40 bg-paper-raised p-5">
+    <article data-god-id={god.id} className="tome-plate tome-plate--corners p-5">
       <header className="flex flex-wrap items-baseline justify-between gap-3">
         <GodIconControl god={god} worldId={worldId} timelineId={timelineId} />
         <div>
@@ -219,7 +219,7 @@ function CreatorGodDetail({
       </dl>
 
       <section className="mt-4 border-t border-line pt-3">
-        <h4 className="mb-2 text-xs tracking-widest text-ink-faint">诸神关系</h4>
+        <h4 className="letterpress mb-2">诸神关系</h4>
         {relations.length ? (
           <ul className="grid gap-2 text-sm">
             {relations.map(([targetId, relation]) => (
@@ -239,13 +239,13 @@ function CreatorGodDetail({
       </section>
 
       <section className="mt-4 border-t border-line pt-3">
-        <h4 className="mb-2 text-xs tracking-widest text-ink-faint">神权与能力</h4>
+        <h4 className="letterpress mb-2">神权与能力</h4>
         <AbilityList abilities={god.abilities} kinds={["divine"]} allowMaterialSave worldId={worldId} timelineId={timelineId} />
       </section>
 
       <section className="mt-4 border-t border-line pt-3">
         <div className="mb-2 flex items-center gap-2">
-          <h4 className="text-xs tracking-widest text-ink-faint">幕后议程</h4>
+          <h4 className="letterpress">幕后议程</h4>
           {!god.agendaWorldVisible && god.agenda && (
             <span className="text-[10px] text-cinnabar/75">天外批注 · 世界内不可见</span>
           )}
@@ -292,8 +292,13 @@ export function GodPanel({
     return (
       <div className="grid gap-5">
         <div>
-          <h3 className="text-sm tracking-widest text-gilt">诸神录</h3>
-          <p className="mt-1 text-xs text-ink-faint">创世主可查看诸神的完整身份、关系、能力与幕后议程。</p>
+          <h3 className="illuminated-header text-base">
+            <span className="illuminated-header__glyph" aria-hidden="true">
+              ✦
+            </span>
+            诸神录
+          </h3>
+          <p className="mt-1.5 text-center text-xs text-ink-faint">创世主可查看诸神的完整身份、关系、能力与幕后议程。</p>
         </div>
         {gods.length ? (
           <>
@@ -304,9 +309,9 @@ export function GodPanel({
                   type="button"
                   data-god-id={god.id}
                   onClick={() => setSelectedGodId(god.id)}
-                  className={`rounded border px-3 py-1.5 text-sm transition ${
+                  className={`rounded-md border px-3 py-1.5 text-sm transition ${
                     selectedGod?.id === god.id
-                      ? "border-gilt bg-gilt/10 text-gilt"
+                      ? "border-gilt bg-gilt/10 text-gilt shadow-[0_0_0.6rem_var(--gilt-glow),inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_70%,transparent)]"
                       : "border-line text-ink-soft hover:border-gilt/60 hover:text-gilt"
                   }`}
                 >
@@ -331,14 +336,14 @@ export function GodPanel({
     <div className="grid gap-6">
       {player && (
         <div>
-          <h3 className="mb-2 text-xs tracking-widest text-ink-faint">本尊神格</h3>
+          <h3 className="letterpress mb-2">本尊神格</h3>
           <PlayerGodCard god={player} theme={theme} worldId={worldId} timelineId={timelineId} />
         </div>
       )}
 
       {majors.length > 0 && (
         <div>
-          <h3 className="mb-2 text-xs tracking-widest text-ink-faint">主神席</h3>
+          <h3 className="letterpress mb-2">主神席</h3>
           <ul className="grid gap-3">
             {majors.map((g) => (
               <MajorGodCard key={g.id} god={g} theme={theme} worldId={worldId} timelineId={timelineId} />
@@ -349,10 +354,13 @@ export function GodPanel({
 
       {minors.length > 0 && (
         <div>
-          <h3 className="mb-2 text-xs tracking-widest text-ink-faint">次要神祇</h3>
+          <h3 className="letterpress mb-2">次要神祇</h3>
           <ul className="grid gap-1.5 text-sm">
             {minors.map((g) => (
-              <li key={g.id} className="rounded-md border border-line/70 p-2.5">
+              <li
+                key={g.id}
+                className="rounded-md border border-line/70 bg-paper-raised/45 p-2.5 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_75%,transparent)] [background-image:var(--fiber-noise)]"
+              >
                 <div className="flex gap-2">
                   <GodIconControl god={g} worldId={worldId} timelineId={timelineId} />
                   <span className="shrink-0 text-ink">{g.name}</span>

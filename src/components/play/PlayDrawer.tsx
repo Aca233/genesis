@@ -105,32 +105,45 @@ export function PlayDrawer({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.25 }}
             onClick={close}
-            className="fixed inset-0 z-40 bg-ink/25"
+            className="fixed inset-0 z-40 bg-scrim"
             aria-hidden
           />
-          {/* 抽屉体（右缘留出符文列宽度，不遮挡换页签） */}
+          {/* 抽屉体：羊皮折页（右缘留出符文列宽度，不遮挡换页签） */}
           <motion.aside
             key="drawer"
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 320, damping: 34 }}
-            className="fixed right-0 top-0 z-50 flex h-full flex-col border-l border-line bg-paper pr-12 shadow-2xl max-sm:pb-14 max-sm:pr-0"
+            className="fixed right-0 top-0 z-50 flex h-full flex-col border-l border-gilt/40 bg-paper pr-12 shadow-[-1.25rem_0_3rem_var(--shadow-warm)] [background-image:var(--fiber-noise),linear-gradient(196deg,color-mix(in_srgb,var(--paper-raised)_92%,transparent),color-mix(in_srgb,var(--paper)_96%,transparent)_42%)] max-sm:pb-14 max-sm:pr-0"
             style={{ width: "min(43rem, 92vw)" }}
             role="dialog"
             aria-label={tabTitle(world.mode, tab)}
           >
-            <header className="flex items-center justify-between border-b border-line px-6 py-4">
-              <h2
-                className="text-lg text-ink"
-                style={{ fontFamily: "var(--font-display)" }}
-              >
+            {/* 折页内衬：左缘鎏金发丝线 + 陈年晕渍
+               （stain-vignette 自带 position:relative，隔一层包裹以免覆写 fixed/absolute 定位） */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 left-1 z-10 w-px bg-gradient-to-b from-transparent via-gilt/55 to-transparent"
+            />
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-y-2 left-2.5 z-10 w-px bg-gradient-to-b from-transparent via-line to-transparent"
+            />
+            <div aria-hidden className="pointer-events-none absolute inset-0 z-10">
+              <div className="stain-vignette h-full w-full" />
+            </div>
+            <header className="flex items-center gap-3 border-b border-gilt/25 px-6 py-4">
+              <h2 className="illuminated-header min-w-0 flex-1 text-lg">
+                <span className="illuminated-header__glyph" aria-hidden="true">
+                  ✦
+                </span>
                 {tabTitle(world.mode, tab)}
               </h2>
               <button
                 ref={closeButtonRef}
                 onClick={close}
-                className="text-ink-faint transition hover:text-ink"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-transparent text-ink-faint transition hover:border-gilt/40 hover:bg-gilt/10 hover:text-gilt"
                 aria-label="合卷"
               >
                 ✕
@@ -138,7 +151,7 @@ export function PlayDrawer({
             </header>
 
             <div
-              className="flex-1 overflow-y-auto px-6 py-5"
+              className="tome-scroll flex-1 overflow-y-auto px-6 py-5"
               tabIndex={0}
               role="region"
               aria-label={tabTitle(world.mode, tab)}

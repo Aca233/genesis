@@ -33,7 +33,7 @@ type ComparisonView = {
 
 function ChronicleDiffEntryCard({ row }: { row: ChronicleDiffRowView }) {
   return (
-    <article className="rounded border border-line p-3">
+    <article className="rounded-lg border border-line border-l-2 border-l-gilt/45 bg-paper-raised/60 p-3 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_80%,transparent)] [background-image:var(--fiber-noise)]">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-gilt">{row.yearLabel.trim() || "时间未载"}</span>
         {row.source === "rewrite" && (
@@ -105,11 +105,11 @@ export function RealityDiffView({
         <button
           type="button"
           onClick={onBack}
-          className="rounded border border-line px-3 py-1.5 text-sm text-ink-soft hover:border-gilt hover:text-gilt"
+          className="rounded-md border border-line bg-paper-raised/55 px-3 py-1.5 text-sm text-ink-soft shadow-[inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_75%,transparent)] transition hover:border-gilt hover:text-gilt"
         >
           ← 返回现实树
         </button>
-        <p className="text-sm text-ink">
+        <p className="text-sm tracking-wider text-ink" style={{ fontFamily: "var(--font-display)" }}>
           分歧对照{data !== null && ` · 分歧于 ${data.divergenceLabel}`}
         </p>
       </div>
@@ -123,29 +123,39 @@ export function RealityDiffView({
 
       {data !== null && !emptyDiff && (
         <div className="grid gap-3 sm:grid-cols-2">
-          <p className="font-medium text-ink">
+          <p className="font-medium text-ink" style={{ fontFamily: "var(--font-display)" }}>
             {leftName} {leftNode?.isActive && <span className="text-xs text-gilt">· 当前</span>}
           </p>
-          <p className="font-medium text-ink">
+          <p className="font-medium text-ink" style={{ fontFamily: "var(--font-display)" }}>
             {rightName} {rightNode?.isActive && <span className="text-xs text-gilt">· 当前</span>}
           </p>
 
-          <p className="col-span-full text-xs tracking-[0.25em] text-gilt">编年史分歧</p>
+          <p className="illuminated-header col-span-full text-xs">编年史分歧</p>
           <p className="col-span-full text-center text-xs text-ink-faint">
             共同历史 · {data.chronicle.commonCount} 条已折叠
           </p>
-          <div className="space-y-2">
-            {data.chronicle.leftOnly.map((row) => <ChronicleDiffEntryCard key={row.id} row={row} />)}
-          </div>
-          <div className="space-y-2">
-            {data.chronicle.rightOnly.map((row) => <ChronicleDiffEntryCard key={row.id} row={row} />)}
+          <div className="relative col-span-full grid gap-3 sm:grid-cols-2">
+            {/* 双栏中缝：鎏金细弦 */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 left-1/2 hidden w-px -translate-x-1/2 bg-gradient-to-b from-transparent via-gilt/40 to-transparent sm:block"
+            />
+            <div className="space-y-2">
+              {data.chronicle.leftOnly.map((row) => <ChronicleDiffEntryCard key={row.id} row={row} />)}
+            </div>
+            <div className="space-y-2">
+              {data.chronicle.rightOnly.map((row) => <ChronicleDiffEntryCard key={row.id} row={row} />)}
+            </div>
           </div>
 
           {data.entities.length > 0 && (
-            <p className="col-span-full text-xs tracking-[0.25em] text-gilt">众生分歧</p>
+            <p className="illuminated-header col-span-full text-xs">众生分歧</p>
           )}
           {data.entities.map((entity) => (
-            <article key={`${entity.type}:${entity.name}`} className="col-span-full rounded border border-line p-3">
+            <article
+              key={`${entity.type}:${entity.name}`}
+              className="col-span-full rounded-lg border border-line bg-paper-raised/60 p-3 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_80%,transparent)] [background-image:var(--fiber-noise)]"
+            >
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-medium text-ink">{entity.name}</p>
                 <span className="rounded-full border border-line px-1.5 text-[10px] text-ink-faint">

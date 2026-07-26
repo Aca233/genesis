@@ -694,7 +694,7 @@ export default function PlayPage({
                 setLoadErrorStatus(null);
                 void loadInitial();
               }}
-              className="rounded-md border border-gilt/50 bg-gilt/5 px-4 py-1 text-sm text-gilt transition hover:bg-gilt/15"
+              className="seal-button min-h-8! px-5! py-1! text-sm!"
             >
               重试
             </button>
@@ -708,7 +708,17 @@ export default function PlayPage({
     return (
       <main className="play-shell flex min-h-screen flex-1 items-center justify-center px-6">
         <PlayBackground />
-        <p className="genesis-status-panel text-ink-faint">展卷中…</p>
+        <div className="genesis-status-panel flex flex-col items-center gap-2 text-center">
+          <span aria-hidden="true" className="select-none text-lg tracking-[0.4em] text-gilt/60">
+            ⁂
+          </span>
+          <p
+            className="text-lg tracking-[0.3em] text-ink-soft"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            展卷中…
+          </p>
+        </div>
       </main>
     );
   }
@@ -718,13 +728,9 @@ export default function PlayPage({
       <main className="play-shell relative flex min-h-screen flex-col">
         <PlayBackground />
         <PlayHeader
-          worldId={state.world.id}
           worldName={state.world.name}
           era={state.temporal.era}
           time={state.temporal.time}
-          iconTheme={state.world.iconTheme}
-          iconThemeRevision={state.world.iconThemeRevision}
-          onThemeChanged={() => { void safeReload(); }}
         />
 
         {/* 书页正文（中央限宽，大屏加宽） */}

@@ -41,7 +41,7 @@ function DeckCardBase({
       exit={{ opacity: 0, scale: 0.96 }}
       onClick={onOpen}
       disabled={rerolling}
-      className="relative flex min-h-32 flex-col gap-1.5 overflow-hidden rounded-lg border border-line bg-paper-raised p-4 text-left shadow-[0_1px_3px_rgba(46,36,24,0.08)] transition hover:border-gilt/50 hover:shadow-[0_0_14px_var(--gilt-glow)]"
+      className="tome-plate flex min-h-32 flex-col gap-1.5 overflow-hidden p-4 text-left transition hover:border-gilt/60! hover:[filter:drop-shadow(0_0_10px_var(--gilt-glow))]"
     >
       <div className="flex items-start justify-between gap-2">
         <h3
@@ -50,18 +50,22 @@ function DeckCardBase({
         >
           {title}
         </h3>
+        {/* 折角控件簇：封蜡 / 锁记以镌刻小签并列于卡角 */}
         <span className="flex shrink-0 items-center gap-1 text-xs">
           {sealed && (
-            <span className="text-cinnabar/80" title="含未启封的天机">
+            <span
+              className="inline-flex items-center rounded-sm border border-cinnabar/40 bg-cinnabar/5 px-1.5 py-px text-[10px] tracking-[0.08em] text-cinnabar/90"
+              title="含未启封的天机"
+            >
               ❈ 封
             </span>
           )}
           {lockedCount > 0 && (
             <span
-              className="inline-flex items-center gap-0.5 text-gilt/80"
+              className="inline-flex items-center gap-0.5 rounded-sm border border-gilt/40 bg-gilt/5 px-1.5 py-px text-[10px] text-gilt"
               title={`${lockedCount} 处手改字段，重掷时保留`}
             >
-              <OperationIcon name="lock" size={11} />{lockedCount}
+              <OperationIcon name="lock" size={10} />{lockedCount}
             </span>
           )}
         </span>
@@ -80,7 +84,7 @@ function DeckCardBase({
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-lg bg-paper/80 backdrop-blur-[1.5px]"
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-[inherit] bg-paper/80 backdrop-blur-[1.5px]"
         >
           <motion.span
             animate={{ rotate: 360 }}
@@ -141,15 +145,13 @@ export function GroupHeader({
   const [note, setNote] = useState("");
 
   return (
-    <div className="mb-3 mt-8 border-b border-line pb-2 first:mt-0">
+    <div className="mb-4 mt-10 first:mt-0">
+      {/* 泥金节题：宋体章题 + 鎏金骰钮 + 向右淡出的发丝金线 */}
       <div className="flex flex-wrap items-center gap-3">
-        <h2
-          className="text-lg text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
+        <h2 className="display-md text-ink">
           {title}
           {typeof count === "number" && (
-            <span className="ml-2 text-sm text-gilt">· {count}</span>
+            <span className="ml-2 text-sm font-normal tracking-normal text-gilt">· {count}</span>
           )}
         </h2>
         <button
@@ -157,13 +159,17 @@ export function GroupHeader({
           onClick={() => setOpen((v) => !v)}
           disabled={rerolling || disabled}
           title={warning ?? "重掷整组（手改字段保留）"}
-          className="inline-flex items-center gap-1 rounded-md border border-gilt/40 px-2.5 py-0.5 text-xs text-gilt transition hover:bg-gilt/10 disabled:opacity-40"
+          className="inline-flex items-center gap-1 rounded-md border border-gilt/45 bg-gilt/5 px-2.5 py-0.5 text-xs tracking-[0.08em] text-gilt transition hover:bg-gilt/15 hover:shadow-[0_0_10px_var(--gilt-glow)] disabled:opacity-40"
         >
           <OperationIcon name="dice" size={12} />{rerolling ? "重掷中…" : "重掷"}
         </button>
         {warning && (
           <span className="text-xs text-ink-faint">{warning}</span>
         )}
+        <span
+          aria-hidden="true"
+          className="h-px min-w-8 flex-1 [background:linear-gradient(90deg,color-mix(in_srgb,var(--gilt)_50%,transparent),transparent)]"
+        />
       </div>
 
       <AnimatePresence>
@@ -181,7 +187,7 @@ export function GroupHeader({
             onChange={(e) => setNote(e.target.value)}
             placeholder="可留一句重掷要求（选填），如「更冷酷一些」"
             maxLength={500}
-            className="w-full max-w-md rounded-md border border-line bg-paper-sunken px-3 py-1.5 text-xs text-ink outline-none focus:border-gilt/60"
+            className="w-full max-w-md rounded-md border border-line bg-paper-sunken px-3 py-1.5 text-xs text-ink shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--ink)_10%,transparent)] outline-none focus:border-gilt/60"
           />
           <button
             type="button"
@@ -190,7 +196,7 @@ export function GroupHeader({
               onReroll(cardKey, note.trim() || undefined);
               setNote("");
             }}
-            className="rounded-md border border-gilt/50 bg-gilt/5 px-4 py-1.5 text-xs text-gilt transition hover:bg-gilt/15"
+            className="seal-button min-h-7! px-4! py-1! text-xs"
           >
             掷
           </button>

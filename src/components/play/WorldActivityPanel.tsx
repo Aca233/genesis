@@ -119,7 +119,13 @@ function EventCard({
   onCancelReplace: () => void;
 }) {
   return (
-    <article className="rounded-lg border border-line bg-paper-raised/55 p-3">
+    <article
+      className={`rounded-lg border p-3 transition [background-image:var(--fiber-noise)] ${
+        focused
+          ? "border-gilt/55 bg-paper-raised/70 shadow-[0_0_0.6rem_var(--gilt-glow),0_2px_10px_var(--shadow-warm),inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_85%,transparent)]"
+          : "border-line bg-paper-raised/55 shadow-[0_2px_10px_var(--shadow-warm),inset_0_1px_0_color-mix(in_srgb,var(--paper-raised)_85%,transparent)]"
+      }`}
+    >
       <button
         type="button"
         data-event-id={event.id}
@@ -135,20 +141,20 @@ function EventCard({
       </div>
       {event.resolvedAt === null ? (
         confirmingReplace ? (
-          <span className="mt-2 flex flex-wrap items-center gap-2 text-xs text-cinnabar">
+          <span className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-cinnabar/40 bg-paper-sunken/70 px-3 py-2 text-xs text-cinnabar shadow-[inset_0_1px_3px_color-mix(in_srgb,var(--ink)_12%,transparent)]">
             替换当前追踪目标？
             <button
               type="button"
               disabled={focusBusy}
               onClick={() => onConfirmReplace(event.id)}
-              className="font-bold underline disabled:opacity-50"
+              className="font-bold underline underline-offset-2 disabled:opacity-50"
             >
               确认
             </button>
             <button
               type="button"
               onClick={onCancelReplace}
-              className="text-ink-faint hover:text-ink"
+              className="text-ink-faint transition hover:text-ink"
             >
               且慢
             </button>
@@ -159,7 +165,11 @@ function EventCard({
             data-focus-event-id={event.id}
             disabled={focusBusy}
             onClick={() => onToggleFocus(event.id)}
-            className="mt-2 rounded border border-gilt/50 px-2 py-1 text-xs text-gilt transition hover:bg-gilt/10 disabled:opacity-50"
+            className={
+              focused
+                ? "mt-2 rounded border border-gilt/50 px-2 py-1 text-xs text-gilt transition hover:bg-gilt/10 disabled:opacity-50"
+                : "seal-button mt-2 min-h-7! px-3! py-1! text-xs"
+            }
           >
             {focused ? "取消追踪" : "追踪事件"}
           </button>
@@ -205,7 +215,10 @@ export function WorldActivityPanelView({
     <div className="space-y-7">
       {selectedEvent ? (
         <section aria-labelledby="activity-event-detail">
-          <h3 id="activity-event-detail" className="mb-3 text-sm font-medium text-ink">
+          <h3 id="activity-event-detail" className="illuminated-header mb-3 text-sm">
+            <span className="illuminated-header__glyph" aria-hidden="true">
+              ✦
+            </span>
             事件详情
           </h3>
           <EventCard
@@ -224,7 +237,10 @@ export function WorldActivityPanelView({
       ) : null}
 
       <section aria-labelledby="activity-focused">
-        <h3 id="activity-focused" className="mb-3 text-sm font-medium text-ink">
+        <h3 id="activity-focused" className="illuminated-header mb-3 text-sm">
+          <span className="illuminated-header__glyph" aria-hidden="true">
+            ✦
+          </span>
           当前关注
         </h3>
         {data.focusedEvent ? (
@@ -246,7 +262,10 @@ export function WorldActivityPanelView({
       </section>
 
       <section aria-labelledby="activity-important">
-        <h3 id="activity-important" className="mb-3 text-sm font-medium text-ink">
+        <h3 id="activity-important" className="illuminated-header mb-3 text-sm">
+          <span className="illuminated-header__glyph" aria-hidden="true">
+            ✦
+          </span>
           重要事件
         </h3>
         <div className="space-y-3">
@@ -269,12 +288,19 @@ export function WorldActivityPanelView({
       </section>
 
       <section aria-labelledby="activity-recent">
-        <h3 id="activity-recent" className="mb-3 text-sm font-medium text-ink">
+        <h3 id="activity-recent" className="illuminated-header mb-3 text-sm">
+          <span className="illuminated-header__glyph" aria-hidden="true">
+            ✦
+          </span>
           近期动态
         </h3>
         <div className="space-y-3">
           {data.recentActivities.length > 0 ? data.recentActivities.map((activity) => (
-            <article key={activity.id} className="border-l border-gilt/45 pl-3">
+            <article key={activity.id} className="relative border-l border-gilt/45 pl-3">
+              <span
+                aria-hidden
+                className="absolute -left-[3.5px] top-2 h-1.5 w-1.5 rotate-45 bg-gilt/70"
+              />
               <p className="text-sm leading-6 text-ink">{activity.text}</p>
               <p className="mt-1 text-xs text-ink-faint">
                 {worldName} · {activity.eraLabel} · {activity.timeLabel}
