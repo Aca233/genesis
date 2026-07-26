@@ -193,6 +193,43 @@ describe("输出上限续写接力", () => {
     expect(mocks.stream).toHaveBeenCalledTimes(2);
   });
 
+  it("complete: 上游谎报正常结束但 JSON 括号未闭合时,启发式判定截断并续写", async () => {
+    mocks.stream
+      .mockImplementationOnce(async function* () {
+        // finish_reason 谎报 stop(truncated: false),但 JSON 明显被斩断
+        yield { type: "text", text: '{"deck":{"name":"残卷' };
+        yield usageChunk(false);
+        yield { type: "done" };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: '世界"}}' };
+        yield usageChunk(false);
+        yield { type: "done" };
+      });
+
+    await expect(complete("narrative", {
+      task: "genesis",
+      failOnTruncation: true,
+      messages: [{ role: "user", content: "create" }],
+    }, { maxAttempts: 1, allowFallback: false })).resolves.toBe('{"deck":{"name":"残卷世界"}}');
+    expect(mocks.stream).toHaveBeenCalledTimes(2);
+  });
+
+  it("complete: 完整 JSON 不触发启发式续写", async () => {
+    mocks.stream.mockImplementationOnce(async function* () {
+      yield { type: "text", text: '{"ok":true}' };
+      yield usageChunk(false);
+      yield { type: "done" };
+    });
+
+    await expect(complete("narrative", {
+      task: "genesis",
+      failOnTruncation: true,
+      messages: [{ role: "user", content: "create" }],
+    }, { maxAttempts: 1, allowFallback: false })).resolves.toBe('{"ok":true}');
+    expect(mocks.stream).toHaveBeenCalledTimes(1);
+  });
+
   it("stream: 连续截断超过轮数上限时报可操作错误", async () => {
     mocks.stream.mockImplementation(async function* () {
       yield { type: "text", text: "片段" };

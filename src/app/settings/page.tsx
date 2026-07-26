@@ -28,6 +28,13 @@ const PROVIDER_HINTS: Record<SlotForm["provider"], string> = {
   gemini: "Google Gemini 协议。Base URL 如 https://generativelanguage.googleapis.com",
 };
 
+/** 黄铜小器钮：玺印钮的紧凑变体（试炼一问 / 取诸名录 共用同一式样） */
+const BRASS_BUTTON = "seal-button min-h-8! px-3.5! py-1! text-xs";
+
+/** 羊皮纸凹井：带内阴影的输入面，聚焦时鎏金微焕 */
+const FIELD_WELL =
+  "w-full rounded-lg border border-line bg-paper-sunken px-3 py-2 text-ink shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--ink)_10%,transparent)] outline-none transition-[border-color,box-shadow] focus:border-gilt/70 focus:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--ink)_10%,transparent),0_0_0.6rem_var(--gilt-glow)]";
+
 function SlotEditor({
   title,
   subtitle,
@@ -86,24 +93,27 @@ function SlotEditor({
     ) ?? [];
 
   return (
-    <fieldset className="rounded-lg border border-line bg-paper-raised p-5">
-      <legend
-        className="px-2 text-lg text-ink"
-        style={{ fontFamily: "var(--font-display)" }}
-      >
+    <section
+      aria-labelledby={`${slotName}-slot-title`}
+      className="tome-plate tome-plate--corners p-5 sm:p-6"
+    >
+      <h2 id={`${slotName}-slot-title`} className="illuminated-header display-md">
+        <span className="illuminated-header__glyph" aria-hidden="true">
+          ✦
+        </span>
         {title}
-      </legend>
-      <p className="mb-4 text-xs text-ink-faint">{subtitle}</p>
+      </h2>
+      <p className="mt-2 mb-5 text-center text-xs text-ink-faint">{subtitle}</p>
 
-      <div className="grid gap-3">
-        <label className="grid gap-1 text-sm text-ink-soft">
-          协议
+      <div className="grid gap-4">
+        <label className="grid gap-1.5 text-sm text-ink-soft">
+          <span className="letterpress">协议</span>
           <select
             value={slot.provider}
             onChange={(e) =>
               onChange({ ...slot, provider: e.target.value as SlotForm["provider"] })
             }
-            className="rounded-md border border-line bg-paper-sunken p-2 text-ink outline-none focus:border-gilt/60"
+            className="scroll-select w-full"
           >
             <option value="openai-compatible">OpenAI 兼容 / 中转站</option>
             <option value="anthropic">Anthropic</option>
@@ -112,36 +122,36 @@ function SlotEditor({
           <span className="text-xs text-ink-faint">{PROVIDER_HINTS[slot.provider]}</span>
         </label>
 
-        <label className="grid gap-1 text-sm text-ink-soft">
-          Base URL
+        <label className="grid gap-1.5 text-sm text-ink-soft">
+          <span className="letterpress">Base URL</span>
           <input
             value={slot.baseUrl}
             onChange={(e) => onChange({ ...slot, baseUrl: e.target.value })}
             placeholder="https://…"
-            className="rounded-md border border-line bg-paper-sunken p-2 text-ink outline-none focus:border-gilt/60"
+            className={FIELD_WELL}
           />
         </label>
 
-        <label className="grid gap-1 text-sm text-ink-soft">
-          API Key
+        <label className="grid gap-1.5 text-sm text-ink-soft">
+          <span className="letterpress">API Key</span>
           <input
             type="password"
             value={slot.apiKey}
             onChange={(e) => onChange({ ...slot, apiKey: e.target.value })}
             placeholder={slot.hasKey ? "●●●●●●●●（已保存，留空则不变）" : "sk-…"}
-            className="rounded-md border border-line bg-paper-sunken p-2 text-ink outline-none focus:border-gilt/60"
+            className={`${FIELD_WELL} placeholder:text-xs`}
           />
         </label>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="relative grid min-w-0 content-start gap-1 text-sm text-ink-soft">
-            <span className="flex items-center justify-between">
-              模型名
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="relative grid min-w-0 content-start gap-1.5 text-sm text-ink-soft">
+            <span className="flex items-center justify-between gap-2">
+              <span className="letterpress">模型名</span>
               <button
                 type="button"
                 onClick={() => void fetchModels()}
                 disabled={listing || !slot.baseUrl}
-                className="text-xs text-gilt/70 transition hover:text-gilt disabled:opacity-40"
+                className={BRASS_BUTTON}
                 title="从端点取回可用模型列表"
               >
                 {listing ? "取名录中…" : "取诸名录"}
@@ -163,7 +173,7 @@ function SlotEditor({
               }}
               onBlur={() => setTimeout(() => setPickerOpen(false), 150)}
               placeholder="claude-sonnet-4-5 / gpt-4o / gemini-2.5-pro…"
-              className="rounded-md border border-line bg-paper-sunken p-2 text-ink outline-none focus:border-gilt/60"
+              className={FIELD_WELL}
             />
             {listError && (
               <span className="text-xs text-cinnabar">{listError}</span>
@@ -173,7 +183,7 @@ function SlotEditor({
               <div
                 id={`${slotName}-model-listbox`}
                 role="listbox"
-                className="absolute top-full z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-line bg-paper-raised shadow-lg"
+                className="tome-scroll absolute top-full z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gilt/35 bg-paper-raised shadow-tome"
               >
                 {filtered.length === 0 ? (
                   <p className="px-3 py-2 text-xs text-ink-faint">
@@ -203,8 +213,10 @@ function SlotEditor({
               </div>
             )}
           </div>
-          <label className="grid min-w-0 gap-1 text-sm text-ink-soft">
-            温度（可选）
+          <label className="grid min-w-0 content-start gap-1.5 text-sm text-ink-soft">
+            <span className="flex min-h-8 items-center">
+              <span className="letterpress">温度（可选）</span>
+            </span>
             <input
               type="number"
               step="0.1"
@@ -218,16 +230,16 @@ function SlotEditor({
                     e.target.value === "" ? undefined : Number(e.target.value),
                 })
               }
-              className="rounded-md border border-line bg-paper-sunken p-2 text-ink outline-none focus:border-gilt/60"
+              className={FIELD_WELL}
             />
           </label>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={onTest}
             disabled={testing || !slot.baseUrl || !slot.model}
-            className="rounded-md border border-gilt/50 px-4 py-1.5 text-sm text-gilt transition hover:bg-gilt/10 disabled:opacity-40"
+            className={BRASS_BUTTON}
           >
             {testing ? "试炼中…" : "试炼一问"}
           </button>
@@ -240,7 +252,7 @@ function SlotEditor({
           )}
         </div>
       </div>
-    </fieldset>
+    </section>
   );
 }
 
@@ -374,12 +386,7 @@ export default function SettingsPage() {
         >
           ← 归返
         </button>
-        <h1
-          className="text-3xl text-ink"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          设置
-        </h1>
+        <h1 className="display-lg text-ink">设置</h1>
         <p className="mt-2 text-sm text-ink-faint">
           你的 Key 以 AES-256-GCM 加密存于本地数据库，仅在请求时解密转发。
         </p>
@@ -421,24 +428,23 @@ export default function SettingsPage() {
         ) : (
           <button
             onClick={() => setBackstage(EMPTY_SLOT)}
-            className="rounded-lg border border-dashed border-line p-4 text-sm text-ink-faint transition hover:border-gilt/40 hover:text-gilt"
+            className="rounded-xl border border-dashed border-gilt/35 bg-paper-raised/40 p-4 text-sm text-ink-faint transition hover:border-gilt/70 hover:text-gilt"
           >
             + 配置幕后模型（可选：诸神回合与结算用便宜模型，省钱提速）
           </button>
         )}
 
         <section
-          className="rounded-lg border border-line bg-paper-raised p-5"
+          className="tome-plate p-5 sm:p-6"
           aria-labelledby="play-prefs-title"
         >
-          <h2
-            id="play-prefs-title"
-            className="text-lg text-ink"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
+          <h2 id="play-prefs-title" className="illuminated-header display-md">
+            <span className="illuminated-header__glyph" aria-hidden="true">
+              ✦
+            </span>
             对局偏好
           </h2>
-          <div className="mt-3 flex items-center justify-between gap-4">
+          <div className="mt-4 flex items-center justify-between gap-4">
             <div className="text-sm text-ink-soft">
               AI 行动建议
               <p className="mt-0.5 text-xs text-ink-faint">
@@ -453,7 +459,7 @@ export default function SettingsPage() {
               onClick={toggleSuggestions}
               className={`relative h-6 w-11 shrink-0 rounded-full border transition ${
                 suggestionsOn
-                  ? "border-gilt/60 bg-gilt/25"
+                  ? "border-gilt/60 bg-gilt/25 shadow-[0_0_0.5rem_var(--gilt-glow)]"
                   : "border-line bg-paper-sunken"
               }`}
             >
@@ -469,11 +475,14 @@ export default function SettingsPage() {
 
         <PromptCacheStats />
 
-        <section className="rounded-lg border border-line bg-paper-raised p-5" aria-labelledby="icon-license-title">
-          <h2 id="icon-license-title" className="text-lg text-ink" style={{ fontFamily: "var(--font-display)" }}>
+        <section className="tome-plate p-5 sm:p-6" aria-labelledby="icon-license-title">
+          <h2 id="icon-license-title" className="illuminated-header display-md">
+            <span className="illuminated-header__glyph" aria-hidden="true">
+              ✦
+            </span>
             图标与开源许可
           </h2>
-          <ul className="mt-3 grid gap-2 text-sm text-ink-soft">
+          <ul className="mt-4 grid gap-2 text-sm text-ink-soft">
             <li>Phosphor Icons — MIT</li>
             <li>Tabler Icons — MIT</li>
             <li>IconPark Outline — Apache 2.0</li>
@@ -483,11 +492,11 @@ export default function SettingsPage() {
           </ul>
         </section>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <button
             onClick={save}
             disabled={saving || !narrative.baseUrl || !narrative.model}
-            className="rounded-md border border-gilt bg-gilt/10 px-8 py-2 text-gilt transition hover:bg-gilt/20 disabled:opacity-40"
+            className="seal-button"
           >
             {saving ? "封存中…" : "封存设置"}
           </button>

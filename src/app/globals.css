@@ -26,6 +26,30 @@
   --seal-paper: #2a2118;     /* 封蜡底 */
   --seal-line: #4a3b28;      /* 封蜡描线 */
   --seal-ink: #e8dfc8;       /* 封蜡上的字 */
+
+  /* ── 浓墨古籍 Foundation 增补（日卷） ── */
+  --gilt-bright: #c9a356;                    /* 亮金：深墨底上的鎏金文字与描边梯度亮端 */
+  --seal-ground-hi: #362a1b;                 /* 玺印钮墨底渐变·亮端 */
+  --seal-ground-lo: #221a10;                 /* 玺印钮墨底渐变·暗端 */
+  --seal-glow: rgba(168, 127, 46, 0.3);      /* 玺印外焕 */
+  --shadow-warm: rgba(64, 44, 18, 0.16);     /* 暖调投影：书卷落于星案 */
+  --stain-edge: rgba(94, 66, 28, 0.1);       /* 陈年卷边渍 */
+  --stain-blotch: rgba(110, 78, 34, 0.05);   /* 角落晕渍 */
+  --astral-corner-ink: color-mix(in srgb, var(--gilt) 25%, transparent); /* 星角纹饰墨色 */
+  /* 纸纤维纹理：横向拉伸的分形噪声，模拟帘纹纸的纤维走向 */
+  --fiber-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.012 0.3' numOctaves='3' seed='11'/%3E%3CfeColorMatrix values='0 0 0 0 0.33 0 0 0 0 0.26 0 0 0 0 0.16 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23f)'/%3E%3C/svg%3E");
+  /* 卷轴拣选器镌刻双弦纹箭头（墨色随主题） */
+  --scroll-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 6.2 8 10.7 12.5 6.2' fill='none' stroke='%235c4f3d' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M4.6 3.8 8 7.2 11.4 3.8' fill='none' stroke='%235c4f3d' stroke-opacity='0.35' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  /* 星标开关：熄（描线四芒星）／燃（实心鎏金四芒星） */
+  --star-glyph-off: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2.6l2.2 7.2 7.2 2.2-7.2 2.2L12 21.4l-2.2-7.2L2.6 12l7.2-2.2z' fill='none' stroke='%2375654c' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --star-glyph-on: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 1.8l2.3 7.9 7.9 2.3-7.9 2.3-2.3 7.9-2.3-7.9L1.8 12l7.9-2.3z' fill='%23a87f2e'/%3E%3C/svg%3E");
+  /* 星角纹饰遮罩（四角同稿旋转，双弦纹 + 四芒星，仅取 alpha，双主题共用） */
+  --astral-corner-tl: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M1 13V5Q1 1 5 1h8' fill='none' stroke='%23000' stroke-width='1.4'/%3E%3Cpath d='M4.8 13V7.4Q4.8 4.8 7.4 4.8H13' fill='none' stroke='%23000' stroke-width='.7'/%3E%3Cpath d='M9.2 5.6l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z'/%3E%3C/svg%3E");
+  --astral-corner-tr: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg transform='rotate(90 12 12)'%3E%3Cpath d='M1 13V5Q1 1 5 1h8' fill='none' stroke='%23000' stroke-width='1.4'/%3E%3Cpath d='M4.8 13V7.4Q4.8 4.8 7.4 4.8H13' fill='none' stroke='%23000' stroke-width='.7'/%3E%3Cpath d='M9.2 5.6l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z'/%3E%3C/g%3E%3C/svg%3E");
+  --astral-corner-br: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg transform='rotate(180 12 12)'%3E%3Cpath d='M1 13V5Q1 1 5 1h8' fill='none' stroke='%23000' stroke-width='1.4'/%3E%3Cpath d='M4.8 13V7.4Q4.8 4.8 7.4 4.8H13' fill='none' stroke='%23000' stroke-width='.7'/%3E%3Cpath d='M9.2 5.6l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z'/%3E%3C/g%3E%3C/svg%3E");
+  --astral-corner-bl: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg transform='rotate(270 12 12)'%3E%3Cpath d='M1 13V5Q1 1 5 1h8' fill='none' stroke='%23000' stroke-width='1.4'/%3E%3Cpath d='M4.8 13V7.4Q4.8 4.8 7.4 4.8H13' fill='none' stroke='%23000' stroke-width='.7'/%3E%3Cpath d='M9.2 5.6l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z'/%3E%3C/g%3E%3C/svg%3E");
+  color-scheme: light;
+
   --play-background-image: url("/images/backgrounds/play-celestial-day.webp");
   --play-background-opacity: 0.58;
   --genesis-mode-opacity: 0.38;
@@ -52,6 +76,23 @@
   --seal-paper: #1d1610;
   --seal-line: #55442c;
   --seal-ink: #e8dfc8;
+
+  /* ── 浓墨古籍 Foundation 增补（烛光） ── */
+  --gilt-bright: #e6c87e;                    /* 烛下亮金更炽 */
+  --seal-ground-hi: #46351f;                 /* 玺印钮：余烬托起的暖墨底 */
+  --seal-ground-lo: #2c2113;
+  --seal-glow: rgba(224, 178, 102, 0.34);    /* 烛光中玺印应为页面最亮之物 */
+  --shadow-warm: rgba(0, 0, 0, 0.44);
+  --stain-edge: rgba(8, 5, 1, 0.32);
+  --stain-blotch: rgba(0, 0, 0, 0.15);
+  --astral-corner-ink: color-mix(in srgb, var(--gilt) 36%, transparent);
+  /* 暗纸上改用亮色纤维，方能显影 */
+  --fiber-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.012 0.3' numOctaves='3' seed='11'/%3E%3CfeColorMatrix values='0 0 0 0 0.87 0 0 0 0 0.78 0 0 0 0 0.57 0 0 0 0.045 0'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23f)'/%3E%3C/svg%3E");
+  --scroll-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 6.2 8 10.7 12.5 6.2' fill='none' stroke='%23bfb298' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M4.6 3.8 8 7.2 11.4 3.8' fill='none' stroke='%23bfb298' stroke-opacity='0.35' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --star-glyph-off: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2.6l2.2 7.2 7.2 2.2-7.2 2.2L12 21.4l-2.2-7.2L2.6 12l7.2-2.2z' fill='none' stroke='%239a8d75' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --star-glyph-on: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 1.8l2.3 7.9 7.9 2.3-7.9 2.3-2.3 7.9-2.3-7.9L1.8 12l7.9-2.3z' fill='%23e2c178'/%3E%3C/svg%3E");
+  color-scheme: dark;
+
   --play-background-image: url("/images/backgrounds/play-celestial-candle.webp");
   --play-background-opacity: 0.66;
   --genesis-mode-opacity: 0.34;
@@ -75,6 +116,15 @@
   --color-seal-paper: var(--seal-paper);
   --color-seal-line: var(--seal-line);
   --color-seal-ink: var(--seal-ink);
+  --color-gilt-bright: var(--gilt-bright);
+  --color-gilt-soft: var(--gilt-soft);
+  --color-seal-ground-hi: var(--seal-ground-hi);
+  --color-seal-ground-lo: var(--seal-ground-lo);
+
+  /* 暖调书卷投影：shadow-tome 工具类，免去任意值书写 */
+  --shadow-tome:
+    0 1.25rem 3.25rem var(--shadow-warm),
+    0 2px 10px color-mix(in srgb, var(--shadow-warm) 55%, transparent);
 
   --font-prose: "LXGW WenKai Screen", serif;                    /* 正文：霞鹜文楷 */
   --font-display: "Noto Serif SC", "LXGW WenKai Screen", serif; /* 标题：思源宋体 */
@@ -105,6 +155,12 @@ body::before {
   z-index: 0;
   opacity: 0.35;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.29 0 0 0 0 0.20 0 0 0 0.045 0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23p)'/%3E%3C/svg%3E");
+}
+
+/* 烛光下暗底吃掉了深色噪点：换用微亮暖噪，感知底色不变，纸的肌理仍在 */
+[data-theme="candle"] body::before {
+  opacity: 0.3;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 0.88 0 0 0 0 0.79 0 0 0 0 0.58 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23p)'/%3E%3C/svg%3E");
 }
 
 body > * {
@@ -365,6 +421,21 @@ body > * {
   .animate-pulse {
     animation: none;
   }
+
+  .seal-button,
+  .scroll-select,
+  .star-toggle,
+  .star-toggle::before {
+    transition: none;
+  }
+
+  .seal-button:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: none;
+  }
+
+  .star-toggle:has(input:checked)::before {
+    transform: none;
+  }
 }
 
 /* 烫金微焕（面板更新提示） */
@@ -402,11 +473,321 @@ body > * {
   font-style: italic;
 }
 
-/* 滚动条走古卷风 */
-::-webkit-scrollbar { width: 10px; }
+/* ═════════════════════ 浓墨古籍 Foundation 组件层 ═════════════════════
+   契约：以下类名为各页面共用的「古籍构件」，双主题取值全部经由上方 Token。
+   .tome-plate 占用 ::before（内衬细线）；.tome-plate--corners 与
+   .stain-vignette 均占用 ::after —— 二者勿叠加于同一元素，需要时包一层。 */
+
+/* ── 书卷面板：多层羊皮纸板 ──
+   纸纤维纹理 + 双重描边框（外 1px 鎏金、内衬发丝线）+ 暖调投影。
+   取代各处「1px 边框 + 圆角 + 单色填充」的通用卡片。 */
+.tome-plate {
+  position: relative;
+  border: 1px solid color-mix(in srgb, var(--gilt) 35%, transparent);
+  border-radius: 0.875rem;
+  background:
+    var(--fiber-noise),
+    linear-gradient(
+      168deg,
+      color-mix(in srgb, var(--paper-raised) 96%, transparent),
+      color-mix(in srgb, var(--paper) 92%, transparent)
+    );
+  box-shadow:
+    0 1.25rem 3.25rem var(--shadow-warm),
+    0 2px 10px color-mix(in srgb, var(--shadow-warm) 55%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--paper-raised) 80%, transparent);
+}
+
+.tome-plate::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border: 1px solid var(--line);
+  border-radius: calc(0.875rem - 4px);
+  pointer-events: none;
+}
+
+/* ── 星角纹饰：四角双弦纹 + 四芒星，呼应背景星图蚀刻 ── */
+.tome-plate--corners::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  pointer-events: none;
+  background: var(--astral-corner-ink);
+  -webkit-mask:
+    var(--astral-corner-tl) left top / 22px 22px no-repeat,
+    var(--astral-corner-tr) right top / 22px 22px no-repeat,
+    var(--astral-corner-br) right bottom / 22px 22px no-repeat,
+    var(--astral-corner-bl) left bottom / 22px 22px no-repeat;
+  mask:
+    var(--astral-corner-tl) left top / 22px 22px no-repeat,
+    var(--astral-corner-tr) right top / 22px 22px no-repeat,
+    var(--astral-corner-br) right bottom / 22px 22px no-repeat,
+    var(--astral-corner-bl) left bottom / 22px 22px no-repeat;
+}
+
+/* ── 玺印钮：典仪级 CTA ──
+   深墨底、金梯度描边、鎏金字、暖焕外光；悬停如余烬拨亮，
+   禁用时是一枚未点燃的蜡印——仍有体积，绝非幽灵轮廓。 */
+.seal-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  min-height: 2.75rem;
+  padding: 0.625rem 2rem;
+  border: 1px solid transparent;
+  border-radius: 0.625rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--gilt-bright);
+  text-shadow: 0 0 10px var(--seal-glow);
+  background:
+    linear-gradient(176deg, var(--seal-ground-hi), var(--seal-ground-lo)) padding-box,
+    linear-gradient(
+      158deg,
+      var(--gilt-bright),
+      var(--gilt) 34%,
+      color-mix(in srgb, var(--gilt) 46%, #1c130a) 62%,
+      var(--gilt-bright)
+    ) border-box;
+  box-shadow:
+    0 0 0.9rem var(--seal-glow),
+    0 3px 14px var(--shadow-warm),
+    inset 0 1px 0 rgba(255, 233, 178, 0.16);
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: box-shadow 0.25s ease, filter 0.25s ease, transform 0.15s ease;
+}
+
+.seal-button:hover:not(:disabled):not([aria-disabled="true"]) {
+  filter: brightness(1.08);
+  box-shadow:
+    0 0 1.6rem var(--seal-glow),
+    0 0 3rem color-mix(in srgb, var(--seal-glow) 55%, transparent),
+    0 4px 18px var(--shadow-warm),
+    inset 0 1px 0 rgba(255, 233, 178, 0.22);
+}
+
+.seal-button:active:not(:disabled):not([aria-disabled="true"]) {
+  transform: translateY(1px);
+  filter: brightness(0.98);
+}
+
+.seal-button:disabled,
+.seal-button[aria-disabled="true"] {
+  cursor: not-allowed;
+  color: color-mix(in srgb, var(--gilt-bright) 46%, var(--seal-ground-hi));
+  text-shadow: none;
+  filter: saturate(0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 233, 178, 0.05),
+    inset 0 0 1.5rem rgba(0, 0, 0, 0.22);
+}
+
+/* ── 泥金章题：两侧发丝线向外淡出的节标题 ──
+   结构：<h2 class="illuminated-header"><span class="illuminated-header__glyph">✦</span>标题</h2>
+   引导纹章槽可省略；裸文本节点即为标题内容。 */
+.illuminated-header {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+}
+
+.illuminated-header::before,
+.illuminated-header::after {
+  content: "";
+  flex: 1 1 0;
+  min-width: 1rem;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--gilt) 55%, transparent)
+  );
+}
+
+.illuminated-header::after {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--gilt) 55%, transparent),
+    transparent
+  );
+}
+
+.illuminated-header__glyph {
+  flex: none;
+  display: inline-flex;
+  color: var(--gilt);
+}
+
+/* ── 卷轴拣选器：去原生化的 <select> ──
+   羊皮纸凹井、墨线描边、镌刻双弦纹箭头；聚焦鎏金（全局 :focus-visible 已管描边）。 */
+.scroll-select {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: var(--font-prose);
+  color: var(--ink);
+  background-color: var(--paper-sunken);
+  background-image: var(--scroll-chevron);
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  background-size: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 26%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.45rem 2.1rem 0.45rem 0.8rem;
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 10%, transparent);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.scroll-select:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--gilt) 55%, transparent);
+}
+
+.scroll-select:focus-visible {
+  border-color: var(--gilt);
+  box-shadow:
+    inset 0 1px 2px color-mix(in srgb, var(--ink) 10%, transparent),
+    0 0 0.6rem var(--gilt-glow);
+}
+
+.scroll-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.scroll-select option {
+  font-family: var(--font-prose);
+  background-color: var(--paper-raised);
+  color: var(--ink);
+}
+
+/* ── 星标开关：checkbox 的四芒星化身 ──
+   结构：<label class="star-toggle"><input type="checkbox" />文案</label>
+   勾选即点燃鎏金星。 */
+.star-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  cursor: pointer;
+  user-select: none;
+  color: var(--ink-soft);
+  transition: color 0.2s ease;
+}
+
+.star-toggle input[type="checkbox"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.star-toggle::before {
+  content: "";
+  flex: none;
+  width: 1.05em;
+  height: 1.05em;
+  background: var(--star-glyph-off) center / contain no-repeat;
+  transition: filter 0.3s ease, transform 0.2s ease;
+}
+
+.star-toggle:hover::before {
+  filter: drop-shadow(0 0 3px var(--gilt-glow));
+}
+
+.star-toggle:has(input:checked) {
+  color: var(--gilt-strong);
+}
+
+.star-toggle:has(input:checked)::before {
+  background-image: var(--star-glyph-on);
+  filter: drop-shadow(0 0 4px var(--gilt-glow));
+  transform: scale(1.06);
+}
+
+.star-toggle:has(input:focus-visible) {
+  outline: 2px solid var(--gilt);
+  outline-offset: 2px;
+  border-radius: 0.375rem;
+}
+
+/* ── 铅印小签：中文语境的 small-caps 质感标签 ── */
+.letterpress {
+  font-size: 0.9em;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  color: var(--ink-faint);
+}
+
+/* ── 补齐中间字级：宋体展示字（介于巨题与 13px 表单字之间） ── */
+.display-md {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1.45;
+}
+
+.display-lg {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  line-height: 1.35;
+}
+
+/* ── 陈年晕渍：大面板的柔和旧边（占用 ::after，见层头契约） ── */
+.stain-vignette {
+  position: relative;
+}
+
+.stain-vignette::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 120% at 50% 44%, transparent 56%, var(--stain-edge) 100%),
+    radial-gradient(42% 34% at 0% 100%, var(--stain-blotch), transparent 70%),
+    radial-gradient(38% 30% at 100% 0%, var(--stain-blotch), transparent 70%);
+}
+
+/* ── 滚动条走古卷风：细身鎏金游标浮于羊皮纸 ──
+   scrollbar-color 可继承，文档级设定即覆盖全站滚动容器；
+   ::-webkit-scrollbar 作为旧 Safari 后备。 */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--gilt) 50%, var(--paper)) transparent;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--line);
-  border-radius: 5px;
+  background: color-mix(in srgb, var(--gilt) 45%, var(--paper));
+  border-radius: 4px;
 }
-::-webkit-scrollbar-thumb:hover { background: var(--gilt-soft); }
+::-webkit-scrollbar-thumb:hover { background: var(--gilt); }
+
+.tome-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--gilt) 50%, var(--paper)) transparent;
+}
+
+.tome-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.tome-scroll::-webkit-scrollbar-track { background: transparent; }
+.tome-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--gilt) 45%, var(--paper));
+  border-radius: 4px;
+}
+.tome-scroll::-webkit-scrollbar-thumb:hover { background: var(--gilt); }

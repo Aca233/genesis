@@ -172,6 +172,43 @@ function trimOverlap(previous: string, next: string): string {
   return next;
 }
 
+/** 字符串外的花括号/方括号失衡数（>0 即未闭合）。 */
+function jsonImbalance(text: string): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (escaped) { escaped = false; continue; }
+    if (ch === "\\") { if (inString) escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{" || ch === "[") depth += 1;
+    else if (ch === "}" || ch === "]") depth -= 1;
+  }
+  return depth;
+}
+
+/**
+ * 部分中转通道会截断输出却谎报正常结束（finish_reason=stop）。
+ * 对"必须完整"的 JSON 输出做启发式判定:解析失败且括号未闭合 = 实为截断。
+ */
+function looksTruncatedJson(raw: string): boolean {
+  const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  if (!text.startsWith("{") && !text.startsWith("[")) return false;
+  try {
+    JSON.parse(text);
+    return false;
+  } catch {
+    return jsonImbalance(text) > 0;
+  }
+}
+
+/** 显式标志或启发式二者其一判定截断。 */
+function needsContinuation(req: CompletionRequest, truncated: boolean | undefined, text: string): boolean {
+  if (!req.failOnTruncation) return false;
+  return (truncated ?? false) || looksTruncatedJson(text);
+}
+
 function truncationError(req: CompletionRequest): Error {
   const asked = req.maxTokens ? `请求 ${req.maxTokens} tokens 未被满足，` : "";
   return new Error(
@@ -203,7 +240,7 @@ export async function complete(
       cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
     if (!req.failOnTruncation) return result.text;
     let text = result.text;
-    for (let round = 0; result.truncated; round += 1) {
+    for (let round = 0; needsContinuation(req, result.truncated, text); round += 1) {
       if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
       result = await collectStream(adapter, slot, continuationRequest(req, text), apiKey);
       await logCall({ ...baseLog, ok: true, usage: result.usage,
@@ -219,7 +256,7 @@ export async function complete(
       cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
     if (!req.failOnTruncation) return result.text;
     let text = result.text;
-    for (let round = 0; result.truncated; round += 1) {
+    for (let round = 0; needsContinuation(req, result.truncated, text); round += 1) {
       if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
       result = await adapter.complete(slot, continuationRequest(req, text), apiKey);
       await logCall({ ...baseLog, ok: true, usage: result.usage,
@@ -322,7 +359,9 @@ export async function* stream(
 
     yield* runRound(req, "");
     if (req.failOnTruncation) {
-      for (let round = 0; truncated && !options?.signal?.aborted; round += 1) {
+      for (let round = 0;
+        needsContinuation(req, truncated, accumulated) && !options?.signal?.aborted;
+        round += 1) {
         if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
         yield* runRound(continuationRequest(req, accumulated), accumulated);
       }

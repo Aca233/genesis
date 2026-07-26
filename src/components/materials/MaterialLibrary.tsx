@@ -9,24 +9,18 @@ import {
   type MaterialVersionFilter,
   type MaterialVisibility,
 } from "./material-library-state";
+import {
+  KIND_LABELS,
+  KindSigil,
+  humanizeMachineText,
+  kindBandStyle,
+  kindGiltColor,
+  kindInkColor,
+} from "./MaterialContentView";
 import { MaterialDetail } from "./MaterialDetail";
 
-const LABELS: Record<string, string> = {
-  player_god: "玩家神",
-  major_god: "主神",
-  character: "人物",
-  race: "种族",
-  faction: "势力",
-  place: "地点",
-  ability: "能力",
-  cosmology: "宇宙论",
-  fusion_axiom: "融合公理",
-  epoch_conflict: "时代冲突",
-  style: "文风",
-  theme: "主题",
-};
-
-const fieldClassName = "min-h-10 min-w-0 w-full rounded border border-line bg-paper-sunken px-3 py-2 text-ink outline-none transition focus:border-gilt";
+/* 羊皮凹井输入框：与 .scroll-select 同一材质语言（纸井、墨线、鎏金聚焦） */
+const fieldClassName = "min-h-10 min-w-0 w-full rounded-lg border border-ink-soft/30 bg-paper-sunken px-3 py-2 font-prose text-ink shadow-[inset_0_1px_2px_rgba(0,0,0,0.08)] outline-none transition-[border-color,box-shadow] duration-200 placeholder:text-ink-faint/70 focus:border-gilt focus:shadow-[inset_0_1px_2px_rgba(0,0,0,0.08),0_0_0.6rem_var(--gilt-glow)]";
 
 export function MaterialLibrary() {
   const [items, setItems] = useState<MaterialListItem[] | null>(null);
@@ -99,17 +93,18 @@ export function MaterialLibrary() {
 
   // 加载态：首次拉取未归来且无错误时，仅展示展卷提示
   if (items === null && !error) {
-    return <p className="py-16 text-center text-ink-faint">展卷中…</p>;
+    return <p className="letterpress py-16 text-center">展卷中…</p>;
   }
 
   return (
     <div className="grid min-w-0 gap-5">
-      {error && <p className="rounded border border-cinnabar/30 bg-cinnabar/5 px-4 py-3 text-cinnabar">{error}</p>}
+      {error && <p className="rounded-lg border border-cinnabar/40 bg-cinnabar/5 px-4 py-3 text-cinnabar shadow-tome">{error}</p>}
 
-      <section className="grid min-w-0 gap-4 rounded-lg border border-line bg-paper-raised p-4" aria-label="素材筛选">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(18rem,1fr)_repeat(3,minmax(9rem,auto))]">
-          <label className="grid gap-1 text-xs text-ink-faint">
-            关键词
+      {/* 拣选案：书卷面板上的卷轴拣选器与星标开关（小屏两列并置以让藏品早现） */}
+      <section className="tome-plate grid min-w-0 gap-4 p-4 sm:p-5" aria-label="素材筛选">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-[minmax(18rem,1fr)_repeat(3,minmax(9rem,auto))]">
+          <label className="col-span-2 grid gap-1.5 xl:col-span-1">
+            <span className="letterpress text-sm">关键词</span>
             <input
               type="search"
               value={query}
@@ -118,27 +113,27 @@ export function MaterialLibrary() {
               className={fieldClassName}
             />
           </label>
-          <label className="grid gap-1 text-xs text-ink-faint">
-            素材类型
-            <select value={kind} onChange={(event) => setKind(event.target.value)} className={fieldClassName}>
+          <label className="grid min-w-0 gap-1.5">
+            <span className="letterpress text-sm">素材类型</span>
+            <select value={kind} onChange={(event) => setKind(event.target.value)} className="scroll-select min-h-10 w-full min-w-0">
               <option value="">全部类型</option>
-              {Object.entries(LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              {Object.entries(KIND_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </label>
-          <label className="grid gap-1 text-xs text-ink-faint">
-            来源世界
-            <select value={source} onChange={(event) => setSource(event.target.value)} className={`${fieldClassName} max-w-56 truncate`}>
+          <label className="grid min-w-0 gap-1.5">
+            <span className="letterpress text-sm">来源世界</span>
+            <select value={source} onChange={(event) => setSource(event.target.value)} className="scroll-select min-h-10 w-full min-w-0 truncate xl:max-w-56">
               <option value="">全部来源</option>
               {options.sources.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}{option.deleted ? "（已删除）" : ""}
+                  {humanizeMachineText(option.label) || option.label}{option.deleted ? "（已删除）" : ""}
                 </option>
               ))}
             </select>
           </label>
-          <label className="grid gap-1 text-xs text-ink-faint">
-            版本类别
-            <select value={version} onChange={(event) => setVersion(event.target.value as MaterialVersionFilter)} className={fieldClassName}>
+          <label className="col-span-2 grid min-w-0 gap-1.5 xl:col-span-1">
+            <span className="letterpress text-sm">版本类别</span>
+            <select value={version} onChange={(event) => setVersion(event.target.value as MaterialVersionFilter)} className="scroll-select min-h-10 w-full min-w-0">
               <option value="all">全部版本类别</option>
               <option value="initial-only">仅有初始版</option>
               <option value="has-edits">已有衍生版本</option>
@@ -146,8 +141,8 @@ export function MaterialLibrary() {
           </label>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-          <span className="mr-1 text-xs text-ink-faint">可见性</span>
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 border-t border-line pt-3">
+          <span className="letterpress mr-1 text-sm">可见性</span>
           {([
             ["visible", "未隐藏"],
             ["hidden", "仅隐藏"],
@@ -158,16 +153,16 @@ export function MaterialLibrary() {
               type="button"
               aria-pressed={visibility === value}
               onClick={() => setVisibility(value)}
-              className={`rounded-full border px-3 py-1 text-sm transition ${visibility === value ? "border-gilt bg-gilt/10 text-gilt" : "border-line text-ink-soft hover:border-gilt/60"}`}
+              className={`rounded-full border px-3 py-1 text-sm transition ${visibility === value ? "border-gilt/70 bg-gilt/15 text-gilt-strong shadow-[0_0_0.55rem_var(--gilt-glow)]" : "border-line text-ink-soft hover:border-gilt/60 hover:text-ink"}`}
             >
               {label}
             </button>
           ))}
-          <label className="ml-1 flex cursor-pointer items-center gap-2 rounded-full border border-line px-3 py-1 text-sm text-ink-soft">
+          <label className="star-toggle ml-1 text-sm">
             <input type="checkbox" checked={favoriteOnly} onChange={(event) => setFavoriteOnly(event.target.checked)} />
             只看收藏
           </label>
-          <span className="ml-auto text-sm text-ink-faint">{shown.length} / {(items ?? []).length} 项</span>
+          <span className="ml-auto text-sm tabular-nums text-ink-faint">{shown.length} / {(items ?? []).length} 项</span>
           {hasActiveFilters && (
             <button type="button" onClick={resetFilters} className="text-sm text-gilt hover:underline">
               清除筛选
@@ -176,30 +171,49 @@ export function MaterialLibrary() {
         </div>
       </section>
 
-      <ul className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {shown.map((item) => (
-          <li key={item.id} className={`min-w-0 rounded-lg border bg-paper-raised p-4 ${item.hidden ? "border-line opacity-70" : "border-line"}`}>
-            <button type="button" onClick={() => setOpen(item.id)} className="min-w-0 w-full text-left">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-xs text-gilt">{LABELS[item.kind] ?? item.kind}</p>
-                <p className="text-xs text-ink-faint">{item.versions.length} 个版本</p>
+      {/* 藏品架：每卡一枚类型纹章与淡彩卡头；神格素材配星角纹饰 */}
+      <ul className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {shown.map((item) => {
+          const godly = item.kind === "player_god" || item.kind === "major_god";
+          const displayName = humanizeMachineText(item.name) || "佚名之藏";
+          const displaySource = humanizeMachineText(item.sourceWorldName) || "无名之界";
+          return (
+            <li
+              key={item.id}
+              className={`tome-plate${godly ? " tome-plate--corners" : ""} min-w-0 overflow-hidden${item.hidden ? " opacity-60 saturate-50" : ""}`}
+            >
+              <button type="button" onClick={() => setOpen(item.id)} className="block min-w-0 w-full text-left">
+                <div className="flex items-center gap-2 px-4 pb-2 pt-2.5" style={kindBandStyle(item.kind)}>
+                  <KindSigil kind={item.kind} className="h-4 w-4 shrink-0" style={{ color: kindGiltColor(item.kind) }} />
+                  <p className="text-xs font-medium tracking-[0.18em]" style={{ color: kindInkColor(item.kind) }}>
+                    {KIND_LABELS[item.kind] ?? item.kind}
+                  </p>
+                  <p className="ml-auto shrink-0 text-xs text-ink-faint">{item.versions.length} 个版本</p>
+                </div>
+                <div className="px-4 pb-3 pt-1.5">
+                  <h2
+                    title={displayName === item.name ? undefined : item.name}
+                    className="display-md break-words text-ink [overflow-wrap:anywhere]"
+                  >
+                    {displayName}
+                  </h2>
+                  <p className="mt-2 line-clamp-3 text-sm leading-6 text-ink-soft">{item.summary}</p>
+                  <p title={`来源：${item.sourceWorldName}`} className="mt-2.5 truncate text-xs text-ink-faint">
+                    {displaySource}{!item.sourceWorldId && " · 来源已删除"}
+                  </p>
+                </div>
+              </button>
+              <div className="mx-4 flex gap-4 border-t border-line pb-3 pt-2 text-sm">
+                <button type="button" onClick={() => void patch(item.id, { favorite: !item.favorite })} className="text-gilt-strong transition hover:text-gilt">
+                  {item.favorite ? "★ 已收藏" : "☆ 收藏"}
+                </button>
+                <button type="button" onClick={() => void patch(item.id, { hidden: !item.hidden })} className="text-ink-faint transition hover:text-ink-soft">
+                  {item.hidden ? "取消隐藏" : "隐藏"}
+                </button>
               </div>
-              <h2 className="mt-1 break-words text-lg text-ink [overflow-wrap:anywhere]">{item.name}</h2>
-              <p className="mt-2 line-clamp-3 text-sm text-ink-soft">{item.summary}</p>
-              <p className="mt-2 break-words text-xs text-ink-faint [overflow-wrap:anywhere]">
-                {item.sourceWorldName}{!item.sourceWorldId && " · 来源已删除"}
-              </p>
-            </button>
-            <div className="mt-3 flex gap-3 border-t border-line pt-2 text-sm">
-              <button type="button" onClick={() => void patch(item.id, { favorite: !item.favorite })} className="text-gilt">
-                {item.favorite ? "★ 已收藏" : "☆ 收藏"}
-              </button>
-              <button type="button" onClick={() => void patch(item.id, { hidden: !item.hidden })} className="text-ink-faint">
-                {item.hidden ? "取消隐藏" : "隐藏"}
-              </button>
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
 
       {items !== null && shown.length === 0 && (

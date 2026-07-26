@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MaterialContentView } from "./MaterialContentView";
+import {
+  KIND_LABELS,
+  KindSigil,
+  MaterialContentView,
+  humanizeMachineText,
+  kindGiltColor,
+  kindInkColor,
+} from "./MaterialContentView";
 
 type MaterialVersionData = {
   id: string;
@@ -15,6 +22,7 @@ type MaterialVersionData = {
 
 type MaterialDetailData = {
   id: string;
+  kind?: string;
   name: string;
   summary: string;
   sourceWorldId: string | null;
@@ -74,25 +82,39 @@ export function MaterialDetail({ id, onClose, onChanged }: { id: string; onClose
 
   if (error) {
     return (
-      <div className="rounded-lg border border-cinnabar/40 p-5 text-cinnabar">
+      <div className="rounded-lg border border-cinnabar/40 bg-cinnabar/5 p-5 text-cinnabar shadow-tome">
         {error}
         <button type="button" onClick={onClose} className="ml-4 underline">关闭</button>
       </div>
     );
   }
-  if (!material) return <p className="fog-text">展卷中…</p>;
+  if (!material) return <p className="letterpress py-16 text-center">展卷中…</p>;
+
+  const displayName = humanizeMachineText(material.name) || "佚名之藏";
+  const displaySource = humanizeMachineText(material.sourceWorldName) || "无名之界";
 
   return (
-    <section className="rounded-xl border border-line bg-paper-raised p-5">
+    <section className="tome-plate tome-plate--corners p-5 sm:p-6">
       <header className="flex justify-between gap-4">
-        <div>
-          <h2 className="text-2xl text-ink">{material.name}</h2>
-          <p className="mt-1 text-sm text-ink-soft">{material.summary}</p>
-          <p className="mt-1 text-xs text-ink-faint">
-            来源：{material.sourceWorldName}{!material.sourceWorldId && "（来源世界已删除）"}
+        <div className="min-w-0">
+          {material.kind && (
+            <p className="mb-1.5 flex items-center gap-2 text-xs tracking-[0.18em]" style={{ color: kindInkColor(material.kind) }}>
+              <KindSigil kind={material.kind} className="h-4 w-4 shrink-0" style={{ color: kindGiltColor(material.kind) }} />
+              {KIND_LABELS[material.kind] ?? material.kind}
+            </p>
+          )}
+          <h2
+            title={displayName === material.name ? undefined : material.name}
+            className="display-lg break-words text-ink [overflow-wrap:anywhere]"
+          >
+            {displayName}
+          </h2>
+          <p className="mt-1.5 text-sm leading-6 text-ink-soft">{material.summary}</p>
+          <p title={`来源：${material.sourceWorldName}`} className="mt-1.5 truncate text-xs text-ink-faint">
+            来源：{displaySource}{!material.sourceWorldId && "（来源世界已删除）"}
           </p>
         </div>
-        <button type="button" onClick={onClose} className="self-start text-ink-faint hover:text-gilt">关闭</button>
+        <button type="button" onClick={onClose} className="self-start text-ink-faint transition hover:text-gilt">关闭</button>
       </header>
 
       <div className="mt-5 grid gap-3">
@@ -100,7 +122,10 @@ export function MaterialDetail({ id, onClose, onChanged }: { id: string; onClose
           const expanded = expandedVersionId === version.id;
           const panelId = `material-version-${version.id}`;
           return (
-            <article key={version.id} className={`rounded-lg border transition ${expanded ? "border-gilt/50" : "border-line"}`}>
+            <article
+              key={version.id}
+              className={`overflow-hidden rounded-lg border bg-paper-raised/70 transition ${expanded ? "border-gilt/50 shadow-[0_0_0.8rem_var(--gilt-glow)]" : "border-line"}`}
+            >
               <div className="flex items-center gap-3 p-4">
                 <button
                   type="button"
@@ -111,9 +136,11 @@ export function MaterialDetail({ id, onClose, onChanged }: { id: string; onClose
                 >
                   <span aria-hidden className={`text-gilt transition-transform ${expanded ? "rotate-90" : ""}`}>›</span>
                   <span className="min-w-0">
-                    <span className="block truncate text-gilt">
-                      v{version.version} · {version.name}
-                      {material.defaultVersionId === version.id && <span className="ml-2 text-xs">默认版本</span>}
+                    <span className="block truncate font-display font-bold tracking-[0.06em] text-gilt-strong">
+                      v{version.version} · {humanizeMachineText(version.name) || version.name}
+                      {material.defaultVersionId === version.id && (
+                        <span className="ml-2 rounded-full border border-gilt/40 bg-gilt/10 px-2 py-0.5 text-xs font-normal tracking-normal text-gilt-strong">默认版本</span>
+                      )}
                     </span>
                     <span className="mt-1 block text-xs text-ink-faint">
                       {new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium" }).format(new Date(version.createdAt))}
@@ -127,8 +154,8 @@ export function MaterialDetail({ id, onClose, onChanged }: { id: string; onClose
               </div>
 
               {expanded && (
-                <div id={panelId} className="border-t border-line p-4">
-                  {version.note && <p className="mb-4 rounded bg-paper-sunken px-3 py-2 text-sm text-ink-soft">版本注记：{version.note}</p>}
+                <div id={panelId} className="border-t border-line bg-paper-sunken/30 p-3 sm:p-4">
+                  {version.note && <p className="mb-4 rounded-md border border-line bg-paper-sunken px-3 py-2 text-sm text-ink-soft">版本注记：{version.note}</p>}
                   <MaterialContentView content={version.content} />
                 </div>
               )}
