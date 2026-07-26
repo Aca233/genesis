@@ -498,6 +498,54 @@ describe("神谕结果申报 META 通道", () => {
   });
 });
 
+describe("时间锚点回合头（CURRENT WORLD TIME 扩展，设计稿 §12）", () => {
+  it("携带锚点数据时追加锚点事件、截止点与毯式规则", () => {
+    const prompt = narratorTurnSystem({
+      mode: "pantheon",
+      scale: "scene",
+      temporal: {
+        era: "帝国历晚期",
+        time: "帝国历 998 年冬",
+        anchorEvent: "就在黑船叩港的前夜",
+        canonCutoff: "主线大战爆发之前",
+      },
+    });
+    expect(prompt).toContain("Era: 帝国历晚期");
+    expect(prompt).toContain("Time: 帝国历 998 年冬");
+    expect(prompt).toContain("Anchor event (this play began at this moment): 就在黑船叩港的前夜");
+    expect(prompt).toContain("Canon cutoff (原作知识截止点): 主线大战爆发之前");
+    expect(prompt).toContain("截止点之后的原作事件在本世界尚未发生，除非它已在本局中发生。");
+  });
+
+  it("原创降级档（无截止点）只追加锚点事件，不出现截止点与毯式规则", () => {
+    const prompt = narratorTurnSystem({
+      mode: "creator",
+      scale: "scene",
+      temporal: {
+        era: "裂光纪",
+        time: "裂光元年",
+        anchorEvent: "巨龙坠落在王都上空的那个清晨",
+      },
+    });
+    expect(prompt).toContain("Anchor event (this play began at this moment): 巨龙坠落在王都上空的那个清晨");
+    expect(prompt).not.toContain("Canon cutoff");
+    expect(prompt).not.toContain("截止点之后的原作事件在本世界尚未发生");
+  });
+
+  it("旧世界（无锚点数据）时间块形状逐字节不变", () => {
+    const prompt = narratorTurnSystem({
+      mode: "pantheon",
+      scale: "scene",
+      temporal: { era: "潮汐纪元", time: "第七日" },
+    });
+    expect(prompt).toContain(
+      "== CURRENT WORLD TIME ==\nEra: 潮汐纪元\nTime: 第七日\nThe dial is the default span.",
+    );
+    expect(prompt).not.toContain("Anchor event");
+    expect(prompt).not.toContain("截止点之后的原作事件在本世界尚未发生");
+  });
+});
+
 describe("余烬低谷文体块（EMBER REGISTER）", () => {
   it("playerGodRank=ember 时注入低谷文体块与回燃线索", () => {
     const prompt = narratorTurnSystem({

@@ -286,15 +286,31 @@ async function* settleChapterWithLease(
   const observerTime = timeline.observerState && typeof timeline.observerState === "object" && !Array.isArray(timeline.observerState)
     ? (timeline.observerState as { timeLabel?: unknown }).timeLabel
     : null;
-  const settlementTimeLabel = typeof observerTime === "string" && observerTime.trim()
-    ? observerTime.trim()
-    : "此刻";
   const realityEra = timeline.realityState && typeof timeline.realityState === "object" && !Array.isArray(timeline.realityState)
     ? (timeline.realityState as { currentEra?: unknown }).currentEra
     : null;
-  const settlementEraLabel = typeof realityEra === "string" && realityEra.trim()
-    ? realityEra.trim()
-    : "未名纪元";
+  // 新契约世界（realityState 携带 anchorOrdinal，时间一致设计稿 §12）：结算时间
+  // 标签缺失直接失败，禁用「未名纪元/此刻」回退；旧世界保持原有回退值不变。
+  const anchorOrdinalValue = timeline.realityState && typeof timeline.realityState === "object" && !Array.isArray(timeline.realityState)
+    ? (timeline.realityState as { anchorOrdinal?: unknown }).anchorOrdinal
+    : null;
+  const temporalFailFast = typeof anchorOrdinalValue === "number";
+  let settlementTimeLabel: string;
+  if (typeof observerTime === "string" && observerTime.trim()) {
+    settlementTimeLabel = observerTime.trim();
+  } else if (temporalFailFast) {
+    throw new Error("新契约世界的观察状态缺少 timeLabel：结算时间回退已禁用");
+  } else {
+    settlementTimeLabel = "此刻";
+  }
+  let settlementEraLabel: string;
+  if (typeof realityEra === "string" && realityEra.trim()) {
+    settlementEraLabel = realityEra.trim();
+  } else if (temporalFailFast) {
+    throw new Error("新契约世界的现实状态缺少 currentEra：结算时间回退已禁用");
+  } else {
+    settlementEraLabel = "未名纪元";
+  }
   assertActiveReality(world.activeTimelineId, timeline.id);
   const parsedReality = RealityStateSchema.safeParse(timeline.realityState);
   if (mode === "creator" && !parsedReality.success) throw new Error("创世主现实状态无效");
@@ -317,6 +333,7 @@ async function* settleChapterWithLease(
           world,
           mode,
           parsedReality.success ? parsedReality.data : undefined,
+          temporalFailFast ? settlementTimeLabel : null,
         );
         settlement = await completeStructured("backstage", {
           task: "settlement",
@@ -663,6 +680,13 @@ async function buildSettlementContext(
   world: SettlementWorld,
   mode: WorldMode,
   reality?: RealityState,
+  /**
+   * 新契约世界（时间一致设计稿 §12）已通过 fail-fast 校验的观察时间标签；
+   * 旧世界传 null。用它取代「元年」种子：新世界首次结算尚无编年史条目，
+   * 若在此直接抛错会击穿每个新世界的第一次结算，故改注入真实锚点时间——
+   * 「元年」这一虚构回退对新契约世界不可达。
+   */
+  anchorTimeLabel: string | null = null,
 ): Promise<Parameters<typeof settlementUserPrompt>[0]> {
   const [entities, gods, abilities, lastEntry, worldActivity, pantheonHistory, entityRelations, canonEventRows, chosenMortalRows] = await Promise.all([
     prisma.entity.findMany({
@@ -793,7 +817,7 @@ async function buildSettlementContext(
     eraSystem: theme.eraSystem ?? "纪元",
     currentYearLabel: mode === "creator" && reality
       ? reality.currentEra
-      : lastEntry?.yearLabel ?? "元年",
+      : lastEntry?.yearLabel ?? anchorTimeLabel ?? "元年",
     entities: entities.map((entity) => {
       const locked = new Set(entity.lockedPaths);
       const sections = entity.sections
@@ -1133,10 +1157,25 @@ async function applyCanonEventUpdates(
     value !== null && typeof value === "object" && !Array.isArray(value)
       ? value as Record<string, unknown>
       : {};
-  const labelOr = (value: unknown, fallback: string): string =>
-    typeof value === "string" && value.trim() ? value.trim() : fallback;
-  const eraLabel = labelOr(jsonRecord(timelineRow?.realityState).currentEra, "未名纪元");
-  const timeLabel = labelOr(jsonRecord(timelineRow?.observerState).timeLabel, "此刻");
+  // 新契约世界（realityState 携带 anchorOrdinal，设计稿 §12）禁用时间回退；
+  // 旧世界保持「未名纪元/此刻」回退值不变。
+  const canonTemporalFailFast =
+    typeof jsonRecord(timelineRow?.realityState).anchorOrdinal === "number";
+  const labelOr = (value: unknown, fallback: string, missingMessage: string): string => {
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (canonTemporalFailFast) throw new Error(missingMessage);
+    return fallback;
+  };
+  const eraLabel = labelOr(
+    jsonRecord(timelineRow?.realityState).currentEra,
+    "未名纪元",
+    "新契约世界的现实状态缺少 currentEra：将临之事传闻时间回退已禁用",
+  );
+  const timeLabel = labelOr(
+    jsonRecord(timelineRow?.observerState).timeLabel,
+    "此刻",
+    "新契约世界的观察状态缺少 timeLabel：将临之事传闻时间回退已禁用",
+  );
 
   for (const update of updates) {
     const row = await db.canonEvent.findUnique({

@@ -2,7 +2,9 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 import {
   CreatorWorldDeckSchema,
+  DECK_CARD_KEYS,
   LegacyWorldDeckSchema,
+  TemporalAnchorCardSchema,
   WorldDeckSchema,
   isLegacyWorldDeck,
   normalizeLegacyWorldDeck,
@@ -322,7 +324,7 @@ describe("WorldDeck 能力与主要人物引用", () => {
     ["种族能力", (deck: ReturnType<typeof completeDeck>) => { deck.races[0]!.abilities = deck.races[0]!.abilities.slice(0, 1); }],
     ["玩家神权", (deck: ReturnType<typeof completeDeck>) => { deck.playerGod.abilities = deck.playerGod.abilities.slice(0, 2); }],
     ["主神神权", (deck: ReturnType<typeof completeDeck>) => { deck.majorGods[0]!.abilities = deck.majorGods[0]!.abilities.slice(0, 2); }],
-    ["主要人物", (deck: ReturnType<typeof completeDeck>) => { deck.majorCharacters = deck.majorCharacters.slice(0, 5); }],
+    ["主要人物", (deck: ReturnType<typeof completeDeck>) => { deck.majorCharacters = deck.majorCharacters.slice(0, 3); }],
     ["个人技能", (deck: ReturnType<typeof completeDeck>) => { deck.majorCharacters[0]!.abilities = deck.majorCharacters[0]!.abilities.slice(0, 1); }],
   ])("严格的新创世卡组拒绝不足数量的%s", (_label, mutate) => {
     const deck = completeDeck();
@@ -543,6 +545,172 @@ describe("将临之事（canonEvents）", () => {
       })),
     ];
     expect(WorldDeckSchema.safeParse(deckWith(six)).success).toBe(false);
+  });
+});
+
+function ipTemporalAnchorCard() {
+  return {
+    source: {
+      basis: "single_ip" as const,
+      sourceIps: ["测试原作"],
+      continuity: "原著小说线",
+      continuitySource: "model_inferred" as const,
+      ambiguityNotes: [],
+    },
+    anchor: {
+      anchorType: "main_story_opening" as const,
+      currentTimeLabel: "裂光元年冬",
+      currentEraLabel: "裂光纪",
+      anchorEvent: "主线开幕前夜，晨钟尚未鸣响",
+      canonCutoff: "原著第一卷开幕之前" as string | null,
+      selectionSource: "model_inferred" as const,
+      confidence: "high" as const,
+      assumptions: ["神谕未指定时期，默认主线前夕"],
+    },
+    anchorOrdinal: 0,
+  };
+}
+
+function originalTemporalAnchorCard() {
+  return {
+    source: { basis: "original" as const, ambiguityNotes: [] },
+    anchor: {
+      ...ipTemporalAnchorCard().anchor,
+      anchorType: "original_present" as const,
+      canonCutoff: null as string | null,
+      selectionSource: "player_explicit" as const,
+      assumptions: [],
+    },
+    anchorOrdinal: 0,
+  };
+}
+
+describe("时间锚点（temporalAnchor）与锚点状态", () => {
+  const issueAt = (result: ReturnType<typeof WorldDeckSchema.safeParse>, path: string) => {
+    if (result.success) throw new Error("预期解析失败");
+    return result.error.issues.some((issue) => issue.path.join(".") === path);
+  };
+
+  it("不携带 temporalAnchor 的旧卡组照常解析且不注入该键", () => {
+    const parsed = WorldDeckSchema.parse(completeDeck());
+    expect(parsed.temporalAnchor).toBeUndefined();
+    expect(Object.keys(parsed)).not.toContain("temporalAnchor");
+  });
+
+  it("旧卡组解析不注入锚点状态与能力时序字段（缺省即 active 等价，字节不变）", () => {
+    const parsed = WorldDeckSchema.parse(completeDeck());
+    if (parsed.mode !== "pantheon") throw new Error("预期 pantheon 卡组");
+    for (const card of [
+      parsed.majorCharacters[0]!,
+      parsed.majorGods[0]!,
+      parsed.playerGod,
+      parsed.factions[0]!,
+      parsed.races[0]!,
+      parsed.places[0]!,
+    ]) {
+      expect(Object.keys(card)).not.toContain("statusAtAnchor");
+      expect(Object.keys(card)).not.toContain("anchorNote");
+    }
+    expect(Object.keys(parsed.playerGod.abilities[0]!)).not.toContain("timing");
+    expect(Object.keys(parsed.majorCharacters[0]!.abilities[0]!)).not.toContain("timing");
+  });
+
+  it("解析携带 IP 锚点卡与原创锚点卡的卡组", () => {
+    const ip = WorldDeckSchema.parse({ ...completeDeck(), temporalAnchor: ipTemporalAnchorCard() });
+    expect(ip.temporalAnchor).toMatchObject({
+      anchorOrdinal: 0,
+      source: { basis: "single_ip", sourceIps: ["测试原作"] },
+      anchor: { anchorType: "main_story_opening", canonCutoff: "原著第一卷开幕之前" },
+    });
+
+    const original = WorldDeckSchema.parse({
+      ...completeDeck(),
+      temporalAnchor: originalTemporalAnchorCard(),
+    });
+    expect(original.temporalAnchor?.source.basis).toBe("original");
+    expect(original.temporalAnchor?.anchor.canonCutoff).toBeNull();
+  });
+
+  it("IP 世界缺 canonCutoff 与原创世界带 canonCutoff 都被拒", () => {
+    const missingCutoff = ipTemporalAnchorCard();
+    missingCutoff.anchor.canonCutoff = null;
+    expect(issueAt(
+      WorldDeckSchema.safeParse({ ...completeDeck(), temporalAnchor: missingCutoff }),
+      "temporalAnchor.anchor.canonCutoff",
+    )).toBe(true);
+
+    const extraCutoff = originalTemporalAnchorCard();
+    extraCutoff.anchor.canonCutoff = "不应存在的截止点";
+    expect(issueAt(
+      WorldDeckSchema.safeParse({ ...completeDeck(), temporalAnchor: extraCutoff }),
+      "temporalAnchor.anchor.canonCutoff",
+    )).toBe(true);
+
+    expect(TemporalAnchorCardSchema.safeParse(ipTemporalAnchorCard()).success).toBe(true);
+    expect(TemporalAnchorCardSchema.safeParse(missingCutoff).success).toBe(false);
+  });
+
+  it("拒绝各实体的越界 statusAtAnchor 与能力 timing 值", () => {
+    const badCharacter = completeDeck() as unknown as {
+      majorCharacters: Array<Record<string, unknown>>;
+    };
+    badCharacter.majorCharacters[0]!.statusAtAnchor = "retired";
+    expect(WorldDeckSchema.safeParse(badCharacter).success).toBe(false);
+
+    const badPlace = completeDeck() as unknown as { places: Array<Record<string, unknown>> };
+    badPlace.places[0]!.statusAtAnchor = "active";
+    expect(WorldDeckSchema.safeParse(badPlace).success).toBe(false);
+
+    const badTiming = completeDeck() as unknown as {
+      playerGod: { abilities: Array<Record<string, unknown>> };
+    };
+    badTiming.playerGod.abilities[0]!.timing = "someday";
+    expect(WorldDeckSchema.safeParse(badTiming).success).toBe(false);
+  });
+
+  it("接受非 active 状态与 future/lost 时序的显式标注", () => {
+    const raw = completeDeck() as unknown as {
+      majorCharacters: Array<Record<string, unknown>>;
+    };
+    raw.majorCharacters[1]!.statusAtAnchor = "dead";
+    raw.majorCharacters[1]!.anchorNote = "三年前战死于北境";
+    (raw.majorCharacters[1]!.abilities as Array<Record<string, unknown>>)[0]!.timing = "future";
+    const parsed = WorldDeckSchema.parse(raw);
+    expect(parsed.majorCharacters[1]).toMatchObject({
+      statusAtAnchor: "dead",
+      anchorNote: "三年前战死于北境",
+    });
+    expect(parsed.majorCharacters[1]!.abilities[0]!.timing).toBe("future");
+  });
+
+  it("携带锚点卡时将临之事 ordinal 必须大于 anchorOrdinal", () => {
+    const anchored = {
+      ...completeDeck(),
+      temporalAnchor: { ...ipTemporalAnchorCard(), anchorOrdinal: 2 },
+      canonEvents: canonEventsFixture(),
+    };
+    const result = WorldDeckSchema.safeParse(anchored);
+    expect(issueAt(result, "canonEvents.0.ordinal")).toBe(true);
+    expect(issueAt(result, "canonEvents.1.ordinal")).toBe(true);
+    if (result.success) throw new Error("预期解析失败");
+    expect(result.error.issues.some((issue) => issue.path.join(".") === "canonEvents.2.ordinal")).toBe(false);
+
+    expect(WorldDeckSchema.safeParse({
+      ...completeDeck(),
+      temporalAnchor: ipTemporalAnchorCard(),
+      canonEvents: canonEventsFixture(),
+    }).success).toBe(true);
+  });
+
+  it("majorCharacters 下限降为 4（小体量原作准确性优先）", () => {
+    const four = completeDeck();
+    four.majorCharacters = four.majorCharacters.slice(0, 4);
+    four.factions[1]!.keyCharacterRefs = [{ ref: "character-1" }];
+    expect(WorldDeckSchema.safeParse(four).success).toBe(true);
+  });
+
+  it("temporalAnchor 进入重掷粒度键（编辑器 UI 键暂缓）", () => {
+    expect(DECK_CARD_KEYS).toContain("temporalAnchor");
   });
 });
 

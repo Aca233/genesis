@@ -277,7 +277,12 @@ export function narratorTurnSystem(opts: {
   mode: WorldMode;
   scale: Scale;
   playerInput?: string;
-  temporal?: { era: string; time: string };
+  /**
+   * anchorEvent / canonCutoff：时间锚点契约（时间一致设计稿 §12）的回合头扩展。
+   * 仅新契约世界（卡组携带 temporalAnchor）提供；旧世界缺省时块形状逐字节不变。
+   * canonCutoff 只在 IP 世界存在（原创降级档为 null，不注入截止点与毯式规则）。
+   */
+  temporal?: { era: string; time: string; anchorEvent?: string; canonCutoff?: string };
   playerGodRank?: string;
   omens?: string[];
   proactiveEvent?: { godName: string; text: string };
@@ -285,9 +290,20 @@ export function narratorTurnSystem(opts: {
 }): string {
   const blocks = [`== CURRENT SCALE ==\n${SCALE_RULES[opts.scale]}`];
   if (opts.temporal) {
+    const anchorLines = [
+      ...(opts.temporal.anchorEvent
+        ? [`Anchor event (this play began at this moment): ${opts.temporal.anchorEvent}`]
+        : []),
+      ...(opts.temporal.canonCutoff
+        ? [
+            `Canon cutoff (原作知识截止点): ${opts.temporal.canonCutoff}`,
+            `截止点之后的原作事件在本世界尚未发生，除非它已在本局中发生。`,
+          ]
+        : []),
+    ];
     blocks.push(`== CURRENT WORLD TIME ==
 Era: ${opts.temporal.era}
-Time: ${opts.temporal.time}
+Time: ${opts.temporal.time}${anchorLines.length ? `\n${anchorLines.join("\n")}` : ""}
 The dial is the default span. Any explicit time wording in the current player input overrides the dial for this reply only and must not change the dial itself. Never report or ask about a conflict.
 Write every year label in exactly the established era format supplied above; never emit a variant spelling or ad-hoc abbreviation of the same calendar.`);
   }

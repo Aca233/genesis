@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { completeCreatorDeck } from "@/lib/abilities/embark.test-fixtures";
+import { completeCreatorDeck, completeDeck } from "@/lib/abilities/embark.test-fixtures";
 import { initialObserverState, initialRealityState } from "@/lib/reality/schemas";
 
 const mocks = vi.hoisted(() => ({
@@ -694,6 +694,116 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     // 输出契约中的 probe 规则会提及该词组，故断言块标题而非裸词
     expect(systems).not.toContain("== INVESTIGATION ADJUDICATION ==");
     expect(systems).not.toContain("潮神已凿穿海堤");
+  });
+
+  describe("时间锚点契约：新契约世界的叙事时间纪律（设计稿 §12）", () => {
+  const anchoredDraftDeck = {
+    temporalAnchor: {
+      source: {
+        basis: "single_ip",
+        sourceIps: ["测试原作"],
+        continuity: "原著小说线",
+        continuitySource: "model_inferred",
+        ambiguityNotes: [],
+      },
+      anchor: {
+        anchorType: "main_story_opening",
+        currentTimeLabel: "帝国历 998 年冬",
+        currentEraLabel: "帝国历晚期",
+        anchorEvent: "就在黑船叩港的前夜",
+        canonCutoff: "主线大战爆发之前",
+        selectionSource: "model_inferred",
+        confidence: "high",
+        assumptions: [],
+      },
+      anchorOrdinal: 0,
+    },
+    epochConflict: { epochName: "旧回退纪元", yearLabel: "旧回退时刻" },
+  };
+
+  function mockAnchoredWorld() {
+    mocks.prisma.world.findUnique.mockResolvedValue({
+      name: "锚定世界", mode: "pantheon", activeTimelineId: "timeline-1",
+      styleCard: null, themeCard: null, cosmology: null, fusionAxiom: null,
+      draftDeck: anchoredDraftDeck, lorebookEntries: [],
+    });
+  }
+
+  it("现实/观察状态齐备时注入锚点回合头（锚点事件 + 截止点 + 毯式规则）", async () => {
+    const deck = completeDeck();
+    mockAnchoredWorld();
+    mockChapter({
+      timeline: {
+        id: "timeline-1",
+        realityState: {
+          ...initialRealityState(deck),
+          currentEra: "帝国历晚期",
+          anchorOrdinal: 0,
+          canonCutoff: "主线大战爆发之前",
+        },
+        observerState: { ...initialObserverState(deck), timeLabel: "帝国历 998 年冬" },
+      },
+    });
+
+    const messages = await buildNarratorContext({
+      worldId: "world-1", chapterId: "chapter-1", playerInput: "巡视港城",
+      scale: "scene", mode: "say",
+    });
+    const systems = messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .join("\n");
+
+    expect(systems).toContain("Era: 帝国历晚期");
+    expect(systems).toContain("Time: 帝国历 998 年冬");
+    expect(systems).not.toContain("旧回退纪元");
+    expect(systems).toContain("Anchor event (this play began at this moment): 就在黑船叩港的前夜");
+    expect(systems).toContain("Canon cutoff (原作知识截止点): 主线大战爆发之前");
+    expect(systems).toContain("截止点之后的原作事件在本世界尚未发生，除非它已在本局中发生。");
+  });
+
+  it("新契约世界现实状态缺失时 fail-fast，不再回退未名纪元", async () => {
+    mockAnchoredWorld();
+    mockChapter(); // realityState: null → 回退路径已被禁用
+
+    await expect(buildNarratorContext({
+      worldId: "world-1", chapterId: "chapter-1", playerInput: "巡视港城",
+      scale: "scene", mode: "say",
+    })).rejects.toThrow("新契约世界的现实状态缺少 currentEra");
+  });
+
+  it("新契约世界观察时间缺失时 fail-fast，不再回退此刻", async () => {
+    const deck = completeDeck();
+    mockAnchoredWorld();
+    mockChapter({
+      timeline: {
+        id: "timeline-1",
+        realityState: { ...initialRealityState(deck), anchorOrdinal: 0 },
+        observerState: null,
+      },
+    });
+
+    await expect(buildNarratorContext({
+      worldId: "world-1", chapterId: "chapter-1", playerInput: "巡视港城",
+      scale: "scene", mode: "say",
+    })).rejects.toThrow("新契约世界的观察状态缺少 timeLabel");
+  });
+
+  it("旧世界（无锚点）保持未名纪元/此刻回退且不出现锚点行", async () => {
+    const messages = await buildNarratorContext({
+      worldId: "world-1", chapterId: "chapter-1", playerInput: "巡视港城",
+      scale: "scene", mode: "say",
+    });
+    const systems = messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .join("\n");
+
+    expect(systems).toContain("Era: 未名纪元");
+    expect(systems).toContain("Time: 此刻");
+    expect(systems).not.toContain("Anchor event");
+    expect(systems).not.toContain("截止点之后的原作事件在本世界尚未发生");
+  });
   });
 });
 

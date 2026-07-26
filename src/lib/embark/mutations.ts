@@ -234,6 +234,12 @@ export async function materializeEmbarkDeck(
       throw new Error(`无法解析种族引用 "${character.raceRef}"`);
     }
 
+    // 时间锚点契约（设计稿 §12）：非 active 锚点状态的人物物化为 dormant，
+    // 不作为在场活跃实体登台；仅新契约卡组（携带 temporalAnchor）走此分支，
+    // 旧卡组保持数据库默认 heat 不变。
+    const dormantAtAnchor = deck.temporalAnchor !== undefined
+      && character.statusAtAnchor !== undefined
+      && character.statusAtAnchor !== "active";
     const created = await tx.entity.create({
       data: {
         timelineId: timeline.id,
@@ -243,6 +249,7 @@ export async function materializeEmbarkDeck(
         emblemSeed: emblemSeed(character.name),
         isMajorCharacter: true,
         raceId,
+        ...(dormantAtAnchor ? { heat: "dormant" } : {}),
         summary: character.situation.slice(0, 120),
         materialRef: character.ref,
         sections: { create: characterSections(character) },

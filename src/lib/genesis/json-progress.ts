@@ -1,6 +1,7 @@
 export const GENESIS_TOP_LEVEL_KEYS = [
   "mode",
   "worldName",
+  "temporalAnchor",
   "cosmology",
   "fusionAxiom",
   "playerGod",

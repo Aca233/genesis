@@ -9,7 +9,9 @@ import {
   type WorldDeck,
 } from "@/lib/cards/schemas";
 import { genesisRepairPrompt, genesisSystem, genesisUserPrompt } from "@/lib/prompts/genesis";
-import { lorebookExcerpts, parseStWorldbook } from "@/lib/lorebook/st-import";
+import { fallbackLorebookExcerpts, parseStWorldbook } from "@/lib/lorebook/st-import";
+import { classifyLoreEntries } from "@/lib/lore-index/classifier";
+import { LORE_GENESIS_BUDGET_CHARS, selectLoreForGenesis } from "@/lib/lore-index/selection";
 import { generateGenesisDeck } from "./generate";
 import { GenesisMaterialSnapshotSchema, type GenesisMaterialSnapshot } from "@/lib/materials/types";
 import { materialConstraintsPrompt } from "@/lib/materials/prompt";
@@ -77,6 +79,34 @@ export function buildGenesisRequest(input: GenesisRequestInput) {
   return input.mode === "pantheon"
     ? { ...shared, mode: input.mode, schema: PantheonWorldDeckSchema }
     : { ...shared, mode: input.mode, schema: CreatorWorldDeckSchema };
+}
+
+type ResolveLoreExcerptsDeps = {
+  classify: typeof classifyLoreEntries;
+  select: typeof selectLoreForGenesis;
+};
+
+/**
+ * 创世注入切换（时间一致设计稿 §11，T4b）：
+ *
+ * 1. 任务携带世界书 → 触发 classifyLoreEntries（backstage 槽位，幂等，
+ *    已索引条目按 sourceKey 跨创世复用）；
+ * 2. 分类成功 → 用 selectLoreForGenesis 的类别预算选择（≈8000 字符）
+ *    替代原始上传序截取；
+ * 3. 分类失败/缺席 → 回退到与既有 lorebookExcerpts 逐字节一致的原始摘录，
+ *    仅前置一行「资料索引不可用，按原始顺序注入」（不阻断创世）。
+ */
+export async function resolveLorebookExcerpts(
+  entries: ReturnType<typeof parseStWorldbook>,
+  deps: ResolveLoreExcerptsDeps = { classify: classifyLoreEntries, select: selectLoreForGenesis },
+): Promise<string | undefined> {
+  if (!entries.length) return undefined;
+  const indexRows = await deps.classify(entries, "backstage");
+  if (indexRows !== null) {
+    const { excerpt } = deps.select(indexRows, LORE_GENESIS_BUDGET_CHARS);
+    return excerpt || undefined;
+  }
+  return fallbackLorebookExcerpts(entries) || undefined;
 }
 
 type ClaimDb = {
@@ -180,7 +210,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
 
   try {
     parsedEntries = task.lorebook ? parseStWorldbook(task.lorebook) : [];
-    excerpts = lorebookExcerpts(parsedEntries) || undefined;
+    excerpts = await resolveLorebookExcerpts(parsedEntries);
     const materialSnapshot: GenesisMaterialSnapshot | null = task.materialSelection == null
       ? null
       : GenesisMaterialSnapshotSchema.parse(task.materialSelection);

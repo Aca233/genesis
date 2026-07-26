@@ -29,8 +29,11 @@ function advanceEvent(
   };
 }
 
-function fixture() {
-  const observerState = {
+function fixture(stateOverrides?: {
+  realityState?: unknown;
+  observerState?: Record<string, unknown>;
+}) {
+  const observerState = stateOverrides?.observerState ?? {
     focusType: "world",
     focusId: null,
     timeLabel: "第七码头日",
@@ -94,7 +97,9 @@ function fixture() {
     timeline: {
       findUnique: vi.fn(async () => ({
         id: "timeline-1",
-        realityState: { currentEra: "潮汐纪元" },
+        realityState: stateOverrides && "realityState" in stateOverrides
+          ? stateOverrides.realityState
+          : { currentEra: "潮汐纪元" },
         observerState: currentObserver,
         gods: [{ id: "god-tide" }],
         entities: [{ id: "entity-port" }, { id: "entity-city" }],
@@ -386,6 +391,72 @@ describe("applySettlementActivity", () => {
         originActivityId: { in: ["activity-b"] },
       },
       data: { originActivityId: "activity-a" },
+    });
+  });
+
+  it("新契约世界（realityState 携带 anchorOrdinal）观察时间缺失时，编年史动态同步 fail-fast", async () => {
+    const { tx } = fixture({
+      realityState: { currentEra: "潮汐纪元", anchorOrdinal: 0 },
+      observerState: { focusType: "world", focusId: null },
+    });
+
+    await expect(applySettlementActivity(tx, {
+      timelineId: "timeline-1",
+      chapterId: "chapter-1",
+      sourceMessageId: "message-current",
+      worldActivity: { mergeActivityIds: [], eventMutations: [] },
+      chronicleEntries: [{
+        yearLabel: "潮汐纪元七年",
+        text: "北港守军封锁盐路。",
+        subjectIds: ["entity-port"],
+      }],
+    })).rejects.toThrow("新契约世界的观察状态缺少 timeLabel");
+  });
+
+  it("新契约世界现实纪元缺失时，事件进展行 fail-fast，不再落「未名纪元」", async () => {
+    const { tx } = fixture({
+      realityState: { anchorOrdinal: 0 },
+    });
+
+    await expect(applySettlementActivity(tx, {
+      timelineId: "timeline-1",
+      chapterId: "chapter-1",
+      sourceMessageId: "message-current",
+      worldActivity: {
+        mergeActivityIds: [],
+        eventMutations: [advanceEvent()],
+      },
+    })).rejects.toThrow("新契约世界的现实状态缺少 currentEra");
+  });
+
+  it("旧世界（无 anchorOrdinal）标签缺失时保持未名纪元/此刻回退", async () => {
+    const { tx, activityRows } = fixture({
+      realityState: {},
+      observerState: { focusType: "world", focusId: null },
+    });
+
+    await applySettlementActivity(tx, {
+      timelineId: "timeline-1",
+      chapterId: "chapter-1",
+      sourceMessageId: "message-current",
+      worldActivity: {
+        mergeActivityIds: [],
+        eventMutations: [advanceEvent()],
+      },
+      chronicleEntries: [{
+        yearLabel: "潮汐纪元七年",
+        text: "北港守军封锁盐路。",
+        subjectIds: ["entity-port"],
+      }],
+    });
+
+    expect(activityRows.get("settlement:chapter-1:chronicle:0")).toMatchObject({
+      eraLabel: "潮汐纪元七年",
+      timeLabel: "此刻",
+    });
+    expect(activityRows.get("settlement:chapter-1:0:progress")).toMatchObject({
+      eraLabel: "未名纪元",
+      timeLabel: "此刻",
     });
   });
 

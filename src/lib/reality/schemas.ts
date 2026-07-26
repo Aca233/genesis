@@ -28,6 +28,12 @@ export const RealityStateSchema = z.object({
   cosmology: CosmologyCardSchema,
   fusionAxiom: FusionAxiomCardSchema.nullable(),
   currentEra: z.string(),
+  // ── 时间锚点加法字段（时间一致设计稿 §12，阶段 1）──
+  // 仅新契约世界（卡组携带 temporalAnchor）在开局物化时写入；旧世界永远缺省，
+  // 一切新行为（时间回退禁用等）都以这些字段的存在为门。刻意不设 .default()：
+  // 旧现实状态解析结果必须逐字节不变（它会被原样注入 ACTIVE REALITY STATE 提示块）。
+  anchorOrdinal: z.number().int().min(0).optional(),
+  canonCutoff: z.string().min(1).nullable().optional(),
   establishedFacts: z.array(EstablishedFactSchema),
 }).strict();
 
@@ -44,12 +50,24 @@ export type RealityState = z.infer<typeof RealityStateSchema>;
 export type ObserverState = z.input<typeof ObserverStateSchema>;
 
 export function initialRealityState(deck: WorldDeck): RealityState {
+  // 时间锚点契约（设计稿 §12）：卡组携带 temporalAnchor 时，当前纪元取自锚点
+  // 展示标签而非 epochConflict，并把 anchorOrdinal / canonCutoff 持久化进现实状态；
+  // 旧卡组（无锚点卡）保持原路径逐字节不变。
+  const temporalAnchor = deck.temporalAnchor;
   return RealityStateSchema.parse({
     theme: deck.theme,
     style: deck.style,
     cosmology: deck.cosmology,
     fusionAxiom: deck.fusionAxiom,
-    currentEra: deck.epochConflict.epochName,
+    currentEra: temporalAnchor !== undefined
+      ? temporalAnchor.anchor.currentEraLabel
+      : deck.epochConflict.epochName,
+    ...(temporalAnchor !== undefined
+      ? {
+          anchorOrdinal: temporalAnchor.anchorOrdinal,
+          canonCutoff: temporalAnchor.anchor.canonCutoff,
+        }
+      : {}),
     establishedFacts: [],
   });
 }
@@ -58,7 +76,9 @@ export function initialObserverState(deck: WorldDeck): ObserverState {
   return ObserverStateSchema.parse({
     focusType: "world",
     focusId: null,
-    timeLabel: deck.epochConflict.yearLabel,
+    timeLabel: deck.temporalAnchor !== undefined
+      ? deck.temporalAnchor.anchor.currentTimeLabel
+      : deck.epochConflict.yearLabel,
     viewpoint: "omniscient",
     activeAvatarId: null,
     focusedEventId: null,

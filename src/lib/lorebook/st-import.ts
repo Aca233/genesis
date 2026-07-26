@@ -64,3 +64,22 @@ export function lorebookExcerpts(
   }
   return parts.join("\n---\n");
 }
+
+/**
+ * 资料索引不可用时，回退摘录前置的一行中文说明（时间一致设计稿 §11：
+ * 索引失败回退使用原始条目、不阻断创世）。该行进入创世提示词表面。
+ */
+export const LORE_INDEX_UNAVAILABLE_NOTICE = "资料索引不可用，按原始顺序注入";
+
+/**
+ * 索引失败/缺席时的回退摘录：与 lorebookExcerpts 逐字节一致，仅在非空时
+ * 前置一行 LORE_INDEX_UNAVAILABLE_NOTICE。摘录为空则返回空字符串
+ * （不注入孤立的说明行）。
+ */
+export function fallbackLorebookExcerpts(
+  entries: ParsedLorebookEntry[],
+  budgetChars = 8000,
+): string {
+  const raw = lorebookExcerpts(entries, budgetChars);
+  return raw ? `${LORE_INDEX_UNAVAILABLE_NOTICE}\n${raw}` : "";
+}

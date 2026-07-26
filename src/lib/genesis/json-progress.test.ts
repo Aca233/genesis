@@ -76,6 +76,15 @@ describe("TopLevelJsonProgressScanner", () => {
     expect(GENESIS_TOP_LEVEL_KEYS).toContain("canonEvents");
   });
 
+  it("temporalAnchor 对象值完整闭合后才被报告，且紧随 worldName 排序", () => {
+    const scanner = new TopLevelJsonProgressScanner();
+
+    expect(scanner.push('{"temporalAnchor":{"anchorOrdinal":0')).toEqual([]);
+    expect(scanner.push("}")).toEqual(["temporalAnchor"]);
+    expect(GENESIS_TOP_LEVEL_KEYS.indexOf("temporalAnchor"))
+      .toBe(GENESIS_TOP_LEVEL_KEYS.indexOf("worldName") + 1);
+  });
+
   it("支持数字、布尔值和 null 这类原始值", () => {
     const scanner = new TopLevelJsonProgressScanner();
     const completed = scanner.push('{"worldName":123,"cosmology":true,"fusionAxiom":null,"theme":false}');

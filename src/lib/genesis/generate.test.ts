@@ -39,6 +39,29 @@ function completeCreatorDeck() {
   });
 }
 
+function ipTemporalAnchorCard() {
+  return {
+    source: {
+      basis: "single_ip" as const,
+      sourceIps: ["测试原作"],
+      continuity: "原著小说线",
+      continuitySource: "model_inferred" as const,
+      ambiguityNotes: [],
+    },
+    anchor: {
+      anchorType: "main_story_opening" as const,
+      currentTimeLabel: "裂光元年冬",
+      currentEraLabel: "裂光纪",
+      anchorEvent: "主线开幕前夜，晨钟尚未鸣响",
+      canonCutoff: "原著第一卷开幕之前",
+      selectionSource: "model_inferred" as const,
+      confidence: "high" as const,
+      assumptions: [],
+    },
+    anchorOrdinal: 0,
+  };
+}
+
 describe("generateGenesisDeck", () => {
   it("要求调用方显式冻结生成模式", () => {
     expectTypeOf<GenesisGenerationOptions>().toMatchObjectType<{ mode: WorldMode }>();
@@ -142,6 +165,50 @@ describe("generateGenesisDeck", () => {
       invalidOutput: '{"mode":"pantheon","worldName":"破碎界"}',
       validationError: expect.stringContaining("cosmology"),
     }));
+  });
+
+  it("携带时间锚点的卡组存在时间矛盾时进入定向修补并携带时间码", async () => {
+    const anchored = PantheonWorldDeckSchema.parse({
+      ...completeDeck(),
+      temporalAnchor: ipTemporalAnchorCard(),
+    });
+    const invalid = structuredClone(anchored);
+    // character-2 是 faction-court（active）的关键人物：死人不能当现任领袖（T2）。
+    invalid.majorCharacters[1]!.statusAtAnchor = "dead";
+    invalid.majorCharacters[1]!.anchorNote = "三年前战死于北境";
+    const repairCompletion = vi.fn().mockResolvedValue(anchored);
+
+    await expect(generateGenesisDeck({
+      mode: "pantheon",
+      decree: "创造测试界",
+      streamCompletion: () => chunksOf(JSON.stringify(invalid)),
+      repairCompletion,
+      onProgress: vi.fn(), onChunk: vi.fn(), onStage: vi.fn(),
+    })).resolves.toEqual(anchored);
+
+    expect(repairCompletion).toHaveBeenCalledTimes(1);
+    expect(repairCompletion).toHaveBeenCalledWith(expect.objectContaining({
+      validationError: expect.stringContaining("T2 DEAD_LEADER"),
+    }));
+    const validationError = repairCompletion.mock.calls[0]![0].validationError as string;
+    expect(validationError).toContain("character-2");
+    expect(validationError).toContain("时间一致性校验失败");
+  });
+
+  it("无 temporalAnchor 的卡组不受时间验证器影响（迁移守护）", async () => {
+    const deck = completeDeck();
+    // 即使出现会触发 T2 的锚点状态数据，无锚点卡组也必须原样通过，零修补。
+    deck.majorCharacters[1]!.statusAtAnchor = "dead";
+    const repairCompletion = vi.fn();
+
+    await expect(generateGenesisDeck({
+      mode: "pantheon",
+      decree: "创造测试界",
+      streamCompletion: () => chunksOf(JSON.stringify(deck)),
+      repairCompletion,
+      onProgress: vi.fn(), onChunk: vi.fn(), onStage: vi.fn(),
+    })).resolves.toEqual(deck);
+    expect(repairCompletion).not.toHaveBeenCalled();
   });
 
   it("引用无效时也进入定向修补", async () => {

@@ -171,8 +171,23 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function label(value: unknown, fallback: string): string {
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+/**
+ * 时间标签解析（时间一致设计稿 §12）：新契约世界（realityState 携带 anchorOrdinal）
+ * 禁用「未名纪元/此刻」回退——标签缺失直接失败；旧世界保持原有回退值逐字不变。
+ */
+function temporalLabel(
+  value: unknown,
+  fallback: string,
+  failFast: boolean,
+  missingMessage: string,
+): string {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (failFast) throw new Error(missingMessage);
+  return fallback;
+}
+
+function hasTemporalAnchorState(realityState: unknown): boolean {
+  return typeof record(realityState).anchorOrdinal === "number";
 }
 
 function stableEventId(chapterId: string, index: number): string {
@@ -199,6 +214,7 @@ async function createProgressOnce(
   if (await tx.worldActivity.findUnique({ where: { id } })) return;
   const reality = record(timeline.realityState);
   const observer = record(timeline.observerState);
+  const failFast = hasTemporalAnchorState(timeline.realityState);
   await tx.worldActivity.create({
     data: {
       id,
@@ -212,8 +228,10 @@ async function createProgressOnce(
       targetIds: [],
       subjectIds,
       sourceMessageId: input.sourceMessageId,
-      eraLabel: source?.eraLabel ?? label(reality.currentEra, "未名纪元"),
-      timeLabel: source?.timeLabel ?? label(observer.timeLabel, "此刻"),
+      eraLabel: source?.eraLabel
+        ?? temporalLabel(reality.currentEra, "未名纪元", failFast, "新契约世界的现实状态缺少 currentEra：事件进展时间回退已禁用"),
+      timeLabel: source?.timeLabel
+        ?? temporalLabel(observer.timeLabel, "此刻", failFast, "新契约世界的观察状态缺少 timeLabel：事件进展时间回退已禁用"),
     },
   });
 }
@@ -296,7 +314,12 @@ export async function applySettlementActivity(
         subjectIds: entry.subjectIds,
         sourceMessageId: input.sourceMessageId,
         eraLabel: entry.yearLabel,
-        timeLabel: label(observer.timeLabel, "此刻"),
+        timeLabel: temporalLabel(
+          observer.timeLabel,
+          "此刻",
+          hasTemporalAnchorState(timeline.realityState),
+          "新契约世界的观察状态缺少 timeLabel：编年史动态时间回退已禁用",
+        ),
       },
     });
   }

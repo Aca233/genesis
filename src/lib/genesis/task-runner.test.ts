@@ -4,10 +4,18 @@ import {
   claimGenesisTask,
   persistWorld,
   renewGenesisLease,
+  resolveLorebookExcerpts,
   toGenesisTaskDto,
 } from "./task-runner";
 import { CreatorWorldDeckSchema, PantheonWorldDeckSchema } from "@/lib/cards/schemas";
 import { completeDeck } from "@/lib/abilities/embark.test-fixtures";
+import {
+  LORE_INDEX_UNAVAILABLE_NOTICE,
+  lorebookExcerpts,
+  type ParsedLorebookEntry,
+} from "@/lib/lorebook/st-import";
+import { LORE_GENESIS_BUDGET_CHARS, selectLoreForGenesis } from "@/lib/lore-index/selection";
+import type { LoreIndexRow } from "@/lib/lore-index/schemas";
 
 function task(overrides: Record<string, unknown> = {}) {
   return {
@@ -23,6 +31,85 @@ function task(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+function loreEntry(keys: string[], content: string, enabled = true): ParsedLorebookEntry {
+  return { keys, content, enabled, stExtra: {} };
+}
+
+function loreRow(
+  sourceKey: string,
+  category: LoreIndexRow["category"],
+  title: string,
+  priority: number,
+  excerpt: string,
+): LoreIndexRow {
+  return {
+    sourceKey,
+    title,
+    keywords: [title],
+    category,
+    temporalHints: { eraGuess: "", relativeToMainline: "unknown" },
+    priority,
+    excerpt,
+  };
+}
+
+describe("resolveLorebookExcerpts（§11 T4b 创世注入切换）", () => {
+  const entries = [
+    loreEntry(["轶闻"], "边角轶闻内容，上传序第一。"),
+    loreEntry(["编年史"], "主线前十年大事记，上传序第二。"),
+  ];
+
+  it("分类成功：用类别预算选择（8000 字符）替代原始上传序截取", async () => {
+    const rows = [
+      loreRow("k-anec", "other", "边角轶闻", 10, "边角轶闻摘录"),
+      loreRow("k-tl", "timeline", "主线编年史", 90, "主线前十年大事记摘录"),
+    ];
+    const classify = vi.fn(async () => rows);
+    const select = vi.fn(selectLoreForGenesis);
+
+    const result = await resolveLorebookExcerpts(entries, { classify, select });
+
+    expect(classify).toHaveBeenCalledWith(entries, "backstage");
+    expect(select).toHaveBeenCalledWith(rows, LORE_GENESIS_BUDGET_CHARS);
+    expect(LORE_GENESIS_BUDGET_CHARS).toBe(8000);
+    expect(result).toBe(selectLoreForGenesis(rows, LORE_GENESIS_BUDGET_CHARS).excerpt);
+    // 注入顺序由预算选择器决定（timeline 先于 other），不再是上传顺序
+    expect(result).toBe("[timeline|主线编年史]\n主线前十年大事记摘录\n---\n[other|边角轶闻]\n边角轶闻摘录");
+    expect(result).not.toContain(LORE_INDEX_UNAVAILABLE_NOTICE);
+  });
+
+  it("分类失败：回退摘录与既有 lorebookExcerpts 逐字节一致，仅前置一行说明", async () => {
+    const classify = vi.fn(async () => null);
+    const select = vi.fn(selectLoreForGenesis);
+
+    const result = await resolveLorebookExcerpts(entries, { classify, select });
+
+    expect(select).not.toHaveBeenCalled();
+    expect(result).toBe(`资料索引不可用，按原始顺序注入\n${lorebookExcerpts(entries)}`);
+    expect(result).toBe(
+      "资料索引不可用，按原始顺序注入\n" +
+        "[keys: 轶闻]\n边角轶闻内容，上传序第一。\n---\n[keys: 编年史]\n主线前十年大事记，上传序第二。",
+    );
+  });
+
+  it("无世界书条目：不触发分类，返回 undefined", async () => {
+    const classify = vi.fn(async () => null);
+    const select = vi.fn(selectLoreForGenesis);
+
+    await expect(resolveLorebookExcerpts([], { classify, select })).resolves.toBeUndefined();
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  it("分类成功但无可用行：返回 undefined（与原路径对空摘录的语义一致）", async () => {
+    const classify = vi.fn(async () => [] as LoreIndexRow[]);
+    const select = vi.fn(selectLoreForGenesis);
+
+    await expect(
+      resolveLorebookExcerpts([loreEntry(["禁"], "全部禁用", false)], { classify, select }),
+    ).resolves.toBeUndefined();
+  });
+});
 
 describe("genesis task runner", () => {
   it("DTO 不会泄露神谕、世界书或模型原始输出", () => {

@@ -38,6 +38,17 @@ export function resolveTemporalState(input: {
   const observer = record(input.observerState);
   const storedEra = nonEmpty(reality.currentEra);
   const storedTime = nonEmpty(observer.timeLabel);
+  // 新契约世界（现实状态携带 anchorOrdinal，时间一致设计稿 §12）：时间必须来自
+  // 现实状态本身，禁用一切只读回退；标签缺失说明开局物化或现实分叉数据已损坏。
+  if (typeof reality.anchorOrdinal === "number") {
+    if (storedEra === null) {
+      throw new Error("新契约世界的现实状态缺少 currentEra：时间回退已禁用，请检查开局物化或现实分叉数据");
+    }
+    if (storedTime === null) {
+      throw new Error("新契约世界的观察状态缺少 timeLabel：时间回退已禁用，请检查开局物化或现实分叉数据");
+    }
+    return { era: storedEra, time: storedTime };
+  }
   return {
     era: storedEra
       ?? nonEmpty(input.epochName)

@@ -50,6 +50,84 @@ export type Scale = z.infer<typeof ScaleSchema>;
 /** Trimmed non-empty reference key used for all cross-card and ability identities. */
 export const StableRefSchema = z.string().trim().min(1, "ref 不能为空白");
 
+// ───────────────────── 时间锚点（时间一致设计稿 §5，阶段 1 加法契约） ─────────────────────
+
+/** 锚点/连续性判定依据（§5.1/§5.2 共用） */
+export const TemporalSelectionSourceSchema = z.enum([
+  "player_explicit", // 玩家明确指定
+  "lorebook",        // 随行资料推断
+  "model_inferred",  // 模型自行推断
+]);
+
+/**
+ * 世界来源与连续性（§5.1 判别联合）。
+ * basis=original 走降级档（§6.2）：无 canonCutoff、无正史还原义务。
+ */
+export const WorldSourceSchema = z.discriminatedUnion("basis", [
+  z.object({
+    basis: z.literal("original").describe("原创世界：没有既有原作正史，走降级档（canonCutoff 必须为 null）"),
+    ambiguityNotes: z.array(z.string()).describe("来源判定中仍存的含糊之处，中文逐条；没有则为空数组"),
+  }).strict(),
+  z.object({
+    basis: z.enum(["single_ip", "multi_ip"]).describe("single_ip=单一原作；multi_ip=多原作融合"),
+    sourceIps: z.array(z.string().min(1)).min(1).describe("来源原作 IP 列表，使用通行名称"),
+    continuity: z.string().min(1).describe("采用的连续性版本，如「原著小说线」「2003 年动画线」"),
+    continuitySource: TemporalSelectionSourceSchema.describe("连续性版本的判定依据：玩家明示 / 资料推断 / 模型推断"),
+    ambiguityNotes: z.array(z.string()).describe("来源与连续性判定中仍存的含糊之处，中文逐条；没有则为空数组"),
+  }).strict(),
+]);
+export type WorldSource = z.infer<typeof WorldSourceSchema>;
+
+/** 时间锚点（§5.2）：开局时刻的定位。时间标签只做展示，不参与任何机器校验。 */
+export const TemporalAnchorSchema = z.object({
+  anchorType: z.enum([
+    "explicit_date",      // 明确日期
+    "explicit_event",     // 明确事件
+    "identity_period",    // 身份时期（如「主角还是学徒的年代」）
+    "main_story_opening", // 原作主线正式开始前夕（未指定时期时的默认档）
+    "original_present",   // 原创世界的当下
+  ]).describe("锚点类型；玩家未指定时期时默认 main_story_opening（原作主线正式开始前夕）"),
+  currentTimeLabel: z.string().min(1).describe("展示用当前时间标签，中文自由字符串（如「帝国历 998 年冬」）；不参与任何机器校验"),
+  currentEraLabel: z.string().min(1).describe("展示用当前纪元标签，中文自由字符串；不参与任何机器校验"),
+  anchorEvent: z.string().min(1).describe("把开局定位到具体时刻的锚点事件，中文一句话（如「就在黑船叩港的前夜」）"),
+  canonCutoff: z.string().min(1).nullable().describe("原作知识截止点：截止点之后的原作事件在本世界尚未发生。basis=original 时必须为 null；IP 世界必填"),
+  selectionSource: TemporalSelectionSourceSchema.describe("锚点的选定依据：玩家明示 / 资料推断 / 模型推断"),
+  confidence: z.enum(["high", "medium", "low"]).describe("锚点判定的置信度"),
+  assumptions: z.array(z.string()).describe("为选定该锚点所做的假设，中文逐条；没有则为空数组"),
+}).strict();
+export type TemporalAnchor = z.infer<typeof TemporalAnchorSchema>;
+
+/**
+ * 时间锚点顶层卡：来源 + 锚点 + 序数锚位。
+ * anchorOrdinal 与 canonEvents.ordinal 同处一条全局序数时间轴（§5.3）：
+ * 过去事件 ordinal < anchorOrdinal < 将临之事 ordinal。现行 canonEvents 契约以
+ * 开局时刻为 0、将临之事自 1 起，故新卡组通常 anchorOrdinal=0。
+ */
+export const TemporalAnchorCardSchema = z.object({
+  source: WorldSourceSchema.describe("世界来源与连续性"),
+  anchor: TemporalAnchorSchema.describe("时间锚点：开局时刻的定位"),
+  anchorOrdinal: z.number().int().min(0).describe(
+    "锚点在全局序数时间轴上的位置。整数序数是唯一被机器校验的时间：过去事件 ordinal < anchorOrdinal，将临之事（canonEvents）ordinal > anchorOrdinal；时间标签只做展示。现行契约以开局时刻为 0、将临之事自 1 起，因此通常填 0",
+  ),
+}).strict().superRefine((card, ctx) => {
+  if (card.source.basis === "original") {
+    if (card.anchor.canonCutoff !== null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["anchor", "canonCutoff"],
+        message: "basis=original 的原创世界必须将 canonCutoff 置为 null",
+      });
+    }
+  } else if (card.anchor.canonCutoff === null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["anchor", "canonCutoff"],
+      message: "IP 世界（single_ip/multi_ip）必须给出 canonCutoff 原作知识截止点",
+    });
+  }
+});
+export type TemporalAnchorCard = z.infer<typeof TemporalAnchorCardSchema>;
+
 // ───────────────────────── 单卡 ─────────────────────────
 
 /** 卡组阶段使用的能力完整描述；ref 是草稿内的稳定关系键。 */
@@ -63,6 +141,8 @@ export const DeckAbilitySchema = z.object({
   limitations: z.string().describe("边界、克制方式及不能做到的事"),
   mastery: AbilityMasterySchema,
   state: AbilityStateSchema,
+  timing: z.enum(["at_anchor", "future", "lost"]).optional()
+    .describe("能力相对时间锚点的时序：at_anchor=锚点时刻已持有；future=原作中锚点之后才会获得（statusAtAnchor=active 的实体不得已持有）；lost=锚点之前已失去。与 state/visibility/继承机制正交；缺省视为 at_anchor（旧卡组兼容）"),
   visibility: AbilityVisibilitySchema,
   rumorText: z.string().nullable(),
   lockedFields: z.array(z.string()).default([]),
@@ -108,6 +188,10 @@ export const MajorCharacterCardSchema = z.object({
   situation: z.string().describe("当前处境"),
   divineTies: z.string().describe("与诸神的关系"),
   conflictTies: z.string().describe("与时代冲突的关系"),
+  statusAtAnchor: z.enum(["active", "unborn", "dead", "missing", "sealed", "historical"]).optional()
+    .describe("锚点时刻的人物状态：active=在世且可活动；unborn=尚未出生；dead=已死亡；missing=失踪；sealed=被封印；historical=只存在于历史记载。缺省视为 active（旧卡组兼容）"),
+  anchorNote: z.string().optional()
+    .describe("一句话说明该锚点状态的来由（如「三年前战死于北境」）；active 且无须说明时留空"),
   learnedTraditionRefs: z.array(z.object({ sourceAbilityRef: StableRefSchema })),
   racialOverrides: z.array(RacialOverrideSchema),
   abilities: z.array(PersonalDeckAbilitySchema).min(2).max(5).describe("个人技能"),
@@ -163,6 +247,10 @@ export const MajorGodCardSchema = z.object({
     note: z.string(),
   }),
   faithScope: z.string().describe("信仰范围一句话"),
+  statusAtAnchor: z.enum(["active", "dormant", "sealed", "dead", "fragmented", "not_yet_ascended"]).optional()
+    .describe("锚点时刻的神明状态：active=活跃临世；dormant=沉眠；sealed=被封印；dead=已死亡；fragmented=神格破碎；not_yet_ascended=尚未成神。缺省视为 active（旧卡组兼容）"),
+  anchorNote: z.string().optional()
+    .describe("一句话说明该锚点状态的来由（如「诸神黄昏中陨落」）；active 且无须说明时留空"),
   abilities: z.array(DivineDeckAbilitySchema).min(3).max(6).describe("神权能力"),
 });
 
@@ -192,6 +280,10 @@ export const PlayerGodCardSchema = z.object({
   rank: RankSchema,
   faithBase: z.string().describe("初始信仰势力"),
   situation: z.string().describe("开局处境与钩子"),
+  statusAtAnchor: z.enum(["active", "dormant", "sealed", "dead", "fragmented", "not_yet_ascended"]).optional()
+    .describe("锚点时刻的玩家神状态；玩家神同样受锚点约束，不是时间规则的例外。开局可操作的玩家神应为 active。缺省视为 active（旧卡组兼容）"),
+  anchorNote: z.string().optional()
+    .describe("一句话说明该锚点状态的来由；active 且无须说明时留空"),
   abilities: z.array(DivineDeckAbilitySchema).min(3).max(6).describe("玩家神权"),
 });
 
@@ -203,6 +295,10 @@ export const FactionCardSchema = z.object({
   overview: z.string(),
   territory: z.string(),
   faith: z.string().describe("信仰归属与浓度"),
+  statusAtAnchor: z.enum(["active", "forming", "dissolved", "destroyed", "historical"]).optional()
+    .describe("锚点时刻的势力状态：active=正常运转；forming=正在成形；dissolved=已解散；destroyed=已被摧毁；historical=只存在于历史记载。缺省视为 active（旧卡组兼容）"),
+  anchorNote: z.string().optional()
+    .describe("一句话说明该锚点状态的来由（如「十年前于内战中解散」）；active 且无须说明时留空"),
   keyCharacterRefs: z.array(z.object({ ref: StableRefSchema })).describe("关键人物稳定引用"),
   // 旧草稿兼容字段；新的运行时关系以 keyCharacterRefs 为准。
   keyFigures: z.array(z.string()).optional().default([]).describe("旧草稿关键人物名"),
@@ -216,6 +312,10 @@ export const RaceCardSchema = z.object({
   lifespan: z.string(),
   distribution: z.string(),
   divineTies: z.string().describe("与诸神的渊源"),
+  statusAtAnchor: z.enum(["active", "declining", "extinct", "not_yet_emerged"]).optional()
+    .describe("锚点时刻的种族状态：active=繁盛存续；declining=衰落中；extinct=已灭绝；not_yet_emerged=尚未出现。缺省视为 active（旧卡组兼容）"),
+  anchorNote: z.string().optional()
+    .describe("一句话说明该锚点状态的来由（如「大寂灭后仅余孑遗」）；active 且无须说明时留空"),
   abilities: z.array(RaceDeckAbilitySchema).min(2).max(5).describe("先天能力与族群技艺"),
 });
 
@@ -226,6 +326,10 @@ export const PlaceCardSchema = z.object({
   kind: z.string().describe("大陆/城市/秘境/圣地"),
   overview: z.string(),
   allegiance: z.string().describe("归属"),
+  statusAtAnchor: z.enum(["accessible", "hidden", "sealed", "destroyed", "not_yet_created"]).optional()
+    .describe("锚点时刻的地点状态：accessible=可以抵达；hidden=隐匿未显；sealed=被封锁；destroyed=已毁灭；not_yet_created=尚未出现。缺省视为 accessible（旧卡组兼容）"),
+  anchorNote: z.string().optional()
+    .describe("一句话说明该锚点状态的来由（如「沉入海底已两百年」）；accessible 且无须说明时留空"),
 });
 
 export const EpochConflictCardSchema = z.object({
@@ -286,15 +390,16 @@ export const EventConsequenceSchema = z.discriminatedUnion("kind", [
  * （docs/superpowers/specs/2026-07-26-temporal-consistent-world-generation-design.md §5.3/§8.4）：
  * 整数 ordinal 承担全部先后序（timeLabel 仅展示），开局时刻为隐式 ordinal 0，
  * 所有条目 ordinal >= 1；epoch 固定 "future"，status 恒 "pending"，visibility 恒 "author_only"。
- * 注：设计稿 §6.2 对 basis=original 世界排除未来正史事件，但 worldSource/basis 字段尚不存在，
- * 且已批准的提案明确覆盖原创世界（候选自 epochConflict 派生）；待时间轴阶段 1 引入 basis 后，
- * 降级档可以再关闭原创世界的生成。
+ * 注：阶段 1 已引入可选的 temporalAnchor 卡（source.basis / anchorOrdinal）。卡组携带锚点时，
+ * 每个 ordinal 还必须大于 anchorOrdinal（epoch=future ⇔ ordinal > anchorOrdinal，见
+ * validateCanonFutureAxis）。设计稿 §6.2 的降级档（basis=original 关闭未来正史事件生成）
+ * 尚未启用——已批准的将临之事提案明确覆盖原创世界（候选自 epochConflict 派生），关闭与否留待后续裁决。
  */
 export const CanonFutureEventSchema = z.object({
   ref: StableRefSchema.describe("稳定引用"),
   title: z.string().min(1),
   timeLabel: z.string().describe("展示用自由时间标签，如「三年后的血月」"),
-  ordinal: z.number().int().min(1).describe("全局唯一整数先后序；开局时刻为 0"),
+  ordinal: z.number().int().min(1).describe("全局唯一整数先后序；开局时刻为 0。卡组携带 temporalAnchor 时还必须大于其 anchorOrdinal（过去 < anchorOrdinal < 将临之事）"),
   epoch: z.literal("future"),
   summary: z.string().describe("作者侧事件概要（中文）"),
   participantRefs: z.array(StableRefSchema).max(8),
@@ -336,12 +441,14 @@ export const ThemeCardSchema = z.object({
 
 const SharedWorldDeckShape = {
   worldName: z.string(),
+  temporalAnchor: TemporalAnchorCardSchema.optional()
+    .describe("时间锚点卡：世界来源、开局时刻与序数锚位。新世界必填，且必须先于一切实体卡确定；旧卡组（无此卡）按旧行为解析"),
   cosmology: CosmologyCardSchema,
   fusionAxiom: FusionAxiomCardSchema.nullable().describe("仅多IP融合时非空"),
   minorGods: z.array(MinorGodSchema),
   factions: z.array(FactionCardSchema).min(2).max(8),
   races: z.array(RaceCardSchema),
-  majorCharacters: z.array(MajorCharacterCardSchema).min(6).max(12),
+  majorCharacters: z.array(MajorCharacterCardSchema).min(4).max(12),
   places: z.array(PlaceCardSchema),
   epochConflict: EpochConflictCardSchema,
   canonEvents: z.array(CanonFutureEventSchema).min(3).max(5).optional()
@@ -478,6 +585,7 @@ function validateModeAwareDeckReferenceUniqueness(
 
 /** Structural view of the deck fields the canon future axis validator reads. */
 type CanonAxisDeckView = {
+  temporalAnchor?: { anchorOrdinal: number };
   playerGod?: { ref: string };
   majorGods: Array<{ ref: string }>;
   races: Array<{ ref: string }>;
@@ -490,10 +598,13 @@ type CanonAxisDeckView = {
 /**
  * 将临之事整轴校验：ordinal 严格递增（同时保证唯一）、每个参与者与条件引用
  * 都必须解析到既有卡组稳定 ref、prior_event_occurred 只准指向数组中更早的事件。
+ * 卡组携带 temporalAnchor 时，epoch=future ⇔ ordinal > anchorOrdinal（§5.3 序数时间轴）。
  */
 function validateCanonFutureAxis(deck: CanonAxisDeckView, ctx: z.RefinementCtx): void {
   const events = deck.canonEvents;
   if (events === undefined) return;
+
+  const anchorOrdinal = deck.temporalAnchor?.anchorOrdinal;
 
   const cardRefs = new Set<string>([
     ...(deck.playerGod === undefined ? [] : [deck.playerGod.ref]),
@@ -520,6 +631,13 @@ function validateCanonFutureAxis(deck: CanonAxisDeckView, ctx: z.RefinementCtx):
         code: "custom",
         path: ["canonEvents", index, "ordinal"],
         message: `将临之事 ordinal 必须按数组顺序严格递增：${previousOrdinal} 之后出现 ${event.ordinal}`,
+      });
+    }
+    if (anchorOrdinal !== undefined && event.ordinal <= anchorOrdinal) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["canonEvents", index, "ordinal"],
+        message: `epoch=future 的将临之事 ordinal 必须大于锚点 anchorOrdinal ${anchorOrdinal}：收到 ${event.ordinal}`,
       });
     }
     previousOrdinal = event.ordinal;
@@ -565,7 +683,10 @@ function validateCanonFutureAxis(deck: CanonAxisDeckView, ctx: z.RefinementCtx):
 
 /** Single superRefine entry combining reference uniqueness and the canon future axis. */
 function validateDeckIntegrity(
-  deck: DeckReferenceGraph & { canonEvents?: CanonFutureEvent[] },
+  deck: DeckReferenceGraph & {
+    canonEvents?: CanonFutureEvent[];
+    temporalAnchor?: { anchorOrdinal: number };
+  },
   ctx: z.RefinementCtx,
 ): void {
   validateModeAwareDeckReferenceUniqueness(deck, ctx);
@@ -773,8 +894,9 @@ export function normalizeLegacyWorldDeck(raw: unknown): LegacyWorldDeck {
   });
 }
 
-/** 卡片键（重掷粒度） */
+/** 卡片键（重掷粒度）。temporalAnchor 参与重掷 API 粒度；其编辑器 UI（时间校准卡）随后续批次交付。 */
 export const DECK_CARD_KEYS = [
+  "temporalAnchor",
   "cosmology",
   "fusionAxiom",
   "playerGod",
@@ -788,4 +910,9 @@ export const DECK_CARD_KEYS = [
   "style",
   "theme",
 ] as const;
-export type DeckCardKey = (typeof DECK_CARD_KEYS)[number];
+/**
+ * 编辑器 UI 消费的卡片键。时间校准卡 UI（确认页只读卡 + 重掷入口）交付前，
+ * temporalAnchor 暂不进入 DeckCardKey，以免 CARD_KEY_LABELS 等穷举映射被迫提前变更；
+ * UI 落地时应把本类型改回 (typeof DECK_CARD_KEYS)[number] 并补齐中文标签。
+ */
+export type DeckCardKey = Exclude<(typeof DECK_CARD_KEYS)[number], "temporalAnchor">;

@@ -5,6 +5,7 @@ import {
   WorldDeckSchema,
 } from "@/lib/cards/schemas";
 import { validateDeckReferences } from "@/lib/abilities/validator";
+import { validateTemporalConsistency } from "@/lib/genesis/temporal-validator";
 import { extractJson } from "@/lib/llm/structured";
 import type { GenesisMaterialSnapshot } from "@/lib/materials/types";
 import { assertMaterializedDeck } from "@/lib/materials/validate-result";
@@ -57,6 +58,8 @@ function validateParsedDeck(
   const deck = WorldDeckSchema.parse(rawDeck);
   assertExpectedMode(deck, expectedMode);
   validateDeckReferences(deck);
+  // 时间一致性 T1–T7（仅对携带 temporalAnchor 的新契约卡组生效；失败走既有修复路径）。
+  validateTemporalConsistency(deck);
   assertMaterializedDeck(deck, materialSnapshot);
   return deck;
 }

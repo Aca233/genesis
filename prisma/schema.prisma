@@ -517,6 +517,29 @@ model LorebookEntry {
 }
 
 
+// ───────────────────────── 资料索引 ─────────────────────────
+
+// LoreIndexEntry：世界书条目的持久化分类索引（时间一致设计稿 §11 阶段4）。
+// 索引是 LorebookEntry 之上的附加层，不是替换——ST 往返导出仍走 lorebook_entries。
+// sourceKey = 条目内容的 SHA-256 哈希，跨世界、跨创世稳定，同一份资料只分类一次；
+// 分类失败不落行，创世回退到原始条目截取，不阻断（§11）。
+model LoreIndexEntry {
+  id            String   @id @default(cuid())
+  userId        String   @default("local") @map("user_id")
+  sourceKey     String   @map("source_key") // 条目内容 SHA-256 十六进制
+  title         String
+  keywords      String[]
+  category      String // world_rule | timeline | character | faction | place | ability | other
+  temporalHints Json     @map("temporal_hints") // { eraGuess: string, relativeToMainline: before|during|after|unknown }
+  priority      Int      @default(50)
+  excerpt       String   @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, sourceKey])
+  @@index([userId, category])
+  @@map("lore_index_entries")
+}
+
 // ───────────────────────── 创世素材库 ─────────────────────────
 
 model MaterialCard {

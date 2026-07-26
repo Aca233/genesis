@@ -513,19 +513,50 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<NarratorCon
       : null,
     gods: godsSystemBlock(mode, gods.filter((god) => !god.isPlayer)),
   });
+  // ── 时间锚点契约（时间一致设计稿 §12）──
+  // 新契约世界（realityState 携带 anchorOrdinal，或创世卡组携带 temporalAnchor）
+  // 禁用「未名纪元/此刻」回退：叙事时间必须来自现实/观察状态本身，缺失即失败。
+  // 锚点展示数据（anchorEvent/canonCutoff）取自创世卡组的时间锚点卡（创世期静态数据）。
+  const deckAnchor = world.draftDeck && typeof world.draftDeck === "object"
+    ? (world.draftDeck as {
+        temporalAnchor?: { anchor?: { anchorEvent?: unknown; canonCutoff?: unknown } };
+      }).temporalAnchor?.anchor
+    : undefined;
+  const temporalContractActive = reality?.anchorOrdinal !== undefined || deckAnchor !== undefined;
+  let temporalEra: string;
+  let temporalTime: string;
+  if (temporalContractActive) {
+    if (!reality?.currentEra) {
+      throw new Error("新契约世界的现实状态缺少 currentEra：叙事时间回退已禁用，请检查开局物化或现实分叉数据");
+    }
+    if (!observer?.timeLabel) {
+      throw new Error("新契约世界的观察状态缺少 timeLabel：叙事时间回退已禁用，请检查开局物化或现实分叉数据");
+    }
+    temporalEra = reality.currentEra;
+    temporalTime = observer.timeLabel;
+  } else {
+    temporalEra = reality?.currentEra
+      ?? ((world.draftDeck && typeof world.draftDeck === "object"
+        ? (world.draftDeck as { epochConflict?: { epochName?: string } }).epochConflict?.epochName
+        : undefined) || "未名纪元");
+    temporalTime = observer?.timeLabel
+      ?? ((world.draftDeck && typeof world.draftDeck === "object"
+        ? (world.draftDeck as { epochConflict?: { yearLabel?: string } }).epochConflict?.yearLabel
+        : undefined) || "此刻");
+  }
   const turnSystem = narratorTurnSystem({
     mode,
     scale: opts.scale,
     playerInput: opts.playerInput,
     temporal: {
-      era: reality?.currentEra
-        ?? ((world.draftDeck && typeof world.draftDeck === "object"
-          ? (world.draftDeck as { epochConflict?: { epochName?: string } }).epochConflict?.epochName
-          : undefined) || "未名纪元"),
-      time: observer?.timeLabel
-        ?? ((world.draftDeck && typeof world.draftDeck === "object"
-          ? (world.draftDeck as { epochConflict?: { yearLabel?: string } }).epochConflict?.yearLabel
-          : undefined) || "此刻"),
+      era: temporalEra,
+      time: temporalTime,
+      ...(typeof deckAnchor?.anchorEvent === "string" && deckAnchor.anchorEvent.trim()
+        ? { anchorEvent: deckAnchor.anchorEvent.trim() }
+        : {}),
+      ...(typeof deckAnchor?.canonCutoff === "string" && deckAnchor.canonCutoff.trim()
+        ? { canonCutoff: deckAnchor.canonCutoff.trim() }
+        : {}),
     },
     playerGodRank: mode === "pantheon" ? playerGod?.rank : undefined,
     omens: omens.texts,
