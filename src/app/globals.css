@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "lxgw-wenkai-screen-webfont/lxgwwenkaiscreen.css";
-@import "@fontsource/noto-serif-sc/chinese-simplified-700.css";
-@import "@fontsource/noto-serif-sc/chinese-simplified-900.css";
+@import "@fontsource/noto-serif-sc/700.css";
+@import "@fontsource/noto-serif-sc/900.css";
 
 /* ───────────────────────── 羊皮古卷主题 Token ─────────────────────────
    隐喻：你在书写并阅读一部创世史书。

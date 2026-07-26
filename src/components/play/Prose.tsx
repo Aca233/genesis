@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useEntityIndex } from "./entity-index";
@@ -10,7 +11,7 @@ import { linkifyChildren } from "./EntityLink";
  * 模型输出常含 *强调*、**着重**、分隔线、列表等——按书页样式渲染而非裸露星号。
  * 段落/强调内的纯文本节点做实体名匹配 → 微光链接。
  */
-export function Prose({ text }: { text: string }) {
+export const Prose = memo(function Prose({ text }: { text: string }) {
   const { patterns } = useEntityIndex();
   const link = (children: React.ReactNode) => linkifyChildren(children, patterns);
 
@@ -90,4 +91,4 @@ export function Prose({ text }: { text: string }) {
       </ReactMarkdown>
     </div>
   );
-}
+});

@@ -17,6 +17,7 @@ import { buildWorldActivityContext } from "@/lib/world-activity/context";
 const LOREBOOK_BUDGET = 4000; // 世界书命中条目预算（字符）
 const WINDOW_BUDGET = 12000; // 正文窗口预算（字符），超出从最旧裁剪
 const RECENT_FOR_LORE = 6; // 参与世界书匹配的最近消息条数
+const CREATOR_HIDDEN_CHRONICLE_LIMIT = 30; // creator 模式作者视角隐藏编年史注入上限（条）
 
 export type NarratorMode = "say" | "continue" | "opening";
 
@@ -341,6 +342,7 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<NarratorCon
         prisma.chronicleEntry.findMany({
           where: { timelineId: chapter.timelineId, revealed: false },
           orderBy: { createdAt: "desc" },
+          take: CREATOR_HIDDEN_CHRONICLE_LIMIT,
         }),
       ])
     : await Promise.all([

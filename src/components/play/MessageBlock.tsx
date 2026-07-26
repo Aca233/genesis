@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { MessageRow, Variant } from "./types";
 import { Prose } from "./Prose";
 
@@ -16,7 +16,7 @@ function chosenIndex(variants: Variant[] | null): number {
   return i === -1 ? variants.length - 1 : i;
 }
 
-export function MessageBlock({
+export const MessageBlock = memo(function MessageBlock({
   message,
   readonly,
   busy,
@@ -244,4 +244,4 @@ export function MessageBlock({
       )}
     </div>
   );
-}
+});

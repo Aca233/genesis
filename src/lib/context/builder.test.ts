@@ -160,6 +160,7 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     expect(mocks.prisma.chronicleEntry.findMany).toHaveBeenCalledWith({
       where: { timelineId: "timeline-1", revealed: false },
       orderBy: { createdAt: "desc" },
+      take: 30,
     });
   });
 

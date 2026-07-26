@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
 import type { MessageRow } from "./types";
 import { MessageBlock } from "./MessageBlock";
 import { Prose } from "./Prose";
@@ -40,6 +40,9 @@ export function StoryStream({
   const bottomRef = useRef<HTMLDivElement>(null);
   const [stickBottom, setStickBottom] = useState(true);
   const stickRef = useRef(true);
+  // 流式文本降级渲染：SSE 高频更新时合并 Markdown 重解析，避免掉帧
+  const deferredStreaming = useDeferredValue(streamingText);
+  const deferredReroll = useDeferredValue(rerollingText);
 
   // 监听窗口滚动：距底 <100px 恢复吸底，上滚暂停
   useEffect(() => {
@@ -63,7 +66,7 @@ export function StoryStream({
   // 内容增长时若吸底则跟随
   useEffect(() => {
     if (stickRef.current) scrollToBottom();
-  }, [messages, streamingText, rerollingText, scrollToBottom]);
+  }, [messages, deferredStreaming, deferredReroll, scrollToBottom]);
 
   return (
     <div className="pb-4 pt-2">
@@ -74,7 +77,7 @@ export function StoryStream({
           message={m}
           readonly={m.editable === false}
           busy={busy}
-          streamingOverride={rerollingId === m.id ? rerollingText : null}
+          streamingOverride={rerollingId === m.id ? deferredReroll : null}
           onEdit={onEdit}
           onCut={onCut}
           onReroll={onReroll}
@@ -85,7 +88,7 @@ export function StoryStream({
       {/* 新段生成中 */}
       {streamingText !== null && (
         <div className="my-4">
-          <Prose text={streamingText} />
+          <Prose text={deferredStreaming ?? ""} />
           <span className="animate-pulse text-gilt">▍</span>
         </div>
       )}
