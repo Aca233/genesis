@@ -1,12 +1,14 @@
 # 04 · Prompt 体系
 
+> 更新日期：2026-07-27
+
 ## 0. 连续 Narrator 与追溯改写契约
 
 ### 统一 Creator Narrator
 
 Creator 是世界外观察者；第二人称指观察者而非神或人物。所有输入统一标记为 `【创世主意图】`，不区分观测与改写通道。Narrator 识别观察、行动、确立未来事实或推翻既成历史：前三者输出 `operation: continue`，只有最后一种输出 `operation: retroactive_rewrite`。Narrator 不虚构 Creator 的身体、神位、信仰、能力限制或世界内身份。作者侧可见完整议程、隐藏编年史和能力，但 NPC 认知仍受亲历与已知事实限制。
 
-时之仪提供默认跨度；当前输入中的明确时间文字覆盖本轮且不得修改表盘。每轮尾部元数据同时携带 `temporal_state`、安全 `immediate_changes`、`significant_event` 与 `settlement_reasons`。
+时之仪提供默认跨度；当前输入中的明确时间文字覆盖本轮且不得修改表盘。每轮尾部元数据同时携带 `temporal_state`、安全 `immediate_changes`、`world_actions`、`activity_entries`、`important_event_mutation`、`significant_event` 与 `settlement_reasons`；查探自报 `probe_attempted`、揭示回填 `revealed_event_ids` / `ability_reveals` 与神谕结果申报 `outcome` 同在这一个 META 内（字段语义见 docs/04-AI系统设计 §2）。
 
 ### Rewrite Planner
 
@@ -18,12 +20,20 @@ Creator 是世界外观察者；第二人称指观察者而非神或人物。所
 
 Creator 没有 playerGod 或 `stanceToPlayer`。关系输入允许模型使用当前时间线神名/别名，但应用前必须唯一解析为真实 God ID；无法解析、重名、实体目标或跨现实引用均拒绝。提示词称其为 `world settlement` 与 `checkpoint window`，不生成玩家可见章节标题；长任务持续续租世界操作权。
 
+结算侧的声纹与元语言纪律（`settlementSystem` 全局规则）：
+
+- **诸神声纹**：每位神的幕后行动必须以该神卡片的性情与措辞书写——醉拳莽神与朝仪龙王绝不共享句式。上下文提供 `RECENT OFFSTAGE ACTIONS` 时，先推进、了结或改道该线索，绝不复读上一检查点未兑现的出发、准备或观望节拍。
+- **元语言禁令**：引擎词汇（本章、章节、剧情、检查点、玩家、AI、设定、系统）与玩家输入里的第四面墙梗不得进入任何面向玩家的字符串（摘要、别名、栏目、编年史文本），必须改写为世界内措辞（玩家的场外玩笑变成世界内的诨号）。
+- **将临之事保密**：`IMPENDING CANON EVENTS` 是作者侧知识，标题、概要与条件永不逐字进入玩家可见字符串；候选是压力不是剧本，无世界内因由不得把 pantheonTurns、抽取或编年史往它们身上引。
+
+结算输出的两类新增裁决：`canonEventUpdates`（最多 5 项，`pending→eligible|altered|cancelled|occurred` 与 `eligible→occurred|altered|cancelled` 的单向状态机；`rumor` 仅 eligible 时给一句凡人传闻）与 `chronicle.eraDigest`（仅提供 `== ERA TO CLOSE ==` 块时，150–400 字史官纪元总评）。仅诸神档另有 `divineCostAudit`（最多 4 项）：对玩家神本窗口行使过的每项神权核对其代价与限制是否真实兑现，`honored | dodged`；dodged 附一句世间暗记（如「河谷的井水一夜转咸」），原样进入征兆队列供日后讨债。两者的 schema 均以 `.default([])` / `optional` 兼容引入前持久化的 `pendingSettlement` 断点。
+
 
 约定（遵循全局规则）：**所有 Prompt 模板以英文撰写**（模型遵循度更好），并硬性要求**中文输出**。所有结构化输出定义 Zod schema，校验失败携错误重问（×2）。模板存于 Prompt Registry，带版本号。
 
 ## 1. 世界生成（Genesis）
 
-**任务**：一句话 → 完整世界卡组。叙事槽，单次结构化调用（超长输出时按卡片分批：宇宙论+神谱 → 势力+种族+地理 → 冲突+风格）。
+**任务**：一句话 → 完整世界卡组。叙事槽，单次流式调用（`task: "genesis"`，`maxTokens: 16000`，`failOnTruncation` 开启）：顶层 JSON 键进度扫描驱动阶段展示与断点持久化；模型/通道输出上限不足时由网关续写接力补完（最多 12 轮，见 docs/04-AI系统设计 §8），不按卡片拆分多次请求。
 
 模板要点（摘要）：
 
@@ -80,10 +90,27 @@ Output: strict JSON per schema. ALL user-facing text in Chinese.
 Role: You are the Chronicler — the narrative engine of this god-RP world.
 Core rules:
  - The player IS a god. Yield agency: never act or speak for the player god.
- - Follow the EFFECTIVE SCALE strictly:
-   scene = moment-to-moment prose; era = decades montage in annalistic prose
-   interleaved with close-ups; epoch = centuries, historian's register.
+ - Follow the CURRENT SCALE and its length band strictly:
+   moment = a single breath, 150-450 chars; scene = moment-to-moment prose,
+   500-1200 chars, at most one --- divider; years = seasonal rhythm,
+   600-1500 chars, summary passages >= 1/3, at most 2 vignettes;
+   era = annalistic montage with 2-3 vignettes, 800-1800 chars;
+   epoch = historian's register, 500-1200 chars, no scene-level dialogue
+   except quoted historical fragments.
  - VOICE cards are law: each god speaks unmistakably in their own voice.
+ - CANON BINDING: codex cards, chronicle, lorebook and active reality state
+   blocks are established canon. Never contradict a supplied fact; when the
+   prose window and a supplied card disagree, the card wins. Invent freely
+   only where canon is silent.
+ - REPETITION LEDGER: the story-so-far window is your repetition ledger —
+   never reuse its opening moves, closing-line shapes, signature metaphors,
+   onomatopoeia lines or character catchphrases. Enter each reply from a
+   fresh angle; any catchphrase at most once per reply.
+ - STOCK-BEAT RATIONING: 仿佛/似乎/像是 at most once each per reply and only
+   for genuinely hard-to-name experience. Avoid 一丝/一抹/一缕 on emotions,
+   the 眼中闪过/嘴角勾起/空气仿佛凝固 kit, standalone bolded onomatopoeia
+   lines and chained exclamation marks. When an impact lands, write its
+   physical consequence; when an emotion shifts, write the act that betrays it.
  - OMENS: you have a queue of pending omens from offstage god actions.
    Weave AT MOST 1-2 per reply, seamlessly — a passing detail, never flagged,
    never explained. ("Tonight the votive fires in the north burned dimmer.")
@@ -97,15 +124,23 @@ Core rules:
  - INVESTIGATION: when the player divines/probes/interrogates, you receive
    matching hidden chronicles/abilities. Adjudicate by in-fiction plausibility:
    full reveal, partial glimpse, or misleading fragment. Mark revealed ids.
+   A probe with no adjudication block this turn still sets probe_attempted —
+   it arms adjudication for the next turn.
  - The world does not orbit the player: NPCs and gods pursue their own ends.
  - Honor fusion axiom on any cross-IP rules question.
- - Dark themes permitted per the world's tone; follow the style card.
+ - Dark themes permitted per the world's tone. Follow EVERY field of the
+   STYLE CARD; its example sentences are tone anchors, never copied verbatim.
+ - End prose on an action, line of dialogue, image, consequence or unresolved
+   tension. Never append a moral, thematic summary or writing commentary.
  - Output Chinese narrative prose. End with the structured block.
-Structured tail block: { "suggestions": [0-4 short action options],
-  "operation": "continue"|"retroactive_rewrite",
+Structured tail block (<<<META … META>>>): { "suggestions": [2-4 options,
+  meaningfully different in kind], "operation": "continue"|"retroactive_rewrite",
   "temporal_state"?: {era?, time?}, "immediate_changes": [...],
-  "significant_event": bool, "settlement_reasons": [...],
-  "revealed_event_ids": [...],
+  "world_actions": [<=3], "activity_entries": [<=3],
+  "important_event_mutation": null | {create|advance},
+  "outcome": null | {result: "fulfilled"|"partial"|"thwarted"|"backfired",
+  note}, "significant_event": bool, "settlement_reasons": [...],
+  "probe_attempted": bool, "revealed_event_ids": [...],
   "ability_reveals": [{abilityId, visibility: "rumored"|"known", evidence}] }
 ```
 
@@ -166,13 +201,19 @@ Output: strict JSON deltas, including abilityChanges[]. Chinese text fields.
 Task: compress this checkpoint window into 2-3 chronicle entries in a historian's
 register (史官笔法), each tagged with the world's era-year label and
 involved entity/god ids; plus an epilogue paragraph.
+When an == ERA TO CLOSE == block is supplied, additionally fill
+chronicle.eraDigest: closedEra + one 150-400 character historian's summary
+of that entire era (defining conflicts, transformations, legacies);
+otherwise omit eraDigest.
 Do NOT include hidden god actions (they are recorded separately).
 Chinese output.
 ```
 
+遗留字段 `chapterTitle` 只是内部兼容数据：结算固定返回空字符串，不生成玩家可见章题。
+
 ## 6. 查探裁决
 
-不设独立调用——作为 Narrator 的内联职责（模板第 2 节 INVESTIGATION 规则）。Context Builder 在玩家输入命中「占卜/窥探/审问/洞察」语义或神选者调查指派时，将相关隐藏编年史与作者侧能力附入上下文。叙事模型分别回填 `revealed_event_ids` 与 `ability_reveals`；服务端校验时间线与当前可见性后，原子执行 `hidden → rumored|known` 或 `rumored → known`，并把消息、证据和该轮时之仪尺度写入 `AbilityEvent(type=revealed)`。普通响应在投影前即过滤隐藏能力。
+不设独立调用——作为 Narrator 的内联职责（模板第 2 节 INVESTIGATION 规则）。Context Builder 在玩家输入命中「占卜/窥探/审问/洞察」语义或神选者调查指派时，将相关隐藏编年史与作者侧能力附入上下文。触发是查探双门：本轮输入命中查探语义正则，**或**上一条 narrator 消息的 META 自报 `probe_attempted: true`——本轮语义未命中但模型判定玩家在世界内查探时，自报标志为下一轮武装裁决上下文；carry 只看最后一条 narrator 消息，下一条叙事落库后自然熄灭。Creator 模式恒不自报（全知叙事无需裁决）。叙事模型分别回填 `revealed_event_ids` 与 `ability_reveals`；服务端校验时间线与当前可见性后，原子执行 `hidden → rumored|known` 或 `rumored → known`，并把消息、证据和该轮时之仪尺度写入 `AbilityEvent(type=revealed)`。普通响应在投影前即过滤隐藏能力。
 
 ## 7. 特殊时刻模板（变体注入）
 
@@ -206,7 +247,17 @@ Chinese output.
 - 隐藏议程、暗流、隐藏能力和未揭示栏目只作幕后约束，不得公开泄露或改为 `known`。
 - 独立能力必须落到类型合法的 owner：`divine → god`、`personal → character`、`racial_* → race`。
 
-素材不触发摘要模型或逐卡调用。正式首轮仍只有 `stream("narrative", { task: "genesis" })`；若结构、引用或素材约束失败，统一进入既有的一次 repair，修复后再次执行本地验证，不新增第三次请求。
+素材不触发摘要模型或逐卡调用。正式首轮仍只有 `stream("narrative", { task: "genesis" })`；若结构、引用或素材约束失败，统一进入至多两轮定向修复：第一轮针对流式原文，第二轮针对第一轮修复稿的残余语义错误，每轮修复后再次执行全部本地验证（schema、模式、引用、素材约束），两轮仍失败以最后错误终局。
+
+## 输出完整性：续写接力提示词
+
+需要完整输出的任务（创世流式与全部 `completeStructured` 结构化任务）在请求上开启 `failOnTruncation`；网关判定截断（显式结束原因或谎报截断启发式，机制见 docs/04-AI系统设计 §8）后发起续写请求：
+
+- 把已产出文本原样回填为 assistant 消息；
+- 追加一条固定 user 续写指令：「你的上一条输出因长度上限被截断。从被截断的确切位置继续输出剩余内容：不要重复任何已输出的字符，不要添加任何解释、前言、省略号或代码围栏，直接接着写。」；
+- 接缝最多回看 400 字符去重，最多接力 12 轮；接力途中的瞬时网络断流以已累积文本为基础断点续传（预算 4 次，独立于接力轮数）。
+
+结构化任务的修复重问（校验失败携 Zod 错误与上一输出重问 ×2）与续写接力正交：前者修语义，后者补长度，二者可在同一任务内先后发生。
 
 ## Prompt Cache 稳定前缀规范
 
@@ -219,9 +270,9 @@ global（跨世界固定） → world（同世界稳定） → dynamic（本轮�
 一旦出现 `dynamic` 消息，后续消息一律视为动态，不能重新进入稳定前缀。主动缓存提示的连续稳定前缀至少为 4,000 字符；缓存键由 provider、规范化 Base URL、model、低基数 namespace 与稳定消息共同生成 SHA-256 摘要，不包含明文。
 
 - **正文 Narrator**：固定核心规则与输出契约为 global；世界名、风格、主题、宇宙论、融合公理、玩家神和主神卡为 world；当前时之仪尺度、征兆、查探结果、实体/能力、世界书命中、编年史、正文窗口和本轮神谕为 dynamic。
-- **创世**：`GENESIS_SYSTEM` 为 global；原初神谕、素材选择及修复内容为 dynamic，namespace 为 `genesis:v1`。
-- **世界整理**：固定 Settlement Schema/System 为 global；当前检查点上下文为 dynamic，namespace 为 `settlement:v1`，仍只进行一次模型调用。
-- **卡片重掷与引用修复**：固定创世 System 为 global；当前卡组、重掷说明和引用错误为 dynamic，任务与 namespace 均使用 `reroll` / `reroll:v1`。
+- **创世**：`GENESIS_SYSTEM` 为 global；原初神谕、素材选择及修复内容为 dynamic，namespace 为 `genesis:v1:{mode}`（按世界模式区分）。
+- **世界整理**：固定 Settlement Schema/System 为 global；当前检查点上下文为 dynamic，namespace 为 `settlement:v4:{mode}`（v4 因输出 schema 新增 `chronicle.eraDigest`，防旧缓存响应缺该字段形状），仍只进行一次模型调用。
+- **卡片重掷与引用修复**：固定创世 System 为 global；当前卡组、重掷说明和引用错误为 dynamic，任务使用 `reroll`，namespace 为 `reroll:v1:{mode}`。
 
 OpenAI-compatible 使用哈希 `prompt_cache_key`；Anthropic 在 global/world 末尾最多放置两个 `cache_control: ephemeral`；Gemini 不创建显式 `cachedContents`，仅依赖隐式缓存并读取 `cachedContentTokenCount`。缓存的是输入前缀，不是模型答案。
 
@@ -233,5 +284,10 @@ Narrator 的 global 稳定块采用“行为边界 + 正向写作目标”组合
 - **角色认知边界**：NPC 的言行必须来自亲历、被告知、可靠推断或已提供卡片；Narrator 知道的隐藏信息不等于角色知道，隐藏编年史和作者侧能力不得借角色泄露。
 - **活人感**：由人格、当前目标、已知信息、关系、近期经历、能力与限制共同推导反应；允许意外但可回溯解释的行为，不随机添加永久人格标签。
 - **文风**：对白自然且有声纹差异，以动作和选择呈现性格；常见感官事实直接白描，抽象体验才谨慎用比喻；句长随场景压力变化；结尾停在动作、对白、景象、后果或未解张力上，不总结主题或评价创作。
+- **正史绑定**：法典卡、编年史、世界书与活动现实状态块是既成正史；不得违背任何已提供事实、已揭示栏目、关系或编年史条目，正文窗口与卡片冲突时以卡片为准，只在正史沉默处自由虚构。
+- **重复账本**：故事至今窗口即重复账本——不得复用其中的开场手法、收束句形、招牌比喻、拟声句与角色口头禅；每轮从不同感官、视距或人物切入，任何口头禅每轮至多出现一次。
+- **套语配给**：仿佛/似乎/像是每轮各至多一次，且仅限确实难以名状的体验；回避情绪上的一丝/一抹/一缕、眼中闪过/嘴角勾起/空气仿佛凝固套件、独立加粗拟声行与连串感叹号。冲击落地写物理后果而非音效行，情绪转折写出卖它的动作而非诊断式叙述。
+- **尺度字数档**：moment 150–450 字（一息之间，不越当下节拍）；scene 500–1200 字（逐时逐刻小说正文，至多一个 --- 分隔）；years 600–1500 字（岁月纵览至少占三分之一，特写至多 2 段）；era 800–1800 字（编年纪事间插 2–3 段特写）；epoch 500–1200 字（史官笔法，除引述史料残句外无场景级对白）。开局正文 800–1500 字，至多点名三位神明或势力，不得盘点卡组。
+- **结构化风格卡**：`StyleCardSchema` 在 preset / presetName / toneNotes 之外新增 `narrationNotes`（叙述视角与人称约定）、`rhythm`（长短句配比、段落长度、对白密度）、`dictionExamples`（至多 3 句本世界腔调锚点例句，仅作语感锚，不得原样进入正文）与 `tabooPhrases`（至多 12 个本世界应回避或限量的套语）；Narrator 对风格卡逐字段遵循，其中的节奏、禁语与例句指引均具约束力。
 - **静默自检**：输出前检查代理权、认知来源、能力边界、因果时间、声纹、时之仪尺度和 META 格式；不得输出思维链、草稿、检查表、自评或人格吐槽。
 - **建议边界**：META 建议仅给玩家神可选择的行动或态度，不预写结果，不提供未解锁能力。

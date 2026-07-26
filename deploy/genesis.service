@@ -1,0 +1,43 @@
+# 《创世》Next.js standalone 单进程 systemd 单元
+# 安放:/etc/systemd/system/genesis.service
+# 启用:sudo systemctl daemon-reload && sudo systemctl enable --now genesis
+#
+# 硬约束:单实例。SSE 事件总线与任务去重依赖进程内 Map
+# (src/lib/chat/task-runner.ts:10-11 等),禁止 pm2 cluster、
+# 模板实例(genesis@.service)或任何形式的多副本。
+
+[Unit]
+Description=Genesis (chuangshi) Next.js standalone server
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=genesis
+Group=genesis
+WorkingDirectory=/srv/genesis/app
+# DATABASE_URL / SECRET_KEY / PORT / HOSTNAME / NODE_ENV 均来自环境文件
+EnvironmentFile=/etc/genesis/genesis.env
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=3
+
+# ── 2C2G 内存保护 ─────────────────────────────────────────────
+# 2GB 盒子上 Node 的安全水位(其余留给 Postgres 与系统)。触及
+# MemoryMax 会被 OOM kill 并由 Restart=always 拉起;若 journal 频繁
+# 出现 oom-kill,先查是否有请求走了全量图标集的 createRequire 兜底
+# (图标子集与目录漂移,见 deploy/README.md §0.2),再考虑调上限。
+MemoryHigh=1024M
+MemoryMax=1280M
+
+# ── 基础加固 ─────────────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# standalone 产物目录只读即可运行;Next.js 需要写 .next 下的缓存目录
+ReadWritePaths=/srv/genesis/app/.next
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
