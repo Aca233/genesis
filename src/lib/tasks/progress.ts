@@ -51,7 +51,7 @@ export type TaskStepView = {
 };
 
 export function taskStageIndex(kind: TaskKind, stage: string): number {
-  return taskStages[kind].findIndex((item) => item.id === stage);
+  return taskStages[kind]?.findIndex((item) => item.id === stage) ?? -1;
 }
 
 export function advanceTaskStage(kind: TaskKind, current: string, next: string): string {

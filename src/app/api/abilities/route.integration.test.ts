@@ -28,7 +28,7 @@ const abilityFields = {
 async function createDerivedFixture() {
   const world = await prisma.world.create({
     data: {
-      name: `ability-post-source-unique-${crypto.randomUUID()}`,
+      userId: "test-user", name: `ability-post-source-unique-${crypto.randomUUID()}`,
       genesisInput: "能力创建并发集成测试",
       lockedPaths: [],
     },

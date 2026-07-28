@@ -15,6 +15,8 @@ import {
   releaseWorldOperation,
   type WorldOperationClient,
 } from "@/lib/reality/operation-lock";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 /**
  * POST /api/chapters/[id]/settle —— 内部世界整理（SSE 进度流）
@@ -24,13 +26,14 @@ import {
 
 export const maxDuration = 600;
 
-export async function POST(
+export const POST = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
-  const chapter = await prisma.chapter.findUnique({
-    where: { id },
+  const chapter = await prisma.chapter.findFirst({
+    where: ownedWhere.chapter(userId, id),
     include: {
       timeline: {
         select: {
@@ -82,7 +85,7 @@ export async function POST(
           worldId: chapter.timeline.worldId,
           token,
           claimed: true,
-          userId: "local", // Phase A 单用户;第 4 波 iso-07 换真实会话用户
+          userId,
         })) {
           const stage = stepMap[p.step];
           emit(progressEvent(
@@ -133,4 +136,4 @@ export async function POST(
   return createSettlementTaskSSE(id, [
     progressEvent(id, "settlement", "checkpoint_read", "running"),
   ]);
-}
+});

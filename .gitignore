@@ -57,3 +57,4 @@ next-env.d.ts
 .codex/skills/.system/**
 !.codex/prompts/
 !.codex/prompts/**
+.ace-tool/

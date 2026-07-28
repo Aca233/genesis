@@ -35,7 +35,7 @@ function plan(overrides: Partial<RewritePlan> = {}): RewritePlan {
 async function fixture(mode = "creator") {
   const world = await prisma.world.create({
     data: {
-      name: `rewrite-runner-${crypto.randomUUID()}`,
+      userId: "test-user", name: `rewrite-runner-${crypto.randomUUID()}`,
       genesisInput: "改写任务测试",
       mode,
       status: "playing",
@@ -89,6 +89,7 @@ function deps(rewritePlan = plan(), narration: string | Error = "新星于是升
 
 async function createTask(data: Awaited<ReturnType<typeof fixture>>, key = crypto.randomUUID()) {
   return createRealityRewrite(prisma, {
+    userId: "test-user",
     worldId: data.world.id,
     decree: "群星改道",
     scope: "prospective",
@@ -186,7 +187,7 @@ describe("idempotent reality rewrite runner", () => {
     expect(failed.error).not.toContain("sk-supersecret123");
     expect(await prisma.timeline.count({ where: { forkRewriteId: task.id } })).toBe(1);
 
-    const rearmed = await retryRealityRewrite(prisma, task.id);
+    const rearmed = await retryRealityRewrite(prisma, "test-user", task.id);
     expect(rearmed.status).toBe("narrating");
     const retry = deps(plan({ interpretation: "不应重新规划" }), "恢复后的新星叙事。");
     await runRealityRewriteTask(task.id, retry);
@@ -228,7 +229,7 @@ describe("idempotent reality rewrite runner", () => {
     const { task } = await createTask(data);
     const first = deps();
     await runRealityRewriteTask(task.id, first);
-    const completed = await retryRealityRewrite(prisma, task.id);
+    const completed = await retryRealityRewrite(prisma, "test-user", task.id);
     const noWork = deps();
     await runRealityRewriteTask(task.id, noWork);
 

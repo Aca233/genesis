@@ -26,12 +26,13 @@ import type { GenesisTopLevelKey } from "./json-progress";
 import { buildWorldIconTheme } from "@/lib/icons/theme";
 import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
 
-const USER_ID = "local";
 const LEASE_MS = 60 * 1000;
 /** 瞬时网络故障允许的最大总尝试数（attempt 在租约认领时自增）。 */
 const MAX_TRANSIENT_ATTEMPTS = 3;
 const TRANSIENT_RETRY_DELAY_MS = 5 * 1000;
 const CHECKPOINT_MS = 1_000;
+/** Keep each upstream generation round below common relay timeouts; gateway continuation stitches the full deck. */
+const GENESIS_ROUND_MAX_TOKENS = 4096;
 
 export type GenesisTaskDto = {
   id: string;
@@ -79,6 +80,24 @@ type GenesisRequestInput = {
   materialConstraints?: string;
 };
 
+type GenesisRepairRequestInput = GenesisRequestInput & {
+  userId: string;
+  invalidOutput: string;
+  validationError: string;
+};
+
+type GenesisRepairRequest = {
+  task: "genesis";
+  userId: string;
+  system: string;
+  user: string;
+  maxTokens: number;
+  maxAttempts: number;
+  transportMaxAttempts: number;
+  allowTransportFallback: boolean;
+  cache: { namespace: string };
+};
+
 export function buildGenesisRequest(input: GenesisRequestInput) {
   const shared = {
     system: genesisSystem(input.mode),
@@ -88,10 +107,41 @@ export function buildGenesisRequest(input: GenesisRequestInput) {
       lorebookExcerpts: input.lorebookExcerpts,
       materialConstraints: input.materialConstraints,
     }),
+    maxTokens: GENESIS_ROUND_MAX_TOKENS,
   };
   return input.mode === "pantheon"
     ? { ...shared, mode: input.mode, schema: PantheonWorldDeckSchema }
     : { ...shared, mode: input.mode, schema: CreatorWorldDeckSchema };
+}
+
+export function buildGenesisRepairRequest(
+  input: GenesisRepairRequestInput & { mode: "pantheon" },
+): GenesisRepairRequest & { schema: typeof PantheonWorldDeckSchema };
+export function buildGenesisRepairRequest(
+  input: GenesisRepairRequestInput & { mode: "creator" },
+): GenesisRepairRequest & { schema: typeof CreatorWorldDeckSchema };
+export function buildGenesisRepairRequest(input: GenesisRepairRequestInput) {
+  const shared = {
+    task: "genesis" as const,
+    userId: input.userId,
+    system: genesisSystem(input.mode),
+    user: genesisRepairPrompt({
+      mode: input.mode,
+      decree: input.decree,
+      lorebookExcerpts: input.lorebookExcerpts,
+      invalidOutput: input.invalidOutput,
+      validationError: input.validationError,
+      materialConstraints: input.materialConstraints,
+    }),
+    maxTokens: GENESIS_ROUND_MAX_TOKENS,
+    maxAttempts: 1,
+    transportMaxAttempts: 1,
+    allowTransportFallback: false,
+    cache: { namespace: `genesis:v1:${input.mode}` },
+  };
+  return input.mode === "pantheon"
+    ? { ...shared, schema: PantheonWorldDeckSchema }
+    : { ...shared, schema: CreatorWorldDeckSchema };
 }
 
 type ResolveLoreExcerptsDeps = {
@@ -111,10 +161,11 @@ type ResolveLoreExcerptsDeps = {
  */
 export async function resolveLorebookExcerpts(
   entries: ReturnType<typeof parseStWorldbook>,
+  userId: string,
   deps: ResolveLoreExcerptsDeps = { classify: classifyLoreEntries, select: selectLoreForGenesis },
 ): Promise<string | undefined> {
   if (!entries.length) return undefined;
-  const indexRows = await deps.classify(entries, "backstage");
+  const indexRows = await deps.classify(entries, "backstage", { userId });
   if (indexRows !== null) {
     const { excerpt } = deps.select(indexRows, LORE_GENESIS_BUDGET_CHARS);
     return excerpt || undefined;
@@ -158,7 +209,6 @@ export async function claimGenesisTask(
   const claimed = await db.genesisTask.updateMany({
     where: {
       id: taskId,
-      userId: USER_ID,
       OR: [
         { status: "queued" },
         {
@@ -223,7 +273,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
 
   try {
     parsedEntries = task.lorebook ? parseStWorldbook(task.lorebook) : [];
-    excerpts = await resolveLorebookExcerpts(parsedEntries);
+    excerpts = await resolveLorebookExcerpts(parsedEntries, task.userId);
     const materialSnapshot: GenesisMaterialSnapshot | null = task.materialSelection == null
       ? null
       : GenesisMaterialSnapshotSchema.parse(task.materialSelection);
@@ -247,8 +297,8 @@ async function runGenesisTask(taskId: string): Promise<void> {
       streamCompletion: async function* () {
         for await (const chunk of stream("narrative", {
           task: "genesis",
-          userId: USER_ID,
-          maxTokens: 16000,
+          userId: task.userId,
+          maxTokens: genesisRequest.maxTokens,
           failOnTruncation: true,
           cache: { namespace: `genesis:v1:${mode}` },
           messages: [
@@ -260,25 +310,23 @@ async function runGenesisTask(taskId: string): Promise<void> {
         }
       },
       repairCompletion: (input) => {
-        const repairPrompt = genesisRepairPrompt({
-          mode: input.mode,
+        const sharedRepairRequest = {
+          userId: task.userId,
           decree: task.decree,
           lorebookExcerpts: excerpts,
           invalidOutput: input.invalidOutput,
           validationError: input.validationError,
           materialConstraints: materialText,
-        });
-        const request = {
-          task: "genesis" as const,
-          userId: USER_ID,
-          system: genesisSystem(input.mode),
-          user: repairPrompt,
-          maxTokens: 16000,
-          cache: { namespace: `genesis:v1:${input.mode}` },
         };
         return input.mode === "pantheon"
-          ? completeStructured("narrative", { ...request, schema: input.schema })
-          : completeStructured("narrative", { ...request, schema: input.schema });
+          ? completeStructured("narrative", buildGenesisRepairRequest({
+            ...sharedRepairRequest,
+            mode: input.mode,
+          }))
+          : completeStructured("narrative", buildGenesisRepairRequest({
+            ...sharedRepairRequest,
+            mode: input.mode,
+          }));
       },
       onChunk: async (rawOutput) => {
         latestRaw = rawOutput;
@@ -316,7 +364,10 @@ async function runGenesisTask(taskId: string): Promise<void> {
     // 报告型 AI 语义审计（§10.4）：校验通过后、落库前执行一次；仅 IP 世界
     // （temporalAnchor 存在 ∧ basis≠original）触发模型调用。审计失败返回 null
     // → 不落任何报告，静默跳过——绝不阻断创世。租约心跳仍在运行，覆盖调用时长。
-    const auditReport = await auditTemporalSemantics(deck, { lorebookExcerpts: excerpts });
+    const auditReport = await auditTemporalSemantics(deck, {
+      userId: task.userId,
+      lorebookExcerpts: excerpts,
+    });
 
     persistedStage = furthestStage(persistedStage, "saving");
     await updateOwnedTask({
@@ -397,6 +448,7 @@ export async function persistWorld(
 
     const world = await tx.world.create({
       data: {
+        userId: task.userId,
         name: deck.worldName,
         genesisInput: task.decree,
         mode,

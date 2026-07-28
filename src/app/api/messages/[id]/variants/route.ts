@@ -10,6 +10,8 @@ import {
   assertMessageEditable,
   MessageCheckpointError,
 } from "@/lib/chat/message-edit-policy";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 /**
  * 消息四件套之「异文」（docs/01 §3.2）
@@ -25,13 +27,14 @@ function asVariants(value: unknown): VariantItem[] {
   return Array.isArray(value) ? (value as VariantItem[]) : [];
 }
 
-export async function POST(
+export const POST = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
-  const message = await prisma.message.findUnique({
-    where: { id },
+  const message = await prisma.message.findFirst({
+    where: ownedWhere.message(userId, id),
     include: {
       chapter: {
         include: {
@@ -98,7 +101,7 @@ export async function POST(
 
   return narratorSSE({
     messages,
-    userId: "local", // Phase A 单用户;后续波换真实会话用户
+    userId,
     cacheNamespace: `narrative:${message.chapter.timeline.worldId}:v1`,
     signal: request.signal,
     onDone: async ({ prose, meta }) => {
@@ -125,14 +128,15 @@ export async function POST(
       };
     },
   });
-}
+});
 
 const PatchSchema = z.object({ index: z.number().int().min(0) });
 
-export async function PATCH(
+export const PATCH = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   const parsed = PatchSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
@@ -140,8 +144,8 @@ export async function PATCH(
   }
   const { index } = parsed.data;
 
-  const message = await prisma.message.findUnique({
-    where: { id },
+  const message = await prisma.message.findFirst({
+    where: ownedWhere.message(userId, id),
     include: {
       chapter: {
         include: {
@@ -188,4 +192,4 @@ export async function PATCH(
   });
 
   return NextResponse.json({ message: updated });
-}
+});

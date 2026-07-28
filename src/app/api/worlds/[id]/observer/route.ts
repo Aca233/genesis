@@ -8,6 +8,8 @@ import {
   type ObserverAction,
   type ObserverState,
 } from "@/lib/reality/schemas";
+import { withAuth } from "@/lib/auth/route";
+import { requireWorld } from "@/lib/auth/ownership";
 
 type Context = { params: Promise<{ id: string }> };
 type Transaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
@@ -256,7 +258,7 @@ async function applyAction(
   }
 }
 
-export async function PATCH(request: Request, { params }: Context) {
+export const PATCH = withAuth(async (userId, request: Request, { params }: Context) => {
   let action: ObserverAction;
   try {
     action = ObserverActionSchema.parse(await request.json());
@@ -269,6 +271,9 @@ export async function PATCH(request: Request, { params }: Context) {
 
   try {
     const { id } = await params;
+    if (await requireWorld(userId, id) === null) {
+      throw new ObserverRequestError("世界不存在", 404);
+    }
     const result = await prisma.$transaction(async (tx) => {
       const world = await tx.world.findUnique({
         where: { id },
@@ -299,4 +304,4 @@ export async function PATCH(request: Request, { params }: Context) {
     }
     throw error;
   }
-}
+});

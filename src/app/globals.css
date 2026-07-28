@@ -371,6 +371,40 @@ body > * {
     radial-gradient(130% 100% at 50% 100%, transparent 66%, var(--stain-blotch) 100%);
 }
 
+/* 登录页让星图直接围绕主卷展开，不再套一层几乎铺满视口的大衬纸。 */
+.login-page-content {
+  width: 100%;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  padding: clamp(0.5rem, 2vw, 1.5rem);
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.login-page-content::before {
+  inset: 50% auto auto 50%;
+  width: min(78vw, 56rem);
+  height: min(62vh, 34rem);
+  transform: translate(-50%, -50%);
+  border: 1px solid color-mix(in srgb, var(--gilt) 13%, transparent);
+  border-radius: 50%;
+  background: radial-gradient(ellipse, var(--gilt-glow), transparent 68%);
+}
+
+.login-page-content::after {
+  display: none;
+}
+
+.login-tome {
+  isolation: isolate;
+  box-shadow:
+    0 1.75rem 5rem color-mix(in srgb, var(--shadow-warm) 115%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--gilt) 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--paper-raised) 84%, transparent);
+}
+
 .home-genesis-panel {
   border: 1px solid var(--line);
   border-radius: 1rem;

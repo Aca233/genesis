@@ -165,6 +165,7 @@ function sectionJson(value: unknown): Prisma.InputJsonValue | typeof Prisma.Json
 }
 
 export type CheckpointForkInput = {
+  userId: string;
   worldId: string;
   sourceChapterId: string;
   expectedActiveId: string;
@@ -231,7 +232,7 @@ async function forkWhileLeased(
 ): Promise<{ activeId: string; timelineId: string }> {
   // (1) 世界与并发前置
   const world = await tx.world.findFirst({
-    where: { id: input.worldId, userId: "local" },
+    where: { id: input.worldId, userId: input.userId },
     select: { mode: true, activeTimelineId: true },
   });
   if (world === null) throw new CheckpointForkNotFoundError("世界不存在");

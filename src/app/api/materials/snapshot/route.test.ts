@@ -4,6 +4,9 @@ const mocks = vi.hoisted(() => ({ snapshot: vi.fn(), findFirst: vi.fn(), createC
 vi.mock("@/lib/materials/runtime-snapshot", () => ({ snapshotRuntimeMaterial: mocks.snapshot }));
 vi.mock("@/lib/materials/repository", () => ({ createMaterialVersion: mocks.createVersion }));
 vi.mock("@/lib/db", () => ({ prisma: { materialCard: { findFirst: mocks.findFirst, create: mocks.createCard } } }));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
+}));
 import { POST } from "./route";
 
 describe("POST /api/materials/snapshot", () => {
@@ -18,7 +21,7 @@ describe("POST /api/materials/snapshot", () => {
     mocks.createVersion.mockResolvedValue({ id: "version-1", version: 1 });
     const response = await POST(new Request("http://localhost/api/materials/snapshot", { method: "POST", body: JSON.stringify({ sourceType: "entity", sourceId: "e1", versionName: "第七章后", setDefault: true }) }));
     expect(response.status).toBe(201);
-    expect(mocks.createVersion).toHaveBeenCalledWith(expect.objectContaining({ cardId: "card-1", name: "第七章后", setDefault: true }));
+    expect(mocks.createVersion).toHaveBeenCalledWith("test-user", expect.objectContaining({ cardId: "card-1", name: "第七章后", setDefault: true }));
   });
   it("rejects invalid source and empty version names", async () => {
     const response = await POST(new Request("http://localhost/api/materials/snapshot", { method: "POST", body: JSON.stringify({ sourceType: "world", sourceId: "e1", versionName: "" }) }));

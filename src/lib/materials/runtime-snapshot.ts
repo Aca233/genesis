@@ -34,6 +34,7 @@ function jsonSafe<T>(value: T): T {
 }
 
 async function stableIdentity(input: {
+  userId: string;
   worldId: string; sourceType: RuntimeSourceType; sourceId: string; materialRef: string | null;
 }) {
   const expected = input.materialRef
@@ -41,19 +42,20 @@ async function stableIdentity(input: {
     : `${input.worldId}:runtime:${input.sourceType}:${input.sourceId}`;
   if (!input.materialRef) return expected;
   const archived = await prisma.materialCard.findFirst({
-    where: { userId: "local", sourceKind: input.sourceType, sourceRef: expected },
+    where: { userId: input.userId, sourceKind: input.sourceType, sourceRef: expected },
     select: { sourceRef: true },
   });
   return archived?.sourceRef ?? expected;
 }
 
 export async function snapshotRuntimeMaterial(input: {
+  userId: string;
   sourceType: RuntimeSourceType;
   sourceId: string;
 }): Promise<RuntimeMaterialSnapshot> {
   if (input.sourceType === "god") {
     const god = await prisma.god.findFirst({
-      where: { id: input.sourceId, timeline: { world: { userId: "local" } } },
+      where: { id: input.sourceId, timeline: { world: { userId: input.userId } } },
       include: {
         abilities: { include: { sourceAbility: { select: { id: true, materialRef: true, name: true } } } },
         timeline: { include: { world: { select: { id: true, name: true, mode: true } } } },
@@ -66,7 +68,7 @@ export async function snapshotRuntimeMaterial(input: {
       : god.isPlayer || god.tier === "player"
         ? "player_god"
         : "major_god";
-    const sourceRef = await stableIdentity({ worldId: world.id, sourceType: "god", sourceId: god.id, materialRef: god.materialRef });
+    const sourceRef = await stableIdentity({ userId: input.userId, worldId: world.id, sourceType: "god", sourceId: god.id, materialRef: god.materialRef });
     const card = jsonSafe({
       ref: god.materialRef ?? sourceRef,
       id: god.id, name: god.name, aliases: god.aliases, tier: god.tier, isPlayer: god.isPlayer,
@@ -87,7 +89,7 @@ export async function snapshotRuntimeMaterial(input: {
 
   if (input.sourceType === "entity") {
     const entity = await prisma.entity.findFirst({
-      where: { id: input.sourceId, timeline: { world: { userId: "local" } } },
+      where: { id: input.sourceId, timeline: { world: { userId: input.userId } } },
       include: {
         sections: true,
         race: { select: { id: true, materialRef: true, name: true } },
@@ -100,7 +102,7 @@ export async function snapshotRuntimeMaterial(input: {
     if (!entity) throw new Error("实体不存在");
     const world = entity.timeline.world;
     const kind = entityKind(entity.type);
-    const sourceRef = await stableIdentity({ worldId: world.id, sourceType: "entity", sourceId: entity.id, materialRef: entity.materialRef });
+    const sourceRef = await stableIdentity({ userId: input.userId, worldId: world.id, sourceType: "entity", sourceId: entity.id, materialRef: entity.materialRef });
     const card = jsonSafe({
       ref: entity.materialRef ?? sourceRef,
       id: entity.id, type: entity.type, name: entity.name, aliases: entity.aliases,
@@ -125,7 +127,7 @@ export async function snapshotRuntimeMaterial(input: {
   }
 
   const ability = await prisma.ability.findFirst({
-    where: { id: input.sourceId, timeline: { world: { userId: "local" } } },
+    where: { id: input.sourceId, timeline: { world: { userId: input.userId } } },
     include: {
       god: { select: { id: true, materialRef: true, name: true } },
       entity: { select: { id: true, type: true, materialRef: true, name: true } },
@@ -136,7 +138,7 @@ export async function snapshotRuntimeMaterial(input: {
   });
   if (!ability) throw new Error("能力不存在");
   const world = ability.timeline.world;
-  const sourceRef = await stableIdentity({ worldId: world.id, sourceType: "ability", sourceId: ability.id, materialRef: ability.materialRef });
+  const sourceRef = await stableIdentity({ userId: input.userId, worldId: world.id, sourceType: "ability", sourceId: ability.id, materialRef: ability.materialRef });
   const owner = ability.god
     ? { kind: "god" as const, sourceRef: ability.god.materialRef ?? `${world.id}:runtime:god:${ability.god.id}`, name: ability.god.name, targetKind: "major_god" as const }
     : ability.entity?.type === "race"

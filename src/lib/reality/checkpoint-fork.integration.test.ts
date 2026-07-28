@@ -46,7 +46,7 @@ async function captureSnapshotV2(timelineId: string): Promise<Prisma.InputJsonVa
 async function fixture() {
   const world = await prisma.world.create({
     data: {
-      name: `checkpoint-fork-${crypto.randomUUID()}`,
+      userId: "test-user", name: `checkpoint-fork-${crypto.randomUUID()}`,
       genesisInput: "检查点回溯测试",
       mode: "pantheon",
       status: "playing",
@@ -399,6 +399,7 @@ describe("forkPantheonCheckpoint", () => {
     const idempotencyKey = `checkpoint-${crypto.randomUUID()}`;
 
     const result = await forkPantheonCheckpoint(prisma, {
+      userId: "test-user",
       worldId: data.world.id,
       sourceChapterId: data.chapterTwo.id,
       expectedActiveId: data.timeline.id,
@@ -524,6 +525,7 @@ describe("forkPantheonCheckpoint", () => {
 
     // 幂等重放：同键返回同一现实，不再新建任何行
     const replay = await forkPantheonCheckpoint(prisma, {
+      userId: "test-user",
       worldId: data.world.id,
       sourceChapterId: data.chapterTwo.id,
       expectedActiveId: data.timeline.id,
@@ -539,12 +541,14 @@ describe("forkPantheonCheckpoint", () => {
 
     // 旧版 v1 快照 → 冲突
     await expect(forkPantheonCheckpoint(prisma, {
+      userId: "test-user",
       worldId: data.world.id,
       sourceChapterId: data.chapterOne.id,
       expectedActiveId: data.timeline.id,
       idempotencyKey: `legacy-${crypto.randomUUID()}`,
     })).rejects.toThrow(CheckpointForkConflictError);
     await expect(forkPantheonCheckpoint(prisma, {
+      userId: "test-user",
       worldId: data.world.id,
       sourceChapterId: data.chapterOne.id,
       expectedActiveId: data.timeline.id,
@@ -553,6 +557,7 @@ describe("forkPantheonCheckpoint", () => {
 
     // 活动现实与期望不符 → 冲突
     await expect(forkPantheonCheckpoint(prisma, {
+      userId: "test-user",
       worldId: data.world.id,
       sourceChapterId: data.chapterTwo.id,
       expectedActiveId: "stale-timeline-id",
@@ -561,6 +566,7 @@ describe("forkPantheonCheckpoint", () => {
 
     // 章节不存在 → 404 语义
     await expect(forkPantheonCheckpoint(prisma, {
+      userId: "test-user",
       worldId: data.world.id,
       sourceChapterId: "missing-chapter-id",
       expectedActiveId: data.timeline.id,
@@ -576,7 +582,7 @@ describe("forkPantheonCheckpoint", () => {
     // 创世主世界 → 冲突（路由层另有 403 前置门禁）
     const creatorWorld = await prisma.world.create({
       data: {
-        name: `checkpoint-creator-${crypto.randomUUID()}`,
+        userId: "test-user", name: `checkpoint-creator-${crypto.randomUUID()}`,
         genesisInput: "创世主不可回溯",
         mode: "creator",
         lockedPaths: [],
@@ -592,6 +598,7 @@ describe("forkPantheonCheckpoint", () => {
       data: { timelineId: creatorTimeline.id, index: 1, settleState: "settled" },
     });
     await expect(forkPantheonCheckpoint(prisma, {
+      userId: "test-user",
       worldId: creatorWorld.id,
       sourceChapterId: creatorChapter.id,
       expectedActiveId: creatorTimeline.id,

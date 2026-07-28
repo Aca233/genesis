@@ -19,6 +19,8 @@ import {
 } from "@/lib/abilities/types";
 import { projectAbilityForPlayer } from "@/lib/abilities/visibility";
 import { ScaleSchema } from "@/lib/cards/schemas";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 const EditableAbilityFieldsSchema = z.object({
   name: z.string(),
@@ -97,8 +99,10 @@ function eventSummary(event: { id: string; type: string }) {
   return { id: event.id, type: event.type };
 }
 
-async function visibleAbilityOrNotFound(id: string) {
-  const ability = await prisma.ability.findUnique({ where: { id } });
+async function visibleAbilityOrNotFound(userId: string, id: string) {
+  const ability = await prisma.ability.findFirst({
+    where: ownedWhere.ability(userId, id),
+  });
   if (ability === null) return null;
   const projection = projectAbilityForPlayer(normalizePersistedAbility(ability));
   return projection === null ? null : { ability, projection };
@@ -197,14 +201,15 @@ async function deleteAbilityInSerializableTransaction(
 }
 
 /** PATCH /api/abilities/[id] —— 乐观锁下的能力更新与沿革记录。 */
-export async function PATCH(
+export const PATCH = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   try {
     const { id } = await params;
     const body = PatchSchema.parse(await request.json());
-    const visible = await visibleAbilityOrNotFound(id);
+    const visible = await visibleAbilityOrNotFound(userId, id);
     if (visible === null) {
       return NextResponse.json({ error: "能力不存在" }, { status: 404 });
     }
@@ -227,19 +232,20 @@ export async function PATCH(
   } catch (error) {
     return errorResponse(error);
   }
-}
+});
 
 /**
  * DELETE /api/abilities/[id] —— 无沿革且无派生引用时物理删除，否则原子废弃并保留史料。
  */
-export async function DELETE(
+export const DELETE = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   try {
     const { id } = await params;
     const body = DeleteSchema.parse(await request.json());
-    const visible = await visibleAbilityOrNotFound(id);
+    const visible = await visibleAbilityOrNotFound(userId, id);
     if (visible === null) {
       return NextResponse.json({ error: "能力不存在" }, { status: 404 });
     }
@@ -267,4 +273,4 @@ export async function DELETE(
   } catch (error) {
     return errorResponse(error);
   }
-}
+});

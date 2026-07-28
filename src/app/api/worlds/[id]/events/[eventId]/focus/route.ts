@@ -8,6 +8,8 @@ import {
 } from "@/lib/reality/visibility";
 import { WorldModeSchema } from "@/lib/world-mode";
 import { ActivityVisibilitySchema } from "@/lib/world-activity/contracts";
+import { withAuth } from "@/lib/auth/route";
+import { requireWorld } from "@/lib/auth/ownership";
 
 type Context = { params: Promise<{ id: string; eventId: string }> };
 type Transaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
@@ -48,11 +50,15 @@ async function activeTimeline(tx: Transaction, worldId: string) {
 }
 
 async function handle(
+  userId: string,
   method: "PUT" | "DELETE",
   { params }: Context,
 ) {
   try {
     const { id: worldId, eventId } = await params;
+    if (await requireWorld(userId, worldId) === null) {
+      throw new FocusRequestError("世界不存在", 404);
+    }
     const focusedEventId = await prisma.$transaction(async (tx) => {
       const { timeline, observerState, mode } = await activeTimeline(tx, worldId);
 
@@ -119,10 +125,8 @@ async function handle(
   }
 }
 
-export async function PUT(_request: Request, context: Context) {
-  return handle("PUT", context);
-}
+export const PUT = withAuth(async (userId, _request: Request, context: Context) =>
+  handle(userId, "PUT", context));
 
-export async function DELETE(_request: Request, context: Context) {
-  return handle("DELETE", context);
-}
+export const DELETE = withAuth(async (userId, _request: Request, context: Context) =>
+  handle(userId, "DELETE", context));

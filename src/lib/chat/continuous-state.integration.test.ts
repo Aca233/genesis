@@ -19,7 +19,7 @@ describe("applyContinuousState", () => {
   beforeAll(async () => {
     await prisma.world.create({
       data: {
-        id: worldId,
+        userId: "test-user", id: worldId,
         name: "连续状态测试界",
         genesisInput: "测试",
         mode: "creator",

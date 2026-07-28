@@ -51,7 +51,7 @@ describe("archiveInitialDeck", () => {
     const materials = extractDeckMaterials(deck);
     const { tx, store, cards, versions } = createFakeTx();
 
-    await archiveInitialDeck(tx, { ...worldInput, deck });
+    await archiveInitialDeck(tx, "test-user", { ...worldInput, deck });
 
     // 批量查询各一次，而非逐素材 4 次往返
     expect(store.materialCard.findMany).toHaveBeenCalledTimes(1);
@@ -64,7 +64,7 @@ describe("archiveInitialDeck", () => {
     // 卡片写入保留原 upsert 的 create 字段与组合 sourceRef
     const cardData = store.materialCard.createManyAndReturn.mock.calls[0]![0].data as Record<string, unknown>[];
     expect(cardData[0]).toMatchObject({
-      userId: "local", kind: materials[0]!.kind, name: materials[0]!.name, summary: materials[0]!.summary,
+      userId: "test-user", kind: materials[0]!.kind, name: materials[0]!.name, summary: materials[0]!.summary,
       sourceWorldId: "world-1", sourceWorldName: "测试界",
       sourceKind: materials[0]!.sourceKind, sourceRef: `world-1:${materials[0]!.sourceKind}:${materials[0]!.sourceRef}`,
     });
@@ -85,10 +85,10 @@ describe("archiveInitialDeck", () => {
   it("重复归档幂等：不新建卡、不新建版本、不改默认指针", async () => {
     const deck = completeDeck();
     const first = createFakeTx();
-    await archiveInitialDeck(first.tx, { ...worldInput, deck });
+    await archiveInitialDeck(first.tx, "test-user", { ...worldInput, deck });
 
     const second = createFakeTx({ cards: first.cards, versions: first.versions });
-    await archiveInitialDeck(second.tx, { ...worldInput, deck });
+    await archiveInitialDeck(second.tx, "test-user", { ...worldInput, deck });
 
     expect(second.store.materialCard.createManyAndReturn).not.toHaveBeenCalled();
     expect(second.store.materialVersion.createManyAndReturn).not.toHaveBeenCalled();
@@ -106,7 +106,7 @@ describe("archiveInitialDeck", () => {
     };
     const { tx, store, versions } = createFakeTx({ cards: [existing] });
 
-    await archiveInitialDeck(tx, { ...worldInput, deck });
+    await archiveInitialDeck(tx, "test-user", { ...worldInput, deck });
 
     // 既有卡不重建，其余素材照常补齐
     const cardData = store.materialCard.createManyAndReturn.mock.calls[0]![0].data as { sourceRef: string }[];
@@ -125,7 +125,7 @@ describe("archiveInitialDeck", () => {
     deck.majorCharacters[1]!.abilities[0]!.ref = duplicatedRef;
     const { tx, store, cards } = createFakeTx();
 
-    await archiveInitialDeck(tx, { ...worldInput, deck });
+    await archiveInitialDeck(tx, "test-user", { ...worldInput, deck });
 
     const sourceRef = `world-1:ability:${duplicatedRef}`;
     const duplicatedCards = cards.filter((card) => card.sourceRef === sourceRef);

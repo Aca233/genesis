@@ -19,7 +19,7 @@ describe("PostgreSQL embark transaction safety", () => {
     const deck = completeCreatorDeck();
     const world = await prisma.world.create({
       data: {
-        name: `embark-creator-${crypto.randomUUID()}`,
+        userId: "test-user", name: `embark-creator-${crypto.randomUUID()}`,
         genesisInput: "Creator 开局集成测试用原初神谕",
         mode: "creator",
         draftDeck: deck,
@@ -89,7 +89,7 @@ describe("PostgreSQL embark transaction safety", () => {
     const deck = completeDeck();
     const world = await prisma.world.create({
       data: {
-        name: `embark-pantheon-${crypto.randomUUID()}`,
+        userId: "test-user", name: `embark-pantheon-${crypto.randomUUID()}`,
         genesisInput: "Pantheon 开局回归测试用原初神谕",
         mode: "pantheon",
         draftDeck: deck,
@@ -113,7 +113,7 @@ describe("PostgreSQL embark transaction safety", () => {
     const creatorDeck = completeCreatorDeck();
     const world = await prisma.world.create({
       data: {
-        name: `embark-mode-mismatch-${crypto.randomUUID()}`,
+        userId: "test-user", name: `embark-mode-mismatch-${crypto.randomUUID()}`,
         genesisInput: "模式不一致回滚测试",
         mode: "creator",
         draftDeck: creatorDeck,
@@ -142,7 +142,7 @@ describe("PostgreSQL embark transaction safety", () => {
     deck.majorCharacters[0]!.learnedTraditionRefs = [{ sourceAbilityRef: "missing-tradition" }];
     const world = await prisma.world.create({
       data: {
-        name: `embark-rollback-${crypto.randomUUID()}`,
+        userId: "test-user", name: `embark-rollback-${crypto.randomUUID()}`,
         genesisInput: "集成测试用原初神谕",
         draftDeck: deck,
         lockedPaths: [],
@@ -178,7 +178,7 @@ describe("PostgreSQL embark transaction safety", () => {
     const deck = completeDeck();
     const world = await prisma.world.create({
       data: {
-        name: `embark-concurrent-${crypto.randomUUID()}`,
+        userId: "test-user", name: `embark-concurrent-${crypto.randomUUID()}`,
         genesisInput: "并发开局集成测试用原初神谕",
         draftDeck: deck,
         lockedPaths: [],

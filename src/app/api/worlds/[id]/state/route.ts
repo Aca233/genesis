@@ -20,21 +20,25 @@ import { rewriteDurableProgress } from "@/lib/reality/task-runner";
 import { loadLocalIcon, resolveNavigationIcons } from "@/lib/icons/svg.server";
 import { resolveIcon } from "@/lib/icons/resolver";
 import type { IconAssignmentValue, WorldIconTheme } from "@/lib/icons/types";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
+import type { SettlementTaskStage } from "@/lib/tasks/progress";
 
 /**
  * GET /api/worlds/[id]/state —— 对局引导：一次拉取对局界面所需全量状态
  * （世界核心卡 + 诸神 + 最近四个内部记录段，最多 80 条连续消息）。
  */
 
-export async function GET(
+export const GET = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   try {
     // 整个读取流程统一兜底：任何未捕获异常都返回结构化中文错误体，
     // 避免空 500 响应使客户端 res.json() 抛 Unexpected end of JSON input。
-    return await loadWorldState(id);
+    return await loadWorldState(userId, id);
   } catch (cause) {
     console.error("GET /api/worlds/[id]/state 未捕获异常：", cause);
     return NextResponse.json(
@@ -42,10 +46,10 @@ export async function GET(
       { status: 500 },
     );
   }
-}
+});
 
-async function loadWorldState(id: string) {
-  const world = await prisma.world.findUnique({ where: { id } });
+async function loadWorldState(userId: string, id: string) {
+  const world = await prisma.world.findFirst({ where: ownedWhere.world(userId, id) });
   if (!world) {
     return NextResponse.json({ error: "世界不存在" }, { status: 404 });
   }
@@ -241,6 +245,24 @@ async function loadWorldState(id: string) {
   const rewriteProgress = world.operationKind === "rewrite" && recentRewrite
     ? rewriteDurableProgress(recentRewrite as never)
     : null;
+  const settlementStage = (state: string): SettlementTaskStage => {
+    if (state === "settled" || state === "settling:done") return "completed";
+    if (state.startsWith("settling:model:")) return "pantheon";
+    if (!state.startsWith("settling:")) return "checkpoint_read";
+
+    const internalStage = state.slice("settling:".length);
+    if (internalStage === "decay") return "chronicle";
+    if (internalStage === "pantheon"
+      || internalStage === "extract"
+      || internalStage === "chronicle"
+      || internalStage === "snapshot") {
+      return internalStage;
+    }
+    return "checkpoint_read";
+  };
+  const publicSettleState = settleState.startsWith("settling:model:")
+    ? "settling:pantheon"
+    : settleState;
   const taskProgress = rewriteProgress
     ? rewriteProgress.status === "running" && !hasLiveWorldOperation
       ? {
@@ -254,13 +276,7 @@ async function loadWorldState(id: string) {
       ? {
           taskKind: "settlement" as const,
           taskId: currentChapter.id,
-          stage: settleState === "settled"
-            ? "completed"
-            : settleState.startsWith("settling:")
-              ? settleState.slice("settling:".length) === "decay"
-                ? "chronicle"
-                : settleState.slice("settling:".length)
-              : "checkpoint_read",
+          stage: settlementStage(settleState),
           status: currentChapter.settleError || !hasLiveSettlementOperation
             ? "failed" as const
             : "running" as const,
@@ -370,7 +386,7 @@ async function loadWorldState(id: string) {
     },
     currentSegment: {
       id: currentChapter.id,
-      settleState,
+      settleState: publicSettleState,
     },
     checkpoint: {
       segmentId: currentChapter.id,

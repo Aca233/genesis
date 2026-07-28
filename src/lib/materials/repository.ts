@@ -7,6 +7,7 @@ import { MaterialDependencySchema, type MaterialDependency } from "./types";
 
 export async function archiveInitialDeck(
   tx: Prisma.TransactionClient,
+  userId: string,
   input: { worldId: string; worldName: string; deck: WorldDeck },
 ): Promise<void> {
   // 与逐条 upsert 语义一致：同一 (sourceKind, sourceRef) 以先出现的素材为准
@@ -22,7 +23,7 @@ export async function archiveInitialDeck(
   // 1) 批量定位已有素材卡，一次性补齐缺失的卡（原 upsert 的 update 为空对象，已存在的卡无需改写）
   const cardSelect = { id: true, sourceKind: true, sourceRef: true, defaultVersionId: true } as const;
   const existingCards = await tx.materialCard.findMany({
-    where: { userId: "local", OR: [...entries.values()].map(({ material, sourceRef }) => ({ sourceKind: material.sourceKind, sourceRef })) },
+    where: { userId, OR: [...entries.values()].map(({ material, sourceRef }) => ({ sourceKind: material.sourceKind, sourceRef })) },
     select: cardSelect,
   });
   const cardByKey = new Map(existingCards.map((card) => [cardKey(card.sourceKind, card.sourceRef), card]));
@@ -30,7 +31,7 @@ export async function archiveInitialDeck(
   if (missingEntries.length > 0) {
     const createdCards = await tx.materialCard.createManyAndReturn({
       data: missingEntries.map(([, { material, sourceRef }]) => ({
-        userId: "local", kind: material.kind, name: material.name, summary: material.summary,
+        userId, kind: material.kind, name: material.name, summary: material.summary,
         sourceWorldId: input.worldId, sourceWorldName: input.worldName,
         sourceKind: material.sourceKind, sourceRef,
       })),
@@ -68,14 +69,14 @@ export async function archiveInitialDeck(
     .map((card) => tx.materialCard.update({ where: { id: card.id }, data: { defaultVersionId: initialIdByCardId.get(card.id)! } })));
 }
 
-export async function createMaterialVersion(input: {
+export async function createMaterialVersion(userId: string, input: {
   cardId: string; name: string; note?: string; content: MaterialVersionContent;
   dependencies: MaterialDependency[]; parentVersionId?: string; setDefault?: boolean;
 }): Promise<MaterialVersion> {
   const content = parseMaterialVersionContent(input.content);
   const dependencies = MaterialDependencySchema.array().parse(input.dependencies);
   return prisma.$transaction(async (tx) => {
-    const card = await tx.materialCard.findFirstOrThrow({ where: { id: input.cardId, userId: "local" } });
+    const card = await tx.materialCard.findFirstOrThrow({ where: { id: input.cardId, userId } });
     if (input.parentVersionId) {
       await tx.materialVersion.findFirstOrThrow({ where: { id: input.parentVersionId, cardId: card.id } });
     }
@@ -96,21 +97,22 @@ export async function createMaterialVersion(input: {
 }
 
 export async function updateMaterialCardIndex(
+  userId: string,
   cardId: string,
   patch: { favorite?: boolean; hidden?: boolean; lastUsedAt?: Date | null },
 ) {
-  return prisma.materialCard.update({ where: { id: cardId, userId: "local" }, data: patch });
+  return prisma.materialCard.update({ where: { id: cardId, userId }, data: patch });
 }
 
-export async function setDefaultMaterialVersion(cardId: string, versionId: string) {
-  const version = await prisma.materialVersion.findFirst({ where: { id: versionId, cardId, card: { userId: "local" } } });
+export async function setDefaultMaterialVersion(userId: string, cardId: string, versionId: string) {
+  const version = await prisma.materialVersion.findFirst({ where: { id: versionId, cardId, card: { userId } } });
   if (!version) throw new Error("素材版本不属于该卡片");
   return prisma.materialCard.update({ where: { id: cardId }, data: { defaultVersionId: versionId } });
 }
 
-export async function deleteMaterialVersion(versionId: string) {
+export async function deleteMaterialVersion(userId: string, versionId: string) {
   return prisma.$transaction(async (tx) => {
-    const version = await tx.materialVersion.findFirstOrThrow({ where: { id: versionId, card: { userId: "local" } }, include: { card: { include: { versions: { select: { id: true } } } } } });
+    const version = await tx.materialVersion.findFirstOrThrow({ where: { id: versionId, card: { userId } }, include: { card: { include: { versions: { select: { id: true } } } } } });
     if (version.card.defaultVersionId === version.id) throw new Error("默认版本不可删除，请先切换默认版本");
     if (version.card.versions.length <= 1) throw new Error("素材卡至少保留一个版本");
     return tx.materialVersion.delete({ where: { id: version.id } });

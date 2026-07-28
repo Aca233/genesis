@@ -9,11 +9,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    timeline: { findUnique: mocks.timelineFindUnique },
+    timeline: { findFirst: mocks.timelineFindUnique },
     chronicleEntry: { findMany: mocks.entryFindMany },
     god: { findMany: mocks.godFindMany },
     entity: { findMany: mocks.entityFindMany },
   },
+}));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
 }));
 
 import { GET } from "./route";

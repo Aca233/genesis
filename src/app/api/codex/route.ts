@@ -5,21 +5,23 @@ import { realityViewerFromPersistence } from "@/lib/reality/visibility";
 import { parseWorldIconTheme } from "@/lib/icons/theme";
 import { resolveIcon } from "@/lib/icons/resolver";
 import { loadLocalIcon } from "@/lib/icons/svg.server";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 /**
  * GET /api/codex?timelineId=xxx —— 众生录列表（轻量，无 sections）
  * 排序：标星在前 → active 在前 → 名字
  */
 
-export async function GET(request: Request) {
+export const GET = withAuth(async (userId, request: Request) => {
   const url = new URL(request.url);
   const timelineId = url.searchParams.get("timelineId");
   if (!timelineId) {
     return NextResponse.json({ error: "缺少 timelineId" }, { status: 400 });
   }
 
-  const timeline = await prisma.timeline.findUnique({
-    where: { id: timelineId },
+  const timeline = await prisma.timeline.findFirst({
+    where: ownedWhere.timeline(userId, timelineId),
     select: {
       observerState: true,
       world: { select: { mode: true, iconTheme: true } },
@@ -104,4 +106,4 @@ export async function GET(request: Request) {
       };
     }),
   });
-}
+});

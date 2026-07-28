@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { createMaterialVersion } from "@/lib/materials/repository";
 import { snapshotRuntimeMaterial } from "@/lib/materials/runtime-snapshot";
+import { withAuth } from "@/lib/auth/route";
 
 const SnapshotRequestSchema = z.object({
   sourceType: z.enum(["god", "entity", "ability"]),
@@ -12,28 +13,28 @@ const SnapshotRequestSchema = z.object({
   setDefault: z.boolean().default(false),
 }).strict();
 
-export async function POST(request: Request) {
+export const POST = withAuth(async (userId, request: Request) => {
   const parsed = SnapshotRequestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "请求参数无效" }, { status: 400 });
   try {
-    const snapshot = await snapshotRuntimeMaterial(parsed.data);
+    const snapshot = await snapshotRuntimeMaterial({ userId, ...parsed.data });
     const identity = snapshot.cardIdentity;
     let card = await prisma.materialCard.findFirst({
-      where: { userId: "local", sourceKind: identity.sourceKind, sourceRef: identity.sourceRef },
+      where: { userId, sourceKind: identity.sourceKind, sourceRef: identity.sourceRef },
       select: { id: true },
     });
     const isNewCard = !card;
     if (!card) {
       card = await prisma.materialCard.create({
         data: {
-          userId: "local", kind: identity.kind, name: identity.name, summary: identity.summary,
+          userId, kind: identity.kind, name: identity.name, summary: identity.summary,
           sourceWorldId: identity.sourceWorldId, sourceWorldName: identity.sourceWorldName,
           sourceKind: identity.sourceKind, sourceRef: identity.sourceRef,
         },
         select: { id: true },
       });
     }
-    const version = await createMaterialVersion({
+    const version = await createMaterialVersion(userId, {
       cardId: card.id,
       name: parsed.data.versionName,
       note: parsed.data.note,
@@ -46,4 +47,4 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: message }, { status: /不存在/.test(message) ? 404 : 400 });
   }
-}
+});

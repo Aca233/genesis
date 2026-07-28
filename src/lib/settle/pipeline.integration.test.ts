@@ -38,7 +38,7 @@ const { prisma } = await import("@/lib/db");
 const { settleChapter } = await import("./pipeline");
 
 async function fixture() {
-  const world = await prisma.world.create({ data: { name: `settle-${crypto.randomUUID()}`, genesisInput: "test", lockedPaths: [] } });
+  const world = await prisma.world.create({ data: { userId: "test-user", name: `settle-${crypto.randomUUID()}`, genesisInput: "test", lockedPaths: [] } });
   const timeline = await prisma.timeline.create({ data: { worldId: world.id } });
   await prisma.world.update({ where: { id: world.id }, data: { activeTimelineId: timeline.id, status: "playing" } });
   const race = await prisma.entity.create({ data: { timelineId: timeline.id, type: "race", name: "山民", aliases: [], emblemSeed: "race", summary: "山地族群", lockedPaths: [] } });
@@ -616,7 +616,7 @@ it("把可见未锁定栏目放入整理上下文，并持久化人物的方向�
 it("逐项忽略跨现实或非人物的人物关系目标", async () => {
   const data = await fixture();
   const foreignWorld = await prisma.world.create({
-    data: { name: `foreign-${crypto.randomUUID()}`, genesisInput: "test", lockedPaths: [] },
+    data: { userId: "test-user", name: `foreign-${crypto.randomUUID()}`, genesisInput: "test", lockedPaths: [] },
   });
   const foreignTimeline = await prisma.timeline.create({ data: { worldId: foreignWorld.id } });
   await prisma.entity.create({

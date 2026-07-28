@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  entityFindUnique: vi.fn(),
+  entityFindFirst: vi.fn(),
   entityRelationFindMany: vi.fn(),
   chronicleFindMany: vi.fn(),
   iconAssignmentFindUnique: vi.fn(),
@@ -10,12 +10,16 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({
   prisma: {
     entity: {
-      findUnique: mocks.entityFindUnique,
+      findFirst: mocks.entityFindFirst,
     },
     entityRelation: { findMany: mocks.entityRelationFindMany },
     chronicleEntry: { findMany: mocks.chronicleFindMany },
     iconAssignment: { findUnique: mocks.iconAssignmentFindUnique },
   },
+}));
+
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
 }));
 
 import { GET } from "./route";
@@ -80,7 +84,7 @@ function entity(mode: "creator" | "pantheon", viewpoint: "omniscient" | "limited
 describe("GET /api/codex/[id] projections", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.entityFindUnique.mockResolvedValue(entity("creator", "omniscient"));
+    mocks.entityFindFirst.mockResolvedValue(entity("creator", "omniscient"));
     mocks.entityRelationFindMany.mockResolvedValue([]);
     mocks.iconAssignmentFindUnique.mockResolvedValue(null);
     mocks.chronicleFindMany.mockResolvedValue([{
@@ -118,7 +122,7 @@ describe("GET /api/codex/[id] projections", () => {
   });
 
   it("迷雾 creator 隐去栏目正文、隐藏能力、沿革和幕后编年史", async () => {
-    mocks.entityFindUnique.mockResolvedValue(entity("creator", "limited"));
+    mocks.entityFindFirst.mockResolvedValue(entity("creator", "limited"));
     mocks.chronicleFindMany.mockResolvedValue([]);
 
     const body = await (await GET(new Request("http://localhost/api/codex/entity-1"), context)).json();
@@ -133,7 +137,7 @@ describe("GET /api/codex/[id] projections", () => {
   });
 
   it("pantheon 忽略伪造的 omniscient 查询参数", async () => {
-    mocks.entityFindUnique.mockResolvedValue(entity("pantheon", "omniscient"));
+    mocks.entityFindFirst.mockResolvedValue(entity("pantheon", "omniscient"));
     mocks.chronicleFindMany.mockResolvedValue([]);
 
     const request = new Request("http://localhost/api/codex/entity-1?viewpoint=omniscient");
@@ -267,7 +271,7 @@ describe("GET /api/codex/[id] projections", () => {
       worldVisible: false,
     });
 
-    mocks.entityFindUnique.mockResolvedValue(entity("creator", "limited"));
+    mocks.entityFindFirst.mockResolvedValue(entity("creator", "limited"));
     const limitedBody = await (
       await GET(new Request("http://localhost/api/codex/entity-1"), context)
     ).json();

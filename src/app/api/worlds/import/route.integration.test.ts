@@ -80,7 +80,7 @@ describe("存档导出导入 PostgreSQL 往返", () => {
     });
     const originalWorld = await prisma.world.create({
       data: {
-        name: `archive-roundtrip-${crypto.randomUUID()}`,
+        userId: "test-user", name: `archive-roundtrip-${crypto.randomUUID()}`,
         genesisInput: "真实存档往返集成测试",
         draftDeck: deck,
         lockedPaths: [],
@@ -291,7 +291,7 @@ describe("存档导出导入 PostgreSQL 往返", () => {
   it("version 3 草稿世界往返保留 creator mode 且不导出操作凭证", async () => {
     const source = await prisma.world.create({
       data: {
-        name: `creator-archive-${crypto.randomUUID()}`,
+        userId: "test-user", name: `creator-archive-${crypto.randomUUID()}`,
         genesisInput: "创造自行运转的宇宙",
         mode: "creator",
         operationKind: "rewrite",
@@ -329,7 +329,7 @@ describe("存档导出导入 PostgreSQL 往返", () => {
     const deck = completeCreatorDeck();
     const source = await prisma.world.create({
       data: {
-        name: `creator-tree-archive-${crypto.randomUUID()}`,
+        userId: "test-user", name: `creator-tree-archive-${crypto.randomUUID()}`,
         genesisInput: "创造分叉的现实",
         mode: "creator",
         draftDeck: deck,
@@ -580,7 +580,7 @@ describe("存档导出导入 PostgreSQL 往返", () => {
       exportedAt: new Date().toISOString(),
       world: {
         id: oldWorldId,
-        userId: "local",
+        userId: "test-user",
         name: "旧版真实存档",
         genesisInput: "旧版神谕",
         status: "playing",

@@ -18,6 +18,7 @@ import {
 import { buildRealityTree } from "@/lib/reality/tree";
 import { ICON_CATALOG_BY_TOKEN } from "@/lib/icons/catalog";
 import { parseWorldIconTheme } from "@/lib/icons/theme";
+import { withAuth } from "@/lib/auth/route";
 
 /**
  * POST /api/worlds/import —— 导入 version 4 存档。
@@ -1038,7 +1039,7 @@ function remapDedupeKey(
   return `import:${newWorldId}:${newEventId}`;
 }
 
-export async function POST(request: Request) {
+export const POST = withAuth(async (userId, request: Request) => {
   let raw: unknown;
   try {
     raw = JSON.parse(await readBoundedBody(request));
@@ -1585,6 +1586,7 @@ export async function POST(request: Request) {
       await tx.world.create({
         data: {
           id: newWorldId,
+          userId,
           name: w.name,
           genesisInput: w.genesisInput,
           mode: w.mode,
@@ -1680,4 +1682,4 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ worldId: newWorldId });
-}
+});

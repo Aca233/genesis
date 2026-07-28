@@ -120,17 +120,23 @@ export async function generateGenesisDeck(
         invalidOutput,
         validationError,
       };
-      const repaired = mode === "pantheon"
-        ? await options.repairCompletion({
-          ...sharedRepairInput,
-          mode,
-          schema: PantheonWorldDeckSchema,
-        })
-        : await options.repairCompletion({
-          ...sharedRepairInput,
-          mode,
-          schema: CreatorWorldDeckSchema,
-        });
+      let repaired: unknown;
+      try {
+        repaired = mode === "pantheon"
+          ? await options.repairCompletion({
+            ...sharedRepairInput,
+            mode,
+            schema: PantheonWorldDeckSchema,
+          })
+          : await options.repairCompletion({
+            ...sharedRepairInput,
+            mode,
+            schema: CreatorWorldDeckSchema,
+          });
+      } catch (repairError) {
+        lastError = repairError;
+        continue;
+      }
       try {
         return validateParsedDeck(repaired, mode, options.materialSnapshot ?? null);
       } catch (repairError) {

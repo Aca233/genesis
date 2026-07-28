@@ -6,6 +6,7 @@ import { parseStWorldbook } from "@/lib/lorebook/st-import";
 import { MaterialSelectionItemSchema } from "@/lib/materials/types";
 import { buildGenesisMaterialSnapshot, snapshotJson } from "@/lib/materials/task-snapshot";
 import { WorldModeSchema } from "@/lib/world-mode";
+import { withAuth } from "@/lib/auth/route";
 
 const CreateGenesisTaskSchema = z.object({
   mode: WorldModeSchema.default("pantheon"),
@@ -15,7 +16,7 @@ const CreateGenesisTaskSchema = z.object({
   materialSelections: z.array(MaterialSelectionItemSchema).max(40).default([]),
 });
 
-export async function POST(request: Request) {
+export const POST = withAuth(async (userId, request: Request) => {
   let body: unknown;
   try {
     body = await request.json();
@@ -42,11 +43,12 @@ export async function POST(request: Request) {
   }
 
   let materialSelection;
-  try { materialSelection = await buildGenesisMaterialSnapshot(parsed.data.materialSelections); }
+  try { materialSelection = await buildGenesisMaterialSnapshot(parsed.data.materialSelections, userId); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 }); }
 
   const task = await prisma.genesisTask.create({
     data: {
+      userId,
       mode: parsed.data.mode,
       decree: parsed.data.decree,
       lorebook: parsed.data.lorebook as Prisma.InputJsonValue | undefined,
@@ -58,4 +60,4 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json({ taskId: task.id }, { status: 202 });
-}
+});

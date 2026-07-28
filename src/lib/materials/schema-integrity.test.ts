@@ -7,8 +7,8 @@ describe("material library Prisma schema", () => {
   it("defines immutable material persistence and runtime source refs", () => {
     expect(schema).toContain("model MaterialCard {");
     expect(schema).toContain("model MaterialVersion {");
-    expect(schema).toContain("materialSelection Json?");
-    expect(schema).toContain("materialArchiveStatus String");
+    expect(schema).toMatch(/materialSelection\s+Json\?/);
+    expect(schema).toMatch(/materialArchiveStatus\s+String/);
     expect(schema).toMatch(/materialRef\s+String\?/);
     expect(schema).toContain("@@unique([userId, sourceKind, sourceRef])");
     expect(schema).toContain("@@unique([cardId, version])");

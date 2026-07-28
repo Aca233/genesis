@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    world: { findUnique: mocks.worldFindUnique },
+    world: { findFirst: mocks.worldFindUnique, findUnique: mocks.worldFindUnique },
     god: { findFirst: mocks.godFindFirst, findMany: mocks.godFindMany },
     chapter: { findFirst: mocks.chapterFindFirst, findMany: mocks.chapterFindMany },
     timeline: { findUnique: mocks.timelineFindUnique },
@@ -35,6 +35,9 @@ vi.mock("@/lib/db", () => ({
     entity: { findMany: mocks.entityFindMany },
     $transaction: mocks.transaction,
   },
+}));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
 }));
 
 vi.mock("@/lib/reality/operation-lock", async (importOriginal) => {

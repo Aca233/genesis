@@ -4,6 +4,7 @@ import { CreatorWorldDeckSchema } from "@/lib/cards/schemas";
 
 const mocks = vi.hoisted(() => ({
   findUnique: vi.fn(),
+  latestFindUnique: vi.fn(),
   updateMany: vi.fn(),
   txFindUnique: vi.fn(),
   transaction: vi.fn(),
@@ -11,9 +12,12 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/db", () => ({
   prisma: {
-    world: { findUnique: mocks.findUnique },
+    world: { findFirst: mocks.findUnique, findUnique: mocks.latestFindUnique },
     $transaction: mocks.transaction,
   },
+}));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
 }));
 vi.mock("@/lib/llm/structured", () => ({ completeStructured: mocks.completeStructured }));
 
@@ -31,6 +35,7 @@ function request(cardKey = "majorGods") {
 describe("POST /api/worlds/[id]/reroll", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.latestFindUnique.mockResolvedValue({ status: "draft" });
     mocks.updateMany.mockResolvedValue({ count: 1 });
     mocks.txFindUnique.mockResolvedValue({ updatedAt: new Date("2026-07-22T00:00:01.456Z") });
     mocks.transaction.mockImplementation(async (run) => run({
@@ -100,7 +105,7 @@ describe("POST /api/worlds/[id]/reroll", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "卡组已被其他操作更新，请刷新后重试" });
     expect(mocks.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "world-1", mode: "creator", status: "draft", updatedAt: loadedAt },
+      where: { id: "world-1", userId: "test-user", mode: "creator", status: "draft", updatedAt: loadedAt },
     }));
     expect(mocks.updateMany).toHaveBeenCalledTimes(1);
     expect(mocks.txFindUnique).not.toHaveBeenCalled();
@@ -109,12 +114,11 @@ describe("POST /api/worlds/[id]/reroll", () => {
   it("模型生成期间世界开局时原子写入失败并返回已开局冲突", async () => {
     const loadedAt = new Date("2026-07-22T00:00:00.123Z");
     const deck = completeCreatorDeck();
-    mocks.findUnique
-      .mockResolvedValueOnce({
-        id: "world-1", mode: "creator", status: "draft", updatedAt: loadedAt,
-        draftDeck: deck, lockedPaths: [], genesisInput: "创造星海",
-      })
-      .mockResolvedValueOnce({ status: "playing" });
+    mocks.findUnique.mockResolvedValue({
+      id: "world-1", mode: "creator", status: "draft", updatedAt: loadedAt,
+      draftDeck: deck, lockedPaths: [], genesisInput: "创造星海",
+    });
+    mocks.latestFindUnique.mockResolvedValue({ status: "playing" });
     mocks.completeStructured.mockResolvedValue(deck);
     mocks.updateMany.mockResolvedValue({ count: 0 });
 
@@ -123,7 +127,7 @@ describe("POST /api/worlds/[id]/reroll", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "世界已开局，不可修改卡组" });
     expect(mocks.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "world-1", mode: "creator", status: "draft", updatedAt: loadedAt },
+      where: { id: "world-1", userId: "test-user", mode: "creator", status: "draft", updatedAt: loadedAt },
     }));
   });
 

@@ -8,16 +8,16 @@
 # 可覆盖变量见下方「配置」段。
 #
 # 前置(一次性):服务器已按 deploy/README.md §1/§4/§5 初始化;
-# deploy 用户可 sudo systemctl restart genesis(sudoers 加一行:
-#   deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart genesis
-# )。
+# deploy 用户属于 genesis 组，可写 releases；并可无密码调用激活器(sudoers):
+#   deploy ALL=(root) NOPASSWD: /srv/genesis/bin/activate-release.sh /srv/genesis/releases/*
 set -euo pipefail
 
 # ── 配置(占位符,按环境覆盖)─────────────────────────────────────
 SERVER="${SERVER:?用法: SERVER=deploy@your-server bash deploy/build-and-ship.sh}"
-APP_DIR="${APP_DIR:-/srv/genesis/app}"
+RELEASES_DIR="${RELEASES_DIR:-/srv/genesis/releases}"
 SERVICE="${SERVICE:-genesis}"
 OUT_DIR="${OUT_DIR:-.deploy-out}"
+RELEASE_ID="${RELEASE_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD 2>/dev/null || echo build)}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -55,10 +55,12 @@ rm -f "$OUT_DIR/.env" "$OUT_DIR"/.env.*
 # DATABASE_URL="postgresql://genesis:<强密码>@localhost:15432/genesis" \
 #   pnpm exec prisma migrate deploy
 
-# ── 4. rsync 上船 + 重启 ────────────────────────────────────────
-# --delete 保证产物目录与本次构建一致;排除运行期缓存避免每次清空。
-rsync -az --delete --exclude='.next/cache' "$OUT_DIR"/ "$SERVER:$APP_DIR"/
+# ── 4. 上传新 release + 原子激活 ────────────────────────────────
+REMOTE_RELEASE="$RELEASES_DIR/$RELEASE_ID"
+ssh "$SERVER" "mkdir -p \"$REMOTE_RELEASE\""
+rsync -az --delete "$OUT_DIR"/ "$SERVER:$REMOTE_RELEASE"/
 
-ssh "$SERVER" "sudo systemctl restart $SERVICE && systemctl is-active $SERVICE"
+# 激活器会校验秘密泄漏、原子切换 current、健康检查并在失败时回滚。
+ssh "$SERVER" "sudo /srv/genesis/bin/activate-release.sh \"$REMOTE_RELEASE\" && systemctl is-active \"$SERVICE\""
 
-echo "OK: shipped $(git rev-parse --short HEAD 2>/dev/null || echo '?') -> $SERVER:$APP_DIR"
+echo "OK: shipped $(git rev-parse --short HEAD 2>/dev/null || echo '?') -> $SERVER:$REMOTE_RELEASE"

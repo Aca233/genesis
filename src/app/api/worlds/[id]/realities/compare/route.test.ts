@@ -10,8 +10,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/db", () => ({
-  prisma: { world: { findUnique: mocks.worldFindUnique } },
+  prisma: { world: { findFirst: mocks.worldFindUnique } },
 }));
+vi.mock("@/lib/auth/session", () => ({ requireUserId: vi.fn().mockResolvedValue("test-user") }));
 vi.mock("@/lib/reality/compare", () => ({
   RealityCompareError: class RealityCompareError extends Error {},
   loadRealityComparison: mocks.loadRealityComparison,

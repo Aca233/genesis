@@ -40,6 +40,9 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/db", () => ({ prisma: mocks.prisma }));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
+}));
 
 import { GET as exportWorld } from "@/app/api/worlds/[id]/export/route";
 import { POST as importWorld } from "./route";
@@ -1551,7 +1554,7 @@ describe("存档导出", () => {
     });
     expect(mocks.prisma.world.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "world-1", userId: "local" },
+        where: { id: "world-1", userId: "test-user" },
         include: expect.objectContaining({
           rewrites: expect.anything(),
           timelines: expect.objectContaining({

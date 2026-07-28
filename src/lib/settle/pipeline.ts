@@ -160,7 +160,7 @@ export type SettlementOperationLease = {
   claimed: true;
   /**
    * 发起结算的用户(多租户 Phase A 归因;槽位解析亦按此用户)。
-   * 未传时回退 "local"(单用户遗留;第 4 波 iso-07 由路由传真实值)。
+   * 请求入口必须传入；内部/测试调用未传时从章节所属世界解析。
    */
   userId?: string;
   /** Test-only override; production uses OPERATION_LEASE_RENEW_MS. */
@@ -237,7 +237,7 @@ export async function* settleChapter(
 
     const chapter = await prisma.chapter.findUnique({
       where: { id: chapterId },
-      include: { timeline: { select: { id: true, worldId: true, world: { select: { activeTimelineId: true } } } } },
+      include: { timeline: { select: { id: true, worldId: true, world: { select: { activeTimelineId: true, userId: true } } } } },
     });
     if (!chapter) throw new Error("内部记录段不存在");
     assertActiveReality(chapter.timeline.world.activeTimelineId, chapter.timeline.id);
@@ -259,7 +259,13 @@ export async function* settleChapter(
       );
       await leaseGuard.assertOwned();
     }
-    yield* settleChapterWithLease(chapterId, worldId, token, leaseGuard.assertOwned, lease?.userId ?? "local");
+    yield* settleChapterWithLease(
+      chapterId,
+      worldId,
+      token,
+      leaseGuard.assertOwned,
+      lease?.userId ?? chapter.timeline.world.userId,
+    );
   } finally {
     leaseGuard?.stop();
     if (ownsLease && worldId) {

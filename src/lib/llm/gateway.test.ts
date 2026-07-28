@@ -23,7 +23,7 @@ vi.mock("./adapters", () => ({
   },
 }));
 
-import { complete, stream } from "./gateway";
+import { complete, isTransientLlmError, stream } from "./gateway";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -175,6 +175,10 @@ describe("prompt cache call logging", () => {
 });
 
 describe("complete transport attempts", () => {
+  it("将空流视为可由任务级调度恢复的瞬时故障", () => {
+    expect(isTransientLlmError(new Error("流式响应为空"))).toBe(true);
+  });
+
   it("可将一次模型调用限制为一次上游请求且禁止非流式回落", async () => {
     mocks.stream.mockImplementation(async function* () {
       throw new Error("fetch failed");
@@ -347,6 +351,57 @@ describe("输出上限续写接力", () => {
     // 断线轮的未交付片段不进入结果(消费者从未收到),续传轮从已确认文本接续
     expect(text).toBe('{"chapter":"上卷下卷"}');
     expect(mocks.stream).toHaveBeenCalledTimes(3);
+  });
+
+  it("stream: 首字符前连接终止时在当前任务内重试", async () => {
+    mocks.stream
+      .mockImplementationOnce(async function* () {
+        throw new Error("terminated");
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: "{\"ok\":true}" };
+        yield usageChunk(false);
+        yield { type: "done" };
+      });
+
+    let text = "";
+    for await (const chunk of stream("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      failOnTruncation: true,
+      messages: [{ role: "user", content: "create" }],
+    })) {
+      if (chunk.type === "text") text += chunk.text;
+    }
+
+    expect(text).toBe("{\"ok\":true}");
+    expect(mocks.stream).toHaveBeenCalledTimes(2);
+  });
+
+  it("stream: 上游正常结束却没有文本时在当前任务内重试", async () => {
+    mocks.stream
+      .mockImplementationOnce(async function* () {
+        yield usageChunk(false);
+        yield { type: "done" };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: "{\"ok\":true}" };
+        yield usageChunk(false);
+        yield { type: "done" };
+      });
+
+    let text = "";
+    for await (const chunk of stream("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      failOnTruncation: true,
+      messages: [{ role: "user", content: "create" }],
+    })) {
+      if (chunk.type === "text") text += chunk.text;
+    }
+
+    expect(text).toBe("{\"ok\":true}");
+    expect(mocks.stream).toHaveBeenCalledTimes(2);
   });
 
   it("stream: 连续截断超过轮数上限时报可操作错误", async () => {

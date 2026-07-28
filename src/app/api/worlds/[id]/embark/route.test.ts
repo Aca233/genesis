@@ -6,7 +6,10 @@ const mocks = vi.hoisted(() => ({
   runClaimedEmbarkTransaction: vi.fn(),
   archiveWorldMaterials: vi.fn(),
 }));
-vi.mock("@/lib/db", () => ({ prisma: { world: { findUnique: mocks.findUnique } } }));
+vi.mock("@/lib/db", () => ({ prisma: { world: { findFirst: mocks.findUnique, findUnique: mocks.findUnique } } }));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
+}));
 vi.mock("@/lib/materials/archive-world", () => ({ archiveWorldMaterials: mocks.archiveWorldMaterials }));
 vi.mock("@/lib/embark/mutations", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/embark/mutations")>();

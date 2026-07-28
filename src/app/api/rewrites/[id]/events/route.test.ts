@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({
   prisma: { realityRewrite: { findFirst: mocks.findFirst } },
 }));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
+}));
 vi.mock("@/lib/reality/task-runner", () => ({
   ensureRealityRewriteRunning: mocks.ensure,
   rewriteDurableProgress: mocks.progress,

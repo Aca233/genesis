@@ -12,13 +12,15 @@ export type TaskProgressView = DurableTaskProgress & {
 export function reduceTaskProgress(
   current: TaskProgressView | null,
   next: DurableTaskProgress,
-): TaskProgressView {
+): TaskProgressView | null {
+  const nextStage = taskStageIndex(next.taskKind, next.stage);
+  if (nextStage < 0) return current;
+
   if (current?.taskId === next.taskId) {
     const currentTime = Date.parse(current.updatedAt);
     const nextTime = Date.parse(next.updatedAt);
     if (nextTime < currentTime) return current;
     const currentStage = taskStageIndex(current.taskKind, current.stage);
-    const nextStage = taskStageIndex(next.taskKind, next.stage);
     if (next.taskKind === current.taskKind && nextStage < currentStage) return current;
   }
   return { ...next, steps: taskStepViews(next) };

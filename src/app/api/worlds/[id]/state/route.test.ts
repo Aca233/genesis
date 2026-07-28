@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    world: { findUnique: mocks.worldFindUnique },
+    world: { findFirst: mocks.worldFindUnique, findUnique: mocks.worldFindUnique },
     timeline: { findUnique: mocks.timelineFindUnique },
     chapter: {
       findUnique: mocks.chapterFindUnique,
@@ -26,6 +26,9 @@ vi.mock("@/lib/db", () => ({
     generationRequest: { findFirst: mocks.generationRequestFindFirst },
     iconAssignment: { findMany: mocks.iconAssignmentFindMany },
   },
+}));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
 }));
 
 import { GET } from "./route";
@@ -378,6 +381,63 @@ describe("GET /api/worlds/[id]/state projections", () => {
     });
     expect(body.checkpoint.settling).toBe(true);
     expect(body.operation).toEqual({ kind: "settlement" });
+  });
+
+  it("把 settlement 的内部 done 步骤投影为公开 completed 阶段", async () => {
+    mocks.worldFindUnique.mockResolvedValue({
+      ...worldFixture,
+      operationKind: "settlement",
+      operationLeaseExpiresAt: new Date("2999-01-01T00:00:00.000Z"),
+    });
+    mocks.chapterFindMany.mockResolvedValue([{
+      id: "chapter-1",
+      index: 1,
+      title: "初燃",
+      settleState: "settling:done",
+      settleError: null,
+      settleRetryable: true,
+      settleUpdatedAt: new Date("2026-07-23T02:00:00.000Z"),
+      createdAt: new Date("2026-07-23T00:00:00.000Z"),
+      messages: [],
+    }]);
+
+    const body = await (await GET(new Request("http://localhost"), context)).json();
+
+    expect(body.taskProgress).toMatchObject({
+      taskKind: "settlement",
+      taskId: "chapter-1",
+      stage: "completed",
+      status: "running",
+    });
+  });
+
+  it("把 settlement 的内部模型租约投影为公开 pantheon 阶段", async () => {
+    mocks.worldFindUnique.mockResolvedValue({
+      ...worldFixture,
+      operationKind: "settlement",
+      operationLeaseExpiresAt: new Date("2999-01-01T00:00:00.000Z"),
+    });
+    mocks.chapterFindMany.mockResolvedValue([{
+      id: "chapter-1",
+      index: 1,
+      title: "初燃",
+      settleState: "settling:model:1780000000000:private-token",
+      settleError: null,
+      settleRetryable: true,
+      settleUpdatedAt: new Date("2026-07-23T02:00:00.000Z"),
+      createdAt: new Date("2026-07-23T00:00:00.000Z"),
+      messages: [],
+    }]);
+
+    const body = await (await GET(new Request("http://localhost"), context)).json();
+
+    expect(body.taskProgress).toMatchObject({
+      taskKind: "settlement",
+      taskId: "chapter-1",
+      stage: "pantheon",
+      status: "running",
+    });
+    expect(JSON.stringify(body)).not.toContain("private-token");
   });
 
   it("连续返回最近四个内部记录段且只允许编辑当前开放段", async () => {

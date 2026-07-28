@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({
   prisma: { genesisTask: { create: mocks.create } },
 }));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
+}));
 
 import { POST } from "./route";
 

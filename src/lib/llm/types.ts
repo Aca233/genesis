@@ -62,6 +62,8 @@ export type LlmTask =
   | "chronicle"
   | "reroll"
   | "finale"
+  | "world-director"
+  | "world-director-probe"
   | "test";
 
 export type CompletionRequest = {

@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ findMany: vi.fn() }));
 vi.mock("@/lib/db", () => ({ prisma: { materialCard: { findMany: mocks.findMany } } }));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
+}));
 import { GET } from "./route";
 
 describe("GET /api/materials", () => {
@@ -25,7 +28,7 @@ describe("GET /api/materials", () => {
       materials: [{ id: "card-1", defaultVersionId: "version-1", versions: [{ id: "version-1", isInitial: true }] }],
     });
     expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { userId: "local", hidden: false },
+      where: { userId: "test-user", hidden: false },
     }));
   });
 
@@ -44,7 +47,7 @@ describe("GET /api/materials", () => {
 
     expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
-        userId: "local", kind: "character", favorite: true,
+        userId: "test-user", kind: "character", favorite: true,
         OR: [
           { name: { contains: "旅人", mode: "insensitive" } },
           { summary: { contains: "旅人", mode: "insensitive" } },

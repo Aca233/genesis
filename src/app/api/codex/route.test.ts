@@ -8,10 +8,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    timeline: { findUnique: mocks.timelineFindUnique },
+    timeline: { findFirst: mocks.timelineFindUnique },
     entity: { findMany: mocks.entityFindMany },
     iconAssignment: { findMany: mocks.iconAssignmentFindMany },
   },
+}));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
 }));
 
 import { GET } from "./route";
@@ -71,7 +74,7 @@ describe("GET /api/codex", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.timelineFindUnique).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "timeline-1" },
+      where: { id: "timeline-1", world: { userId: "test-user" } },
       select: expect.objectContaining({ observerState: true, world: expect.anything() }),
     }));
     expect(mocks.entityFindMany).toHaveBeenCalled();

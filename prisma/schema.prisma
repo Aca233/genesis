@@ -1,5 +1,5 @@
 // 《创世》数据模型 —— 见 docs/03-数据模型.md
-// 单用户期 user_id 恒为 "local"，为后续 Discord OAuth 预留。
+// 多用户：5 张属主表经 user_id 外键归属 better-auth 的 "user" 表。
 
 generator client {
   provider = "prisma-client-js"
@@ -9,64 +9,142 @@ datasource db {
   provider = "postgresql"
 }
 
+// ───────────────────────── 身份与会话（better-auth）─────────────────────────
+
+model User {
+  id               String           @id
+  name             String
+  email            String
+  emailVerified    Boolean
+  image            String?
+  createdAt        DateTime
+  updatedAt        DateTime
+  role             String?
+  banned           Boolean?
+  banReason        String?
+  banExpires       DateTime?
+  sessions         Session[]
+  accounts         Account[]
+  worlds           World[]
+  genesisTasks     GenesisTask[]
+  materialCards    MaterialCard[]
+  loreIndexEntries LoreIndexEntry[]
+  settings         Settings?
+  adminAuditLogs   AdminAuditLog[]  @relation("AdminAuditActor")
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id             String   @id
+  expiresAt      DateTime
+  token          String
+  createdAt      DateTime
+  updatedAt      DateTime
+  ipAddress      String?
+  userAgent      String?
+  userId         String
+  impersonatedBy String?
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime
+  updatedAt             DateTime
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("account")
+}
+
+model Verification {
+  id         String    @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime?
+  updatedAt  DateTime?
+
+  @@map("verification")
+}
+
 // ───────────────────────── 世界与时间线 ─────────────────────────
 
 model World {
-  id                 String     @id @default(cuid())
-  userId             String     @default("local") @map("user_id")
-  name               String
-  genesisInput       String     @map("genesis_input") // 原初神谕
-  mode               String     @default("pantheon")
-  status             String     @default("draft") // draft | playing | concluded
-  draftDeck          Json?      @map("draft_deck") // 创世草稿卡组（开局落地后清空）
-  lockedPaths        String[]   @map("locked_paths") // 卡片编辑器 player_locked 字段路径
-  themeCard          Json?      @map("theme_card") // 纪年名/位阶命名/措辞
-  styleCard          Json?      @map("style_card") // 叙事风格卡
-  cosmology          Json? // 宇宙论卡
-  fusionAxiom        Json?      @map("fusion_axiom") // 融合公理卡（仅多IP融合）
-  iconTheme          Json?      @map("icon_theme")
-  iconThemeRevision  Int        @default(0) @map("icon_theme_revision")
-  iconThemeOperationKey String?  @map("icon_theme_operation_key")
-  activeTimelineId   String?    @map("active_timeline_id")
-  operationKind      String?    @map("operation_kind")
-  operationToken     String?    @map("operation_token")
-  operationLeaseExpiresAt DateTime? @map("operation_lease_expires_at")
-  timelines          Timeline[]
-  rewrites           RealityRewrite[]
-  lorebookEntries    LorebookEntry[]
-  genesisTasks       GenesisTask[]
-  materialCards      MaterialCard[]
-  materialArchiveStatus String   @default("pending") @map("material_archive_status")
-  materialArchiveError  String?  @map("material_archive_error")
-  createdAt          DateTime   @default(now()) @map("created_at")
-  updatedAt          DateTime   @updatedAt @map("updated_at")
+  id                      String           @id @default(cuid())
+  userId                  String           @map("user_id")
+  user                    User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  name                    String
+  genesisInput            String           @map("genesis_input") // 原初神谕
+  mode                    String           @default("pantheon")
+  status                  String           @default("draft") // draft | playing | concluded
+  draftDeck               Json?            @map("draft_deck") // 创世草稿卡组（开局落地后清空）
+  lockedPaths             String[]         @map("locked_paths") // 卡片编辑器 player_locked 字段路径
+  themeCard               Json?            @map("theme_card") // 纪年名/位阶命名/措辞
+  styleCard               Json?            @map("style_card") // 叙事风格卡
+  cosmology               Json? // 宇宙论卡
+  fusionAxiom             Json?            @map("fusion_axiom") // 融合公理卡（仅多IP融合）
+  iconTheme               Json?            @map("icon_theme")
+  iconThemeRevision       Int              @default(0) @map("icon_theme_revision")
+  iconThemeOperationKey   String?          @map("icon_theme_operation_key")
+  activeTimelineId        String?          @map("active_timeline_id")
+  operationKind           String?          @map("operation_kind")
+  operationToken          String?          @map("operation_token")
+  operationLeaseExpiresAt DateTime?        @map("operation_lease_expires_at")
+  timelines               Timeline[]
+  rewrites                RealityRewrite[]
+  lorebookEntries         LorebookEntry[]
+  genesisTasks            GenesisTask[]
+  materialCards           MaterialCard[]
+  materialArchiveStatus   String           @default("pending") @map("material_archive_status")
+  materialArchiveError    String?          @map("material_archive_error")
+  archivedAt              DateTime?        @map("archived_at")
+  createdAt               DateTime         @default(now()) @map("created_at")
+  updatedAt               DateTime         @updatedAt @map("updated_at")
 
   @@index([userId])
   @@map("worlds")
 }
 
 model GenesisTask {
-  id             String    @id @default(cuid())
-  userId         String    @default("local") @map("user_id")
-  decree         String
-  lorebook       Json?
-  lorebookName   String?   @map("lorebook_name")
-  materialSelection Json?  @map("material_selection")
-  mode           String    @default("pantheon")
-  status         String    @default("queued") // queued | running | repairing | completed | failed
-  stage          String    @default("oracle")
-  completedKeys  String[]  @map("completed_keys")
-  rawOutput      String    @default("") @map("raw_output") @db.Text
-  error          String?
-  /** 时间一致设计稿 §10.4：报告型 AI 语义审计结果（TemporalAuditResult）；仅 IP 世界产出，审计失败/旧任务为 NULL */
-  auditReport    Json?     @map("audit_report")
-  attempt        Int       @default(0)
-  leaseToken     String?   @map("lease_token")
-  leaseExpiresAt DateTime? @map("lease_expires_at")
-  worldId        String?   @unique @map("world_id")
-  world          World?    @relation(fields: [worldId], references: [id], onDelete: SetNull)
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  id                String    @id @default(cuid())
+  userId            String    @map("user_id")
+  user              User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  decree            String
+  lorebook          Json?
+  lorebookName      String?   @map("lorebook_name")
+  materialSelection Json?     @map("material_selection")
+  mode              String    @default("pantheon")
+  status            String    @default("queued") // queued | running | repairing | completed | failed
+  stage             String    @default("oracle")
+  completedKeys     String[]  @map("completed_keys")
+  rawOutput         String    @default("") @map("raw_output") @db.Text
+  error             String?
+  /**
+   * 时间一致设计稿 §10.4：报告型 AI 语义审计结果（TemporalAuditResult）；仅 IP 世界产出，审计失败/旧任务为 NULL
+   */
+  auditReport       Json?     @map("audit_report")
+  attempt           Int       @default(0)
+  leaseToken        String?   @map("lease_token")
+  leaseExpiresAt    DateTime? @map("lease_expires_at")
+  worldId           String?   @unique @map("world_id")
+  world             World?    @relation(fields: [worldId], references: [id], onDelete: SetNull)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@index([userId, status])
   @@index([status, leaseExpiresAt])
@@ -74,82 +152,82 @@ model GenesisTask {
 }
 
 model Timeline {
-  id          String           @id @default(cuid())
-  worldId     String           @map("world_id")
-  world       World            @relation(fields: [worldId], references: [id], onDelete: Cascade)
-  parentId    String?          @map("parent_id") // 自哪条时间线分叉（M3）
-  forkChapter Int?             @map("fork_chapter")
-  branchName      String            @default("原初现实") @map("branch_name")
-  branchSummary   String?           @map("branch_summary")
-  realityState    Json?             @map("reality_state")
-  observerState   Json?             @map("observer_state")
-  forkRewriteId   String?           @unique @map("fork_rewrite_id")
-  forkRewrite     RealityRewrite?   @relation("TimelineForkRewrite", fields: [forkRewriteId], references: [id], onDelete: SetNull)
-  sourceRewrites  RealityRewrite[]  @relation("RewriteSource")
-  resultRewrite   RealityRewrite?   @relation("RewriteResult")
-  chapters    Chapter[]
-  gods        God[]
-  entities    Entity[]
-  abilities   Ability[]
-  chronicles  ChronicleEntry[]
-  omens       OmenQueue[]
-  canonEvents CanonEvent[]
+  id              String           @id @default(cuid())
+  worldId         String           @map("world_id")
+  world           World            @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  parentId        String?          @map("parent_id") // 自哪条时间线分叉（M3）
+  forkChapter     Int?             @map("fork_chapter")
+  branchName      String           @default("原初现实") @map("branch_name")
+  branchSummary   String?          @map("branch_summary")
+  realityState    Json?            @map("reality_state")
+  observerState   Json?            @map("observer_state")
+  forkRewriteId   String?          @unique @map("fork_rewrite_id")
+  forkRewrite     RealityRewrite?  @relation("TimelineForkRewrite", fields: [forkRewriteId], references: [id], onDelete: SetNull)
+  sourceRewrites  RealityRewrite[] @relation("RewriteSource")
+  resultRewrite   RealityRewrite?  @relation("RewriteResult")
+  chapters        Chapter[]
+  gods            God[]
+  entities        Entity[]
+  abilities       Ability[]
+  chronicles      ChronicleEntry[]
+  omens           OmenQueue[]
+  canonEvents     CanonEvent[]
   worldEvents     WorldEvent[]
   worldActivities WorldActivity[]
   entityRelations EntityRelation[]
   iconAssignments IconAssignment[]
-  createdAt   DateTime         @default(now()) @map("created_at")
-  updatedAt   DateTime         @updatedAt @map("updated_at")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
 
   @@index([worldId])
   @@map("timelines")
 }
 
 model Chapter {
-  id              String    @id @default(cuid())
-  timelineId      String    @map("timeline_id")
-  timeline        Timeline  @relation(fields: [timelineId], references: [id], onDelete: Cascade)
-  index           Int
-  title           String?
-  summary         String? // 章末史官小结
-  settleState     String    @default("open") @map("settle_state") // open | settling:<step> | settled
-  settleError     String?   @map("settle_error")
-  settleRetryable Boolean   @default(true) @map("settle_retryable")
-  settleUpdatedAt DateTime  @default(now()) @map("settle_updated_at")
-  snapshot        Json? // 章快照（M3 分叉用）
-  messages      Message[]
-  abilityEvents AbilityEvent[]
+  id                 String              @id @default(cuid())
+  timelineId         String              @map("timeline_id")
+  timeline           Timeline            @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  index              Int
+  title              String?
+  summary            String? // 章末史官小结
+  settleState        String              @default("open") @map("settle_state") // open | settling:<step> | settled
+  settleError        String?             @map("settle_error")
+  settleRetryable    Boolean             @default(true) @map("settle_retryable")
+  settleUpdatedAt    DateTime            @default(now()) @map("settle_updated_at")
+  snapshot           Json? // 章快照（M3 分叉用）
+  messages           Message[]
+  abilityEvents      AbilityEvent[]
   generationRequests GenerationRequest[]
-  createdAt     DateTime  @default(now()) @map("created_at")
+  createdAt          DateTime            @default(now()) @map("created_at")
 
   @@unique([timelineId, index])
   @@map("chapters")
 }
 
 model GenerationRequest {
-  id                String   @id
-  chapterId         String   @map("chapter_id")
-  chapter           Chapter  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  id                String    @id
+  chapterId         String    @map("chapter_id")
+  chapter           Chapter   @relation(fields: [chapterId], references: [id], onDelete: Cascade)
   mode              String
   scale             String
   content           String?
   directive         String?
-  status            String   @default("pending")
-  stage             String   @default("reserved")
-  outputSnapshot    Json?    @map("output_snapshot")
-  retryable         Boolean  @default(true)
-  safeError         String?  @map("safe_error")
-  stageUpdatedAt    DateTime @default(now()) @map("stage_updated_at")
+  status            String    @default("pending")
+  stage             String    @default("reserved")
+  outputSnapshot    Json?     @map("output_snapshot")
+  retryable         Boolean   @default(true)
+  safeError         String?   @map("safe_error")
+  stageUpdatedAt    DateTime  @default(now()) @map("stage_updated_at")
   error             String?
-  attempt           Int      @default(1)
+  attempt           Int       @default(1)
   leaseExpiresAt    DateTime? @map("lease_expires_at")
-  playerMessageId   String?  @map("player_message_id")
-  narratorMessageId String   @map("narrator_message_id")
-  playerIndex       Int?     @map("player_index")
-  narratorIndex     Int      @map("narrator_index")
-  resultMeta        Json?    @map("result_meta")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  playerMessageId   String?   @map("player_message_id")
+  narratorMessageId String    @map("narrator_message_id")
+  playerIndex       Int?      @map("player_index")
+  narratorIndex     Int       @map("narrator_index")
+  resultMeta        Json?     @map("result_meta")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@index([chapterId, status])
   @@index([chapterId, stage])
@@ -222,17 +300,17 @@ model WorldActivity {
 }
 
 model Message {
-  id        String   @id @default(cuid())
-  chapterId String   @map("chapter_id")
-  chapter   Chapter  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
-  index     Int
-  role      String // player | narrator
-  content   String
-  scale     String   @default("scene") // scene | era | epoch
-  variants  Json? // 异文候选 [{content, chosen}]
+  id            String         @id @default(cuid())
+  chapterId     String         @map("chapter_id")
+  chapter       Chapter        @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  index         Int
+  role          String // player | narrator
+  content       String
+  scale         String         @default("scene") // scene | era | epoch
+  variants      Json? // 异文候选 [{content, chosen}]
   meta          Json? // 建议/揭示事件/实体链接span/edited标记
   abilityEvents AbilityEvent[]
-  createdAt     DateTime @default(now()) @map("created_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
 
   @@unique([chapterId, index])
   @@map("messages")
@@ -241,66 +319,66 @@ model Message {
 // ───────────────────────── 诸神 ─────────────────────────
 
 model God {
-  id             String   @id @default(cuid())
-  timelineId     String   @map("timeline_id")
-  timeline       Timeline @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  id             String    @id @default(cuid())
+  timelineId     String    @map("timeline_id")
+  timeline       Timeline  @relation(fields: [timelineId], references: [id], onDelete: Cascade)
   name           String
   aliases        String[] // 检索用：别名+称号
   tier           String // major | minor | player
-  isPlayer       Boolean  @default(false) @map("is_player")
-  rank           String   @default("nascent") // ember..sovereign 内部枚举，主题卡负责措辞映射
+  isPlayer       Boolean   @default(false) @map("is_player")
+  rank           String    @default("nascent") // ember..sovereign 内部枚举，主题卡负责措辞映射
   domains        String[] // 领域关键词
   persona        Json? // 人格卡（可见）
   voice          Json? // 声纹卡（可见）
   agenda         Json? // 议程卡（默认隐藏）
-  agendaRevealed Boolean  @default(false) @map("agenda_revealed")
+  agendaRevealed Boolean   @default(false) @map("agenda_revealed")
   relations      Json? // { targetId: {label, note} }
-  faithScope     String?  @map("faith_scope")
-  materialRef    String?  @map("material_ref")
-  codexEntityId  String?    @map("codex_entity_id")
+  faithScope     String?   @map("faith_scope")
+  materialRef    String?   @map("material_ref")
+  codexEntityId  String?   @map("codex_entity_id")
   abilities      Ability[] @relation("GodAbilities")
   createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  @@index([timelineId])
   @@unique([timelineId, materialRef])
+  @@index([timelineId])
   @@map("gods")
 }
 
 // ───────────────────────── 百科（Codex）─────────────────────────
 
 model Entity {
-  id            String          @id @default(cuid())
-  timelineId    String          @map("timeline_id")
-  timeline      Timeline        @relation(fields: [timelineId], references: [id], onDelete: Cascade)
-  type          String // faction | character | race | place | artifact | cult
-  name          String
-  aliases       String[]
-  emblemSeed    String          @map("emblem_seed") // 程序纹章种子
-  imageUrl      String?         @map("image_url") // 玩家上传；预留 AI 生图
-  starred          Boolean            @default(false)
-  isChosen         Boolean            @default(false) @map("is_chosen") // 神选者：永不降档/压缩
-  isMajorCharacter Boolean            @default(false) @map("is_major_character")
-  isCreatorAvatar  Boolean            @default(false) @map("is_creator_avatar")
-  raceId           String?            @map("race_id")
-  race             Entity?            @relation("CharacterRace", fields: [raceId], references: [id], onDelete: SetNull)
-  raceMembers      Entity[]           @relation("CharacterRace")
-  heat          String          @default("active") // active | dormant
-  scenePresence Boolean         @default(false) @map("scene_presence")
-  summary       String // 摘要卡（dormant 时的全部）
-  lockedPaths   String[]        @map("locked_paths") // player_locked 字段路径
-  materialRef   String?         @map("material_ref")
-  sections              EntitySection[]
-  abilities             Ability[]         @relation("EntityAbilities")
-  memberships           EntityMembership[] @relation("MembershipCharacter")
-  membershipsAsFaction  EntityMembership[] @relation("MembershipFaction")
-  outgoingRelations     EntityRelation[]   @relation("EntityRelationSource")
-  incomingRelations     EntityRelation[]   @relation("EntityRelationTarget")
-  createdAt             DateTime           @default(now()) @map("created_at")
-  updatedAt     DateTime        @updatedAt @map("updated_at")
+  id                   String             @id @default(cuid())
+  timelineId           String             @map("timeline_id")
+  timeline             Timeline           @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  type                 String // faction | character | race | place | artifact | cult
+  name                 String
+  aliases              String[]
+  emblemSeed           String             @map("emblem_seed") // 程序纹章种子
+  imageUrl             String?            @map("image_url") // 玩家上传；预留 AI 生图
+  starred              Boolean            @default(false)
+  isChosen             Boolean            @default(false) @map("is_chosen") // 神选者：永不降档/压缩
+  isMajorCharacter     Boolean            @default(false) @map("is_major_character")
+  isCreatorAvatar      Boolean            @default(false) @map("is_creator_avatar")
+  raceId               String?            @map("race_id")
+  race                 Entity?            @relation("CharacterRace", fields: [raceId], references: [id], onDelete: SetNull)
+  raceMembers          Entity[]           @relation("CharacterRace")
+  heat                 String             @default("active") // active | dormant
+  scenePresence        Boolean            @default(false) @map("scene_presence")
+  summary              String // 摘要卡（dormant 时的全部）
+  lockedPaths          String[]           @map("locked_paths") // player_locked 字段路径
+  materialRef          String?            @map("material_ref")
+  sections             EntitySection[]
+  abilities            Ability[]          @relation("EntityAbilities")
+  memberships          EntityMembership[] @relation("MembershipCharacter")
+  membershipsAsFaction EntityMembership[] @relation("MembershipFaction")
+  outgoingRelations    EntityRelation[]   @relation("EntityRelationSource")
+  incomingRelations    EntityRelation[]   @relation("EntityRelationTarget")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
 
-  @@index([timelineId, type])
   @@unique([timelineId, materialRef])
+  @@index([timelineId, type])
   @@map("entities")
 }
 
@@ -324,26 +402,26 @@ model EntityRelation {
 }
 
 model RealityRewrite {
-  id                 String    @id @default(cuid())
-  worldId            String    @map("world_id")
-  world              World     @relation(fields: [worldId], references: [id], onDelete: Cascade)
-  sourceTimelineId   String    @map("source_timeline_id")
-  sourceTimeline     Timeline  @relation("RewriteSource", fields: [sourceTimelineId], references: [id], onDelete: Restrict)
-  resultTimelineId   String?   @unique @map("result_timeline_id")
-  resultTimeline     Timeline? @relation("RewriteResult", fields: [resultTimelineId], references: [id], onDelete: SetNull)
-  forkedTimeline     Timeline? @relation("TimelineForkRewrite")
-  sourceChapterId    String    @map("source_chapter_id")
-  decree             String    @db.Text
-  scope              String    @default("prospective")
-  status             String    @default("planning")
-  plan               Json?
-  summary            String?
-  idempotencyKey     String    @unique @map("idempotency_key")
-  leaseToken         String?   @map("lease_token")
-  leaseExpiresAt     DateTime? @map("lease_expires_at")
-  error              String?
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  id               String    @id @default(cuid())
+  worldId          String    @map("world_id")
+  world            World     @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  sourceTimelineId String    @map("source_timeline_id")
+  sourceTimeline   Timeline  @relation("RewriteSource", fields: [sourceTimelineId], references: [id], onDelete: Restrict)
+  resultTimelineId String?   @unique @map("result_timeline_id")
+  resultTimeline   Timeline? @relation("RewriteResult", fields: [resultTimelineId], references: [id], onDelete: SetNull)
+  forkedTimeline   Timeline? @relation("TimelineForkRewrite")
+  sourceChapterId  String    @map("source_chapter_id")
+  decree           String    @db.Text
+  scope            String    @default("prospective")
+  status           String    @default("planning")
+  plan             Json?
+  summary          String?
+  idempotencyKey   String    @unique @map("idempotency_key")
+  leaseToken       String?   @map("lease_token")
+  leaseExpiresAt   DateTime? @map("lease_expires_at")
+  error            String?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   @@index([worldId, createdAt])
   @@index([status, leaseExpiresAt])
@@ -351,40 +429,40 @@ model RealityRewrite {
 }
 
 model Ability {
-  id              String          @id @default(cuid())
-  timelineId      String          @map("timeline_id")
-  timeline        Timeline        @relation(fields: [timelineId], references: [id], onDelete: Cascade)
-  entityId        String?         @map("entity_id")
-  entity          Entity?         @relation("EntityAbilities", fields: [entityId], references: [id], onDelete: Cascade)
-  godId           String?         @map("god_id")
-  god             God?            @relation("GodAbilities", fields: [godId], references: [id], onDelete: Cascade)
-  sourceAbilityId String?         @map("source_ability_id")
-  sourceAbility   Ability?        @relation("AbilitySource", fields: [sourceAbilityId], references: [id], onDelete: SetNull)
-  derivedAbilities Ability[]      @relation("AbilitySource")
-  name            String
-  kind            String
-  effect          String
-  trigger         String
-  cost            String
-  limitations     String
-  mastery         String
-  state           String          @default("normal")
-  visibility      String          @default("known")
-  rumorText       String?         @map("rumor_text")
-  bloodlineJustification String?         @map("bloodline_justification")
-  lockedFields    String[]        @map("locked_fields")
-  version         Int             @default(1)
-  materialRef     String?         @map("material_ref")
-  events          AbilityEvent[]
-  createdAt       DateTime        @default(now()) @map("created_at")
-  updatedAt       DateTime        @updatedAt @map("updated_at")
+  id                     String         @id @default(cuid())
+  timelineId             String         @map("timeline_id")
+  timeline               Timeline       @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+  entityId               String?        @map("entity_id")
+  entity                 Entity?        @relation("EntityAbilities", fields: [entityId], references: [id], onDelete: Cascade)
+  godId                  String?        @map("god_id")
+  god                    God?           @relation("GodAbilities", fields: [godId], references: [id], onDelete: Cascade)
+  sourceAbilityId        String?        @map("source_ability_id")
+  sourceAbility          Ability?       @relation("AbilitySource", fields: [sourceAbilityId], references: [id], onDelete: SetNull)
+  derivedAbilities       Ability[]      @relation("AbilitySource")
+  name                   String
+  kind                   String
+  effect                 String
+  trigger                String
+  cost                   String
+  limitations            String
+  mastery                String
+  state                  String         @default("normal")
+  visibility             String         @default("known")
+  rumorText              String?        @map("rumor_text")
+  bloodlineJustification String?        @map("bloodline_justification")
+  lockedFields           String[]       @map("locked_fields")
+  version                Int            @default(1)
+  materialRef            String?        @map("material_ref")
+  events                 AbilityEvent[]
+  createdAt              DateTime       @default(now()) @map("created_at")
+  updatedAt              DateTime       @updatedAt @map("updated_at")
 
+  @@unique([timelineId, materialRef])
+  @@unique([entityId, sourceAbilityId])
   @@index([timelineId])
   @@index([entityId])
   @@index([godId])
   @@index([sourceAbilityId])
-  @@unique([timelineId, materialRef])
-  @@unique([entityId, sourceAbilityId])
   @@map("abilities")
 }
 
@@ -411,11 +489,11 @@ model AbilityEvent {
 }
 
 model EntityMembership {
-  id          String @id @default(cuid())
-  characterId String @map("character_id")
-  character   Entity @relation("MembershipCharacter", fields: [characterId], references: [id], onDelete: Cascade)
-  factionId   String @map("faction_id")
-  faction     Entity @relation("MembershipFaction", fields: [factionId], references: [id], onDelete: Cascade)
+  id          String  @id @default(cuid())
+  characterId String  @map("character_id")
+  character   Entity  @relation("MembershipCharacter", fields: [characterId], references: [id], onDelete: Cascade)
+  factionId   String  @map("faction_id")
+  faction     Entity  @relation("MembershipFaction", fields: [factionId], references: [id], onDelete: Cascade)
   role        String
   isPrimary   Boolean @default(false) @map("is_primary")
 
@@ -518,7 +596,6 @@ model LorebookEntry {
   @@map("lorebook_entries")
 }
 
-
 // ───────────────────────── 资料索引 ─────────────────────────
 
 // LoreIndexEntry：世界书条目的持久化分类索引（时间一致设计稿 §11 阶段4）。
@@ -527,7 +604,8 @@ model LorebookEntry {
 // 分类失败不落行，创世回退到原始条目截取，不阻断（§11）。
 model LoreIndexEntry {
   id            String   @id @default(cuid())
-  userId        String   @default("local") @map("user_id")
+  userId        String   @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Restrict)
   sourceKey     String   @map("source_key") // 条目内容 SHA-256 十六进制
   title         String
   keywords      String[]
@@ -546,7 +624,8 @@ model LoreIndexEntry {
 
 model MaterialCard {
   id               String            @id @default(cuid())
-  userId           String            @default("local") @map("user_id")
+  userId           String            @map("user_id")
+  user             User              @relation(fields: [userId], references: [id], onDelete: Restrict)
   kind             String
   name             String
   summary          String
@@ -574,7 +653,7 @@ model MaterialVersion {
   id              String            @id @default(cuid())
   cardId          String            @map("card_id")
   card            MaterialCard      @relation("MaterialCardVersions", fields: [cardId], references: [id], onDelete: Cascade)
-  defaultForCards MaterialCard[]     @relation("MaterialDefaultVersion")
+  defaultForCards MaterialCard[]    @relation("MaterialDefaultVersion")
   version         Int
   name            String
   note            String?
@@ -595,7 +674,8 @@ model MaterialVersion {
 // ───────────────────────── 设置与日志 ─────────────────────────
 
 model Settings {
-  userId        String   @id @default("local") @map("user_id")
+  userId        String   @id @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Restrict)
   narrativeSlot Json?    @map("narrative_slot") // ModelSlot（key 为 AES-256-GCM 密文）
   backstageSlot Json?    @map("backstage_slot")
   embeddingSlot Json?    @map("embedding_slot")
@@ -620,20 +700,32 @@ model LlmCall {
   cacheWriteTokens Int?     @map("cache_write_tokens")
   cacheRequested   Boolean  @default(false) @map("cache_requested")
   cacheFallback    Boolean  @default(false) @map("cache_fallback")
-  /** 端点缓存能力降级快照(能力位 + 最近一次降级原因);全部完好为 NULL(F8 可观测) */
+  /**
+   * 端点缓存能力降级快照(能力位 + 最近一次降级原因);全部完好为 NULL(F8 可观测)
+   */
   cacheCapability  String?  @map("cache_capability")
-  /** 缓存前缀指纹(buildPromptCachePlan().key);同 hash 短窗口内第 2+ 次调用「应命中」(F5 可观测) */
+  /**
+   * 缓存前缀指纹(buildPromptCachePlan().key);同 hash 短窗口内第 2+ 次调用「应命中」(F5 可观测)
+   */
   stablePrefixHash String?  @map("stable_prefix_hash")
-  /** 一条业务请求(含全部续写/断点续传轮)共享的运行 ID(F5 可观测) */
+  /**
+   * 一条业务请求(含全部续写/断点续传轮)共享的运行 ID(F5 可观测)
+   */
   agentRunId       String?  @map("agent_run_id")
-  /** 运行内轮号:0 = 首轮请求,1+ = 续写接力/回退轮(F5 可观测) */
+  /**
+   * 运行内轮号:0 = 首轮请求,1+ = 续写接力/回退轮(F5 可观测)
+   */
   agentCallIndex   Int?     @map("agent_call_index")
   dynamicTokens    Int?     @map("dynamic_tokens")
   toolResultTokens Int?     @map("tool_result_tokens")
   cacheLayer       String?  @map("cache_layer")
-  /** 归因:发起调用的用户(多租户 Phase A);历史行保持 NULL 不回填 */
+  /**
+   * 归因:发起调用的用户(多租户 Phase A);历史行保持 NULL 不回填
+   */
   userId           String?  @map("user_id")
-  /** 归因:调用所属世界(设计 §3.1 顺手可加);无世界语境的调用(test 等)为 NULL */
+  /**
+   * 归因:调用所属世界(设计 §3.1 顺手可加);无世界语境的调用(test 等)为 NULL
+   */
   worldId          String?  @map("world_id")
   createdAt        DateTime @default(now()) @map("created_at")
 
@@ -643,4 +735,24 @@ model LlmCall {
   @@index([agentRunId])
   @@index([userId, createdAt])
   @@map("llm_calls")
+}
+
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?  @map("actor_user_id")
+  actor       User?    @relation("AdminAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  action      String
+  targetType  String   @map("target_type")
+  targetId    String   @map("target_id")
+  targetLabel String   @map("target_label")
+  reason      String
+  success     Boolean
+  requestIp   String?  @map("request_ip")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([targetType, targetId, createdAt])
+  @@map("admin_audit_logs")
 }

@@ -16,8 +16,9 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/db", () => ({
-  prisma: { $transaction: mocks.transaction },
+  prisma: { world: { findFirst: vi.fn().mockResolvedValue({ id: "world-1" }) }, $transaction: mocks.transaction },
 }));
+vi.mock("@/lib/auth/session", () => ({ requireUserId: vi.fn().mockResolvedValue("test-user") }));
 
 import { PATCH } from "./route";
 

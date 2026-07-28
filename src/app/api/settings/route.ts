@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { encryptSecret } from "@/lib/crypto";
 import { ModelSlotSchema, type ModelSlot } from "@/lib/llm/types";
+import { withAuth } from "@/lib/auth/route";
 
 /**
  * 设置读写。
@@ -44,18 +45,18 @@ function sealSlot(
   };
 }
 
-export async function GET() {
-  const settings = await prisma.settings.findUnique({ where: { userId: "local" } });
+export const GET = withAuth(async (userId) => {
+  const settings = await prisma.settings.findUnique({ where: { userId } });
   return NextResponse.json({
     narrativeSlot: maskSlot(settings?.narrativeSlot),
     backstageSlot: maskSlot(settings?.backstageSlot),
     prefs: settings?.prefs ?? {},
   });
-}
+});
 
-export async function PUT(request: Request) {
+export const PUT = withAuth(async (userId, request: Request) => {
   const body = PutSchema.parse(await request.json());
-  const existing = await prisma.settings.findUnique({ where: { userId: "local" } });
+  const existing = await prisma.settings.findUnique({ where: { userId } });
 
   const narrativeSlot =
     body.narrativeSlot === undefined
@@ -79,10 +80,10 @@ export async function PUT(request: Request) {
   };
 
   await prisma.settings.upsert({
-    where: { userId: "local" },
-    create: { userId: "local", ...data } as Prisma.SettingsCreateInput,
+    where: { userId },
+    create: { userId, ...data } as Prisma.SettingsCreateInput,
     update: data,
   });
 
   return NextResponse.json({ ok: true });
-}
+});

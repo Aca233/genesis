@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   prisma: {
-    world: { findUnique: vi.fn() },
-    entity: { findUnique: vi.fn() },
+    world: { findUnique: vi.fn(), findFirst: vi.fn() },
+    entity: { findUnique: vi.fn(), findFirst: vi.fn() },
     god: { findUnique: vi.fn(), findMany: vi.fn() },
     chapter: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn() },
     message: { findUnique: vi.fn() },
-    timeline: { findUnique: vi.fn() },
+    timeline: { findUnique: vi.fn(), findFirst: vi.fn() },
     realityRewrite: { findFirst: vi.fn() },
     generationRequest: { findFirst: vi.fn().mockResolvedValue(null) },
     entityRelation: { findMany: vi.fn() },
@@ -27,6 +27,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mocks.prisma }));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
+}));
 vi.mock("@/lib/abilities/visibility", () => ({
   projectAbilitiesForOwner: mocks.projectAbilitiesForOwner,
   projectAbilitiesForPlayer: mocks.projectAbilitiesForPlayer,
@@ -66,6 +69,9 @@ describe("能力 API 可见性", () => {
     mocks.prisma.chronicleEntry.findMany.mockResolvedValue([]);
     mocks.prisma.entityRelation.findMany.mockResolvedValue([]);
     mocks.prisma.realityRewrite.findFirst.mockResolvedValue(null);
+    mocks.prisma.entity.findFirst.mockImplementation((args) =>
+      mocks.prisma.entity.findUnique(args),
+    );
     mocks.prisma.$transaction.mockImplementation(
       async (operation: (tx: typeof mocks.prisma) => unknown) => operation(mocks.prisma),
     );
@@ -86,9 +92,15 @@ describe("能力 API 可见性", () => {
       chapterId: "chapter-1",
       scale: "scene",
     });
-    mocks.prisma.ability.findFirst.mockResolvedValue(null);
+    mocks.prisma.ability.findFirst.mockImplementation(({ where }) =>
+      "id" in where ? mocks.prisma.ability.findUnique({ where: { id: where.id } }) : null,
+    );
     mocks.prisma.ability.updateMany.mockResolvedValue({ count: 1 });
     mocks.prisma.timeline.findUnique.mockResolvedValue({
+      id: "timeline-1",
+      world: { activeTimelineId: "timeline-1" },
+    });
+    mocks.prisma.timeline.findFirst.mockResolvedValue({
       id: "timeline-1",
       world: { activeTimelineId: "timeline-1" },
     });
@@ -171,7 +183,7 @@ describe("能力 API 可见性", () => {
 
   it("GET 世界状态对玩家神公开全部神权，对其他神按可见性投影", async () => {
     const { GET } = await import("@/app/api/worlds/[id]/state/route");
-    mocks.prisma.world.findUnique.mockResolvedValue({
+    mocks.prisma.world.findFirst.mockResolvedValue({
       id: "world-1",
       name: "测试界",
       status: "playing",
@@ -486,7 +498,7 @@ describe("能力 API 可见性", () => {
 
   it("history 不返回隐藏能力的沿革", async () => {
     const { GET } = await import("./history/route");
-    mocks.prisma.ability.findUnique.mockResolvedValue({
+    mocks.prisma.ability.findFirst.mockResolvedValue({
       ...hiddenAbility,
       timelineId: "timeline-1",
       entityId: "character-1",
@@ -712,7 +724,9 @@ describe("能力 API 可见性", () => {
     let current = stored;
     mocks.prisma.ability.findUnique.mockImplementation(async () => current);
     mocks.prisma.abilityEvent.count.mockResolvedValue(0);
-    mocks.prisma.ability.findFirst.mockResolvedValue({ id: "derived-ability" });
+    mocks.prisma.ability.findFirst.mockImplementation(({ where }) =>
+      "id" in where ? current : { id: "derived-ability" },
+    );
     mocks.prisma.ability.updateMany.mockImplementation(async ({ data }) => {
       current = { ...current, ...data, version: current.version + data.version.increment };
       return { count: 1 };
@@ -809,7 +823,7 @@ describe("能力 API 可见性", () => {
 
   it("history 对传闻能力只公开揭示时间和 rumorText", async () => {
     const { GET } = await import("./history/route");
-    mocks.prisma.ability.findUnique.mockResolvedValue({
+    mocks.prisma.ability.findFirst.mockResolvedValue({
       ...knownAbility,
       visibility: "rumored",
       rumorText: "据说此技源自失落王朝。",

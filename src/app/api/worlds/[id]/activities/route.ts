@@ -10,6 +10,8 @@ import {
   type WorldActivityProjectionRow,
   type WorldEventProjectionRow,
 } from "@/lib/world-activity/projection";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 export const dynamic = "force-dynamic";
 
@@ -78,18 +80,19 @@ function pagination(request: Request):
   return { limit, before };
 }
 
-export async function GET(
+export const GET = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const page = pagination(request);
   if ("error" in page) {
     return NextResponse.json({ error: page.error }, { status: 400 });
   }
 
   const { id } = await params;
-  const world = await prisma.world.findUnique({
-    where: { id },
+  const world = await prisma.world.findFirst({
+    where: ownedWhere.world(userId, id),
     select: { id: true, mode: true, activeTimelineId: true },
   });
   if (!world) {
@@ -249,4 +252,4 @@ export async function GET(
     })),
     nextCursor,
   });
-}
+});

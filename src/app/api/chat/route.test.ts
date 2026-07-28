@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   OpeningGenerationConflictError: class OpeningGenerationConflictError extends Error {},
   FrozenRealityError: class FrozenRealityError extends Error {},
   prisma: {
-    chapter: { findUnique: vi.fn() },
+    chapter: { findFirst: vi.fn() },
     world: { findUnique: vi.fn() },
     message: { create: vi.fn() },
   },
@@ -26,6 +26,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mocks.prisma }));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
+}));
 vi.mock("@/lib/context/builder", () => ({
   buildNarratorContext: mocks.buildNarratorContext,
 }));
@@ -69,7 +72,7 @@ import { POST } from "./route";
 describe("POST /api/chat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.prisma.chapter.findUnique.mockResolvedValue({
+    mocks.prisma.chapter.findFirst.mockResolvedValue({
       id: "chapter-1",
       index: 2,
       settleState: "open",
@@ -426,7 +429,7 @@ describe("POST /api/chat", () => {
     );
   });
   it("rejects a frozen branch before generation reservation", async () => {
-    mocks.prisma.chapter.findUnique.mockResolvedValue({
+    mocks.prisma.chapter.findFirst.mockResolvedValue({
       id: "chapter-frozen", index: 2, settleState: "open",
       timeline: { id: "timeline-old", worldId: "world-1", world: { activeTimelineId: "timeline-new" } },
       messages: [],

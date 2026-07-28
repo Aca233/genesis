@@ -10,9 +10,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    world: { findUnique: mocks.findUnique },
+    world: { findFirst: mocks.findUnique },
     $transaction: mocks.transaction,
   },
+}));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
 }));
 
 import { GET, PATCH } from "./route";
@@ -75,7 +78,7 @@ describe("/api/worlds/[id]", () => {
       updatedAt: nextRevision.toISOString(),
     });
     expect(mocks.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "world-1", mode: "creator", status: "draft", updatedAt: new Date(initialRevision) },
+      where: { id: "world-1", userId: "test-user", mode: "creator", status: "draft", updatedAt: new Date(initialRevision) },
       data: expect.objectContaining({ draftDeck: expect.objectContaining({ mode: "creator" }) }),
     }));
     expect(mocks.txFindUnique).toHaveBeenCalledWith({
@@ -96,7 +99,7 @@ describe("/api/worlds/[id]", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: "卡组已被其他操作更新，请刷新后重试" });
     expect(mocks.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "world-1", mode: "creator", status: "draft", updatedAt: new Date(initialRevision) },
+      where: { id: "world-1", userId: "test-user", mode: "creator", status: "draft", updatedAt: new Date(initialRevision) },
     }));
     expect(mocks.updateMany).toHaveBeenCalledTimes(1);
     expect(mocks.txFindUnique).not.toHaveBeenCalled();

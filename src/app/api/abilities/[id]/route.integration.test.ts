@@ -28,7 +28,7 @@ const abilityFields = {
 async function createLineageFixture() {
   const world = await prisma.world.create({
     data: {
-      name: `ability-delete-lineage-${crypto.randomUUID()}`,
+      userId: "test-user", name: `ability-delete-lineage-${crypto.randomUUID()}`,
       genesisInput: "能力删除并发集成测试",
       lockedPaths: [],
     },

@@ -5,6 +5,7 @@ import {
   toRealityRewriteDto,
 } from "@/lib/reality/task-runner";
 import { encodeTaskEvent } from "@/lib/tasks/progress-events";
+import { withAuth } from "@/lib/auth/route";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -15,13 +16,14 @@ function encodeEvent(event: string, data: unknown) {
   return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-export async function GET(
+export const GET = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   const exists = await prisma.realityRewrite.findFirst({
-    where: { id, world: { userId: "local" } },
+    where: { id, world: { userId } },
     select: { id: true, status: true },
   });
   if (exists === null) return Response.json({ error: "现实改写任务不存在" }, { status: 404 });
@@ -33,7 +35,7 @@ export async function GET(
       try {
         for (let tick = 0; !request.signal.aborted; tick += 1) {
           const task = await prisma.realityRewrite.findFirst({
-            where: { id, world: { userId: "local" } },
+            where: { id, world: { userId } },
           });
           if (task === null) {
             controller.enqueue(encodeEvent("failed", { error: "现实改写任务不存在" }));
@@ -91,4 +93,4 @@ export async function GET(
       "X-Accel-Buffering": "no",
     },
   });
-}
+});

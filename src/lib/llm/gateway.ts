@@ -55,6 +55,7 @@ function isNetworkError(message: string): boolean {
 
 function isRetryable(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
+  if (message === "流式响应为空") return true;
   if (/HTTP (429|500|502|503|504|529)/.test(message)) return true;
   if (/HTTP 404/.test(message) && /route_not_found|upstream|数据面/.test(message)) return true;
   return isNetworkError(message);
@@ -370,6 +371,7 @@ export async function* stream(
       let usage: NormalizedUsage | undefined;
       let cacheRequested = false;
       let cacheFallback = false;
+      let receivedText = false;
       truncated = false;
       // 接缝缓冲:续写轮开头可能与已产出结尾重叠,先攒足 400 字符做去重
       let seamBuffer: string | null = overlapBase ? "" : null;
@@ -380,6 +382,7 @@ export async function* stream(
           cacheFallback = chunk.cacheFallback;
           truncated = chunk.truncated ?? false;
         } else if (chunk.type === "text") {
+          if (chunk.text) receivedText = true;
           if (seamBuffer !== null) {
             seamBuffer += chunk.text;
             if (seamBuffer.length >= 400) {
@@ -398,6 +401,7 @@ export async function* stream(
           yield chunk;
         }
       }
+      if (!receivedText) throw new Error("流式响应为空");
       if (seamBuffer !== null && seamBuffer) {
         const deduped = trimOverlap(overlapBase, seamBuffer);
         if (deduped) {
@@ -416,14 +420,18 @@ export async function* stream(
           yield* runRound(roundReq, overlapBase);
           return;
         } catch (error) {
-          const resumable = req.failOnTruncation && isRetryable(error)
-            && accumulated.length > 0 && networkRetries < STREAM_NETWORK_RETRIES
+          const message = error instanceof Error ? error.message : String(error);
+          const resumable = req.failOnTruncation
+            && (isRetryable(error) || message === "流式响应为空")
+            && networkRetries < STREAM_NETWORK_RETRIES
             && !options?.signal?.aborted;
           if (!resumable) throw error;
           networkRetries += 1;
           await backoff(networkRetries - 1);
-          roundReq = continuationRequest(req, accumulated);
-          overlapBase = accumulated;
+          if (accumulated.length > 0) {
+            roundReq = continuationRequest(req, accumulated);
+            overlapBase = accumulated;
+          }
         }
       }
     };

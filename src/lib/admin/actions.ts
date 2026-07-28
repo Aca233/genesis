@@ -1,0 +1,103 @@
+import "server-only";
+import type { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db";
+import { ensureGenesisTaskRunning } from "@/lib/genesis/task-runner";
+import { ensureRealityRewriteRunning, retryRealityRewrite } from "@/lib/reality/task-runner";
+import { assertAdminConfirmation, assertAdminMutationAllowed, redactAdminError } from "./security";
+
+export type AdminActionContext = { actorUserId: string; requestIp: string | null };
+type AdminDb = typeof prisma;
+
+async function audit(db: AdminDb, ctx: AdminActionContext, input: { action: string; targetType: string; targetId: string; targetLabel: string; reason: string; success: boolean; metadata?: Prisma.InputJsonValue }) {
+  await db.adminAuditLog.create({ data: { actorUserId: ctx.actorUserId, requestIp: ctx.requestIp, ...input } });
+}
+
+export async function mutateAdminUser(ctx: AdminActionContext, input: { targetUserId: string; action: "ban" | "unban" | "promote" | "demote" | "revoke-sessions" | "delete"; reason: string; confirmation?: string }, db: AdminDb = prisma) {
+  const target = await db.user.findUnique({ where: { id: input.targetUserId }, select: { id: true, name: true, email: true, role: true, banned: true } });
+  if (!target) throw new Error("用户不存在");
+  const activeAdminCount = await db.user.count({ where: { role: "admin", OR: [{ banned: false }, { banned: null }] } });
+  if (input.action === "ban") assertAdminMutationAllowed({ action: "ban-user", actorUserId: ctx.actorUserId, targetUserId: target.id, activeAdminCount, targetIsActiveAdmin: target.role === "admin" && target.banned !== true });
+  if (input.action === "demote") assertAdminMutationAllowed({ action: "demote-user", actorUserId: ctx.actorUserId, targetUserId: target.id, activeAdminCount, targetIsActiveAdmin: target.role === "admin" && target.banned !== true });
+  if (input.action === "delete") {
+    assertAdminMutationAllowed({ action: "delete-user", actorUserId: ctx.actorUserId, targetUserId: target.id, activeAdminCount, targetIsActiveAdmin: target.role === "admin" && target.banned !== true });
+    assertAdminConfirmation({ expected: target.email, confirmation: input.confirmation ?? "", reason: input.reason });
+  } else if (!input.reason.trim()) throw new Error("必须填写操作原因");
+
+  try {
+    if (input.action === "revoke-sessions") await db.session.deleteMany({ where: { userId: target.id } });
+    else if (input.action === "delete") await db.$transaction(async (tx) => {
+      await tx.adminAuditLog.create({ data: { actorUserId: ctx.actorUserId, action: "delete-user", targetType: "user", targetId: target.id, targetLabel: target.email, reason: input.reason.trim(), success: true, requestIp: ctx.requestIp } });
+      await tx.settings.deleteMany({ where: { userId: target.id } });
+      await tx.loreIndexEntry.deleteMany({ where: { userId: target.id } });
+      await tx.genesisTask.deleteMany({ where: { userId: target.id } });
+      await tx.materialCard.deleteMany({ where: { userId: target.id } });
+      await tx.world.deleteMany({ where: { userId: target.id } });
+      await tx.session.deleteMany({ where: { userId: target.id } });
+      await tx.llmCall.updateMany({ where: { userId: target.id }, data: { userId: null } });
+      await tx.user.delete({ where: { id: target.id } });
+    });
+    else {
+      const data = input.action === "ban" ? { banned: true, banReason: input.reason.trim() } : input.action === "unban" ? { banned: false, banReason: null, banExpires: null } : input.action === "promote" ? { role: "admin" } : { role: "user" };
+      await db.user.update({ where: { id: target.id }, data });
+      if (input.action === "ban") await db.session.deleteMany({ where: { userId: target.id } });
+    }
+    if (input.action !== "delete") await audit(db, ctx, { action: `${input.action}-user`, targetType: "user", targetId: target.id, targetLabel: target.email, reason: input.reason.trim(), success: true, metadata: { previousRole: target.role, previousBanned: target.banned } });
+    return { ok: true };
+  } catch (error) {
+    await audit(db, ctx, { action: `${input.action}-user`, targetType: "user", targetId: target.id, targetLabel: target.email, reason: input.reason.trim(), success: false, metadata: { error: redactAdminError(error) } }).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function mutateAdminWorld(ctx: AdminActionContext, input: { worldId: string; action: "archive" | "restore" | "delete"; reason: string; confirmation?: string }, db: AdminDb = prisma) {
+  const world = await db.world.findUnique({ where: { id: input.worldId }, select: { id: true, name: true, archivedAt: true } });
+  if (!world) throw new Error("世界不存在");
+  if (input.action === "delete") assertAdminConfirmation({ expected: world.name, confirmation: input.confirmation ?? "", reason: input.reason });
+  else if (!input.reason.trim()) throw new Error("必须填写操作原因");
+  try {
+    if (input.action === "delete") await db.$transaction(async (tx) => { await tx.adminAuditLog.create({ data: { actorUserId: ctx.actorUserId, action: "delete-world", targetType: "world", targetId: world.id, targetLabel: world.name, reason: input.reason.trim(), success: true, requestIp: ctx.requestIp } }); await tx.world.delete({ where: { id: world.id } }); });
+    else { await db.world.update({ where: { id: world.id }, data: { archivedAt: input.action === "archive" ? new Date() : null } }); await audit(db, ctx, { action: `${input.action}-world`, targetType: "world", targetId: world.id, targetLabel: world.name, reason: input.reason.trim(), success: true }); }
+    return { ok: true };
+  } catch (error) {
+    await audit(db, ctx, { action: `${input.action}-world`, targetType: "world", targetId: world.id, targetLabel: world.name, reason: input.reason.trim(), success: false, metadata: { error: redactAdminError(error) } }).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function mutateAdminTask(ctx: AdminActionContext, input: { kind: "genesis" | "narrative" | "rewrite"; taskId: string; action: "cancel" | "retry" | "recover"; reason: string }, db: AdminDb = prisma) {
+  if (!input.reason.trim()) throw new Error("必须填写操作原因");
+  let targetType = `${input.kind}-task`;
+  let targetLabel = input.taskId;
+  try {
+  if (input.kind === "genesis") {
+    const task = await db.genesisTask.findUnique({ where: { id: input.taskId }, select: { id: true, userId: true, status: true, stage: true } });
+    if (!task) throw new Error("任务不存在");
+    targetType = "genesis-task";
+    targetLabel = task.stage;
+    if (input.action === "cancel") { const result = await db.genesisTask.updateMany({ where: { id: task.id, status: { in: ["queued", "running", "repairing"] } }, data: { status: "cancelled", leaseToken: null, leaseExpiresAt: null, error: "管理员已取消" } }); if (result.count !== 1) throw new Error("任务当前不可取消"); }
+    else { const result = await db.genesisTask.updateMany({ where: { id: task.id, ...(input.action === "retry" ? { status: "failed" } : { status: { in: ["running", "repairing"] }, leaseExpiresAt: { lt: new Date() } }) }, data: { status: "queued", error: null, leaseToken: null, leaseExpiresAt: null, attempt: 0 } }); if (result.count !== 1) throw new Error("任务当前不可恢复"); ensureGenesisTaskRunning(task.id); }
+    await audit(db, ctx, { action: `${input.action}-task`, targetType: "genesis-task", targetId: task.id, targetLabel: task.stage, reason: input.reason.trim(), success: true });
+  } else if (input.kind === "narrative") {
+    if (input.action !== "cancel") throw new Error("叙事任务只能由原世界请求重试");
+    const task = await db.generationRequest.findUnique({ where: { id: input.taskId }, select: { id: true, status: true, chapter: { select: { timeline: { select: { world: { select: { id: true, name: true } } } } } } } });
+    if (!task) throw new Error("任务不存在");
+    targetType = "narrative-task";
+    targetLabel = task.chapter.timeline.world.name;
+    const result = await db.generationRequest.updateMany({ where: { id: task.id, status: "pending" }, data: { status: "cancelled", retryable: true, safeError: "管理员已取消", leaseExpiresAt: null, stageUpdatedAt: new Date() } });
+    if (result.count !== 1) throw new Error("任务当前不可取消");
+    await audit(db, ctx, { action: "cancel-task", targetType: "narrative-task", targetId: task.id, targetLabel: task.chapter.timeline.world.name, reason: input.reason.trim(), success: true });
+  } else {
+    const task = await db.realityRewrite.findUnique({ where: { id: input.taskId }, select: { id: true, status: true, world: { select: { userId: true, name: true } } } });
+    if (!task) throw new Error("任务不存在");
+    targetType = "rewrite-task";
+    targetLabel = task.world.name;
+    if (input.action === "cancel") { const result = await db.realityRewrite.updateMany({ where: { id: task.id, status: { in: ["planning", "applying", "narrating"] } }, data: { status: "cancelled", leaseToken: null, leaseExpiresAt: null, error: "管理员已取消" } }); if (result.count !== 1) throw new Error("任务当前不可取消"); }
+    else { const current = await retryRealityRewrite(db, task.world.userId, task.id); if (current.status !== "completed") ensureRealityRewriteRunning(current.id); }
+    await audit(db, ctx, { action: `${input.action}-task`, targetType: "rewrite-task", targetId: task.id, targetLabel: task.world.name, reason: input.reason.trim(), success: true });
+  }
+  return { ok: true };
+  } catch (error) {
+    await audit(db, ctx, { action: `${input.action}-task`, targetType, targetId: input.taskId, targetLabel, reason: input.reason.trim(), success: false, metadata: { error: redactAdminError(error) } }).catch(() => undefined);
+    throw error;
+  }
+}

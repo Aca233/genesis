@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 // 式样常量复制自 src/app/settings/page.tsx（:32 BRASS_BUTTON / :36 FIELD_WELL），
 // 按设计裁决不抽公共模块，保持两处独立演化。
@@ -27,6 +28,7 @@ export function validatePasswordChange(current: string, next: string): string | 
  */
 export function IdentitySection() {
   const [email, setEmail] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [changing, setChanging] = useState(false);
@@ -36,9 +38,9 @@ export function IdentitySection() {
   useEffect(() => {
     let cancelled = false;
     void fetch("/api/auth/get-session")
-      .then((r) => (r.ok ? (r.json() as Promise<{ user?: { email?: string } } | null>) : null))
+      .then((r) => (r.ok ? (r.json() as Promise<{ user?: { email?: string; role?: string } } | null>) : null))
       .then((json) => {
-        if (!cancelled) setEmail(json?.user?.email ?? null);
+        if (!cancelled) { setEmail(json?.user?.email ?? null); setIsAdmin(json?.user?.role === "admin"); }
       })
       .catch(() => {});
     return () => {
@@ -115,6 +117,7 @@ export function IdentitySection() {
       <p className="mt-4 text-xs text-ink-faint">
         初次入界者，请在此改换房主代授的初始密语。
       </p>
+      {isAdmin && <Link href="/admin" className="mt-3 inline-flex text-sm text-gilt transition hover:text-gilt-strong">进入天文台总录 →</Link>}
       <div className="mt-2 grid gap-1.5">
         <input
           type="password"

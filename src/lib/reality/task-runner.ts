@@ -26,7 +26,6 @@ import {
 } from "./schemas";
 import type { DurableTaskProgress } from "@/lib/tasks/progress";
 
-const USER_ID = "local";
 export const REWRITE_LEASE_MS = 5 * 60 * 1000;
 export const REWRITE_LEASE_RENEW_MS = REWRITE_LEASE_MS / 3;
 
@@ -173,6 +172,7 @@ export function rewriteDurableProgress(
 type RewriteDb = PrismaClient;
 
 export type CreateRealityRewriteInput = {
+  userId: string;
   worldId: string;
   decree: string;
   scope: RewriteScope;
@@ -200,7 +200,7 @@ export async function createRealityRewrite(
   try {
     const task = await db.$transaction(async (tx) => {
       const world = await tx.world.findFirst({
-        where: { id: input.worldId, userId: USER_ID },
+        where: { id: input.worldId, userId: input.userId },
         select: { id: true, mode: true, activeTimelineId: true },
       });
       if (world === null) throw new RealityRewriteNotFoundError("世界不存在");
@@ -255,7 +255,6 @@ export async function claimRealityRewriteTask(
   const claimed = await db.realityRewrite.updateMany({
     where: {
       id: taskId,
-      world: { userId: USER_ID },
       status: { in: ["planning", "applying", "narrating"] },
       OR: [{ leaseExpiresAt: null }, { leaseExpiresAt: { lte: now } }],
     },
@@ -288,10 +287,11 @@ export async function renewRealityRewriteLease(
 
 export async function retryRealityRewrite(
   db: RewriteDb,
+  userId: string,
   taskId: string,
 ): Promise<RealityRewrite> {
   const task = await db.realityRewrite.findFirst({
-    where: { id: taskId, world: { userId: USER_ID } },
+    where: { id: taskId, world: { userId } },
   });
   if (task === null) throw new RealityRewriteNotFoundError();
   if (task.status === "completed") return task;
@@ -391,9 +391,13 @@ export type RealityRewriteRunnerDependencies = {
 const defaultDependencies: RealityRewriteRunnerDependencies = {
   db: prisma,
   async plan(task, context) {
+    const owner = await prisma.world.findUniqueOrThrow({
+      where: { id: task.worldId },
+      select: { userId: true },
+    });
     return completeStructured("backstage", {
       task: "extract",
-      userId: USER_ID,
+      userId: owner.userId,
       system: rewritePlannerSystem(),
       user: rewritePlannerUserPrompt({
         decree: task.decree,
@@ -406,9 +410,13 @@ const defaultDependencies: RealityRewriteRunnerDependencies = {
     });
   },
   async narrate(task, plan, input) {
+    const owner = await prisma.world.findUniqueOrThrow({
+      where: { id: task.worldId },
+      select: { userId: true },
+    });
     return complete("narrative", {
       task: "narrative",
-      userId: USER_ID,
+      userId: owner.userId,
       maxTokens: 4000,
       cache: { namespace: `reality-rewrite-result:v1:${task.worldId}` },
       messages: [
@@ -674,8 +682,8 @@ async function applyInSerializableTransaction(
           };
         }
 
-        const world = await tx.world.findFirst({
-          where: { id: task.worldId, userId: USER_ID },
+        const world = await tx.world.findUnique({
+          where: { id: task.worldId },
           select: {
             mode: true,
             activeTimelineId: true,

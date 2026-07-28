@@ -10,6 +10,8 @@ import {
   EmbarkModeMismatchError,
   runClaimedEmbarkTransaction,
 } from "@/lib/embark/mutations";
+import { withAuth } from "@/lib/auth/route";
+import { requireWorld } from "@/lib/auth/ownership";
 
 export {
   claimDraftWorld,
@@ -25,11 +27,15 @@ export {
 export const maxDuration = 60;
 
 
-export async function POST(
+export const POST = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
+  if (!(await requireWorld(userId, id))) {
+    return NextResponse.json({ error: "世界草稿不存在" }, { status: 404 });
+  }
   try {
     let temporal = { era: "未名纪元", time: "此刻" };
     const result = await runClaimedEmbarkTransaction(prisma, id, async (tx) => {
@@ -73,4 +79,4 @@ export async function POST(
     console.error("Failed to materialize embark deck", error);
     return NextResponse.json({ error: "开局物化失败" }, { status: 500 });
   }
-}
+});

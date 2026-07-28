@@ -9,9 +9,13 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     message: {
       findUnique: mocks.messageFindUnique,
+      findFirst: mocks.messageFindUnique,
       update: mocks.messageUpdate,
     },
   },
+}));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
 }));
 
 vi.mock("@/lib/context/builder", () => ({

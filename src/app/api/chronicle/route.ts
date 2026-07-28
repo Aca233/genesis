@@ -6,13 +6,15 @@ import {
   projectChronicleForViewer,
   realityViewerFromPersistence,
 } from "@/lib/reality/visibility";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 /**
  * GET /api/chronicle?timelineId=xxx&entityId=&godId= —— 年表（已揭示条目）
  * 附过滤器选项（诸神/实体名单）。
  */
 
-export async function GET(request: Request) {
+export const GET = withAuth(async (userId, request: Request) => {
   const url = new URL(request.url);
   const timelineId = url.searchParams.get("timelineId");
   const entityId = url.searchParams.get("entityId");
@@ -21,8 +23,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "缺少 timelineId" }, { status: 400 });
   }
 
-  const timeline = await prisma.timeline.findUnique({
-    where: { id: timelineId },
+  const timeline = await prisma.timeline.findFirst({
+    where: ownedWhere.timeline(userId, timelineId),
     select: {
       observerState: true,
       world: { select: { mode: true } },
@@ -102,4 +104,4 @@ export async function GET(request: Request) {
     gods,
     entities,
   });
-}
+});

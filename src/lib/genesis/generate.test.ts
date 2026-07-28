@@ -167,6 +167,27 @@ describe("generateGenesisDeck", () => {
     }));
   });
 
+  it("首轮修补调用自身失败时仍使用第二轮修补额度", async () => {
+    const deck = completeDeck();
+    const repairCompletion = vi.fn()
+      .mockRejectedValueOnce(new Error("流式响应为空"))
+      .mockResolvedValueOnce(deck);
+
+    await expect(generateGenesisDeck({
+      mode: "pantheon",
+      decree: "创造测试界",
+      streamCompletion: () => chunksOf("{\"mode\":\"pantheon\"}"),
+      repairCompletion,
+      onProgress: vi.fn(), onChunk: vi.fn(), onStage: vi.fn(),
+    })).resolves.toEqual(deck);
+
+    expect(repairCompletion).toHaveBeenCalledTimes(2);
+    expect(repairCompletion.mock.calls[1]![0]).toMatchObject({
+      invalidOutput: "{\"mode\":\"pantheon\"}",
+      validationError: expect.stringContaining("cosmology"),
+    });
+  });
+
   it("携带时间锚点的卡组存在时间矛盾时进入定向修补并携带时间码", async () => {
     const anchored = PantheonWorldDeckSchema.parse({
       ...completeDeck(),

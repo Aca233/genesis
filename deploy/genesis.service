@@ -15,9 +15,11 @@ After=network-online.target postgresql.service
 Type=simple
 User=genesis
 Group=genesis
-WorkingDirectory=/srv/genesis/app
+WorkingDirectory=/srv/genesis/current
 # DATABASE_URL / SECRET_KEY / PORT / HOSTNAME / NODE_ENV 均来自环境文件
 EnvironmentFile=/etc/genesis/genesis.env
+EnvironmentFile=/etc/genesis/profile.env
+ExecStartPre=/srv/genesis/bin/preflight.sh
 ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=3
@@ -35,8 +37,25 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-# standalone 产物目录只读即可运行;Next.js 需要写 .next 下的缓存目录
-ReadWritePaths=/srv/genesis/app/.next
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
+# release 只读，运行期仅共享缓存可写
+ReadWritePaths=/srv/genesis/shared/cache
 LimitNOFILE=65536
 
 [Install]

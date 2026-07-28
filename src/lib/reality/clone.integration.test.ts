@@ -45,7 +45,7 @@ async function sourceGraph(timelineId: string) {
 async function fixture() {
   const world = await prisma.world.create({
     data: {
-      name: `clone-graph-${crypto.randomUUID()}`,
+      userId: "test-user", name: `clone-graph-${crypto.randomUUID()}`,
       genesisInput: "完整现实克隆测试",
       mode: "creator",
       lockedPaths: [],
@@ -814,7 +814,7 @@ describe("cloneTimelineGraph", () => {
 
   it("必需的源时间线引用没有映射时直接抛错并回滚子分支", async () => {
     const world = await prisma.world.create({
-      data: { name: `clone-dangling-${crypto.randomUUID()}`, genesisInput: "test", mode: "creator", lockedPaths: [] },
+      data: { userId: "test-user", name: `clone-dangling-${crypto.randomUUID()}`, genesisInput: "test", mode: "creator", lockedPaths: [] },
     });
     try {
       const timeline = await prisma.timeline.create({ data: { worldId: world.id } });

@@ -114,7 +114,7 @@ type AuditDeps = {
  */
 export async function auditTemporalSemantics(
   deck: TemporalAuditDeckView,
-  opts: { slot?: SlotName; lorebookExcerpts?: string } = {},
+  opts: { userId: string; slot?: SlotName; lorebookExcerpts?: string },
   deps: AuditDeps = { complete: completeStructured },
 ): Promise<TemporalAuditResult | null> {
   const anchor = deck.temporalAnchor;
@@ -123,7 +123,7 @@ export async function auditTemporalSemantics(
   try {
     const result = await deps.complete(opts.slot ?? "backstage", {
       task: "extract",
-      userId: "local", // Phase A 单用户;后续波由创世任务归属用户换真值
+      userId: opts.userId,
       system: TEMPORAL_AUDIT_SYSTEM,
       user: temporalAuditUserPrompt(deck, opts.lorebookExcerpts),
       schema: TemporalAuditResultSchema,

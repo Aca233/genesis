@@ -16,9 +16,15 @@ vi.mock("@/lib/llm/structured", () => ({ completeStructured: mocks.completeStruc
 import {
   CLASSIFY_BATCH_SIZE,
   LORE_CLASSIFIER_SYSTEM,
-  classifyLoreEntries,
+  classifyLoreEntries as classifyLoreEntriesImpl,
   loreSourceKey,
 } from "./classifier";
+
+function classifyLoreEntries(
+  entries: Parameters<typeof classifyLoreEntriesImpl>[0],
+) {
+  return classifyLoreEntriesImpl(entries, "backstage", { userId: "test-user" });
+}
 
 function entry(content: string, keys: string[] = ["钥匙"]) {
   return { keys, content, enabled: true };
@@ -40,7 +46,7 @@ function classified(index: number, overrides: Record<string, unknown> = {}) {
 function existingRow(content: string, overrides: Record<string, unknown> = {}) {
   return {
     id: "row-1",
-    userId: "local",
+    userId: "test-user",
     sourceKey: loreSourceKey(content),
     title: "既有标题",
     keywords: ["既有"],
@@ -109,7 +115,7 @@ describe("classifyLoreEntries", () => {
       },
     ]);
     expect(mocks.prisma.loreIndexEntry.findMany).toHaveBeenCalledWith({
-      where: { userId: "local", sourceKey: { in: [loreSourceKey("内容一")] } },
+      where: { userId: "test-user", sourceKey: { in: [loreSourceKey("内容一")] } },
     });
     expect(mocks.completeStructured).not.toHaveBeenCalled();
     expect(mocks.prisma.loreIndexEntry.createMany).not.toHaveBeenCalled();
@@ -125,14 +131,14 @@ describe("classifyLoreEntries", () => {
     const [slot, opts] = mocks.completeStructured.mock.calls[0];
     expect(slot).toBe("backstage");
     expect(opts.task).toBe("extract");
-    expect(opts.userId).toBe("local"); // 归因:默认单用户,后续波换真值
+    expect(opts.userId).toBe("test-user");
     expect(opts.user).toContain("内容二");
     expect(opts.user).not.toContain("内容一");
 
     expect(mocks.prisma.loreIndexEntry.createMany).toHaveBeenCalledWith({
       data: [
         expect.objectContaining({
-          userId: "local",
+          userId: "test-user",
           sourceKey: loreSourceKey("内容二"),
           title: "标题0",
           category: "character",

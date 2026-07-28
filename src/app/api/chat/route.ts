@@ -34,6 +34,8 @@ import {
   type WorldOperationClient,
 } from "@/lib/reality/operation-lock";
 import { ensureRealityRewriteRunning } from "@/lib/reality/task-runner";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 /**
  * POST /api/chat —— 叙事主循环（SSE 流）
@@ -54,7 +56,7 @@ const BodySchema = z.object({
   generationId: z.string().min(8).max(128).optional(),
 });
 
-export async function POST(request: Request) {
+export const POST = withAuth(async (userId, request: Request) => {
   const parsed = BodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "请求体不合法" }, { status: 400 });
@@ -62,8 +64,8 @@ export async function POST(request: Request) {
   const { chapterId, content, scale, mode, directive } = parsed.data;
   const generationId = parsed.data.generationId ?? crypto.randomUUID();
 
-  const chapter = await prisma.chapter.findUnique({
-    where: { id: chapterId },
+  const chapter = await prisma.chapter.findFirst({
+    where: ownedWhere.chapter(userId, chapterId),
     include: {
       timeline: {
         select: {
@@ -290,7 +292,7 @@ export async function POST(request: Request) {
   ]);
   const internal = narratorSSE({
     messages,
-    userId: "local", // Phase A 单用户;后续波换真实会话用户
+    userId,
     cacheNamespace: `narrative:${chapter.timeline.worldId}:v1`,
     heartbeatMs: OPERATION_LEASE_RENEW_MS,
     onHeartbeat: async () => {
@@ -337,4 +339,4 @@ export async function POST(request: Request) {
   });
   void relayNarratorResponse(generationId, internal);
   return response;
-}
+});

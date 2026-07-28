@@ -27,6 +27,7 @@ async function insert(input: {
       cacheFallback: input.cacheFallback ?? false,
       durationMs: 1,
       ok: true,
+      userId: marker,
     },
   });
 }
@@ -43,7 +44,7 @@ describe("prompt cache stats database aggregation", () => {
     await insert({ id: `${marker}-null`, task: "narrative", createdAt: new Date(now - 120_000), inputTokens: null, cacheReadTokens: null, cacheFallback: true });
     await insert({ id: `${marker}-old`, task: "settlement", createdAt: new Date(now - 25 * 60 * 60 * 1000), inputTokens: 200, cacheReadTokens: 100 });
 
-    const stats = await loadPromptCacheStats();
+    const stats = await loadPromptCacheStats(marker);
     expect(stats.allTime.calls).toBeGreaterThanOrEqual(3);
     expect(stats.last24Hours.calls).toBeLessThan(stats.allTime.calls);
     expect(stats.byTask.find((row) => row.task === "genesis")?.aggregate.calls).toBeGreaterThanOrEqual(1);

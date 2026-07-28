@@ -1,11 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  auditTemporalSemantics,
+  auditTemporalSemantics as auditTemporalSemanticsImpl,
   temporalAuditUserPrompt,
   TEMPORAL_AUDIT_SYSTEM,
   TemporalAuditResultSchema,
   type TemporalAuditResult,
 } from "./temporal-audit";
+
+function auditTemporalSemantics(
+  deck: Parameters<typeof auditTemporalSemanticsImpl>[0],
+  opts: Omit<Parameters<typeof auditTemporalSemanticsImpl>[1], "userId"> = {},
+  deps?: Parameters<typeof auditTemporalSemanticsImpl>[2],
+) {
+  return auditTemporalSemanticsImpl(
+    deck,
+    { userId: "test-user", ...opts },
+    deps,
+  );
+}
 
 function ipDeck(basis: "single_ip" | "multi_ip" = "single_ip") {
   return {
@@ -104,8 +116,12 @@ describe("auditTemporalSemantics（§10.4 报告型 AI 语义审计）", () => {
   });
 
   it("提供资料索引摘录时并入审计输入", async () => {
-    const complete = vi.fn(async (..._args: unknown[]) =>
-      ({ verdict: "pass", issues: [] } as TemporalAuditResult));
+    const complete = vi.fn(async (
+      ...args: [string, { user: string }]
+    ) => {
+      void args;
+      return { verdict: "pass", issues: [] } as TemporalAuditResult;
+    });
     await auditTemporalSemantics(ipDeck(), { lorebookExcerpts: "[timeline|编年史]\n主线大事记" }, { complete });
     const opts = complete.mock.calls[0]![1] as { user: string };
     expect(opts.user).toContain("主线大事记");

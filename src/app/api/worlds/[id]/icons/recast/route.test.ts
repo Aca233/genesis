@@ -3,12 +3,13 @@ import { DEFAULT_WORLD_ICON_THEME } from "@/lib/icons/theme";
 
 const mocks = vi.hoisted(() => ({
   world: {
-    findUnique: vi.fn(),
+    findFirst: vi.fn(),
     updateMany: vi.fn(),
   },
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: { world: mocks.world } }));
+vi.mock("@/lib/auth/session", () => ({ requireUserId: vi.fn().mockResolvedValue("test-user") }));
 
 import { POST } from "./route";
 
@@ -39,7 +40,7 @@ const world = {
 describe("world icon theme recast", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.world.findUnique.mockResolvedValue(world);
+    mocks.world.findFirst.mockResolvedValue(world);
     mocks.world.updateMany.mockResolvedValue({ count: 1 });
   });
 
@@ -56,7 +57,7 @@ describe("world icon theme recast", () => {
       "navigation.activity": "event.discovery",
     });
     expect(mocks.world.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "world-1", iconThemeRevision: 3 },
+      where: { id: "world-1", userId: "test-user", iconThemeRevision: 3 },
       data: expect.objectContaining({
         iconThemeOperationKey: "recast-1",
         iconThemeRevision: { increment: 1 },
@@ -65,7 +66,7 @@ describe("world icon theme recast", () => {
   });
 
   it("returns the current result for a repeated idempotency key", async () => {
-    mocks.world.findUnique.mockResolvedValue({
+    mocks.world.findFirst.mockResolvedValue({
       ...world,
       iconThemeRevision: 4,
       iconThemeOperationKey: "recast-1",

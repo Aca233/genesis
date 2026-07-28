@@ -17,6 +17,8 @@ import {
   rerollUserPrompt,
 } from "@/lib/prompts/genesis";
 import { assertModeTransition, WorldModeSchema, type WorldMode } from "@/lib/world-mode";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 /**
  * POST /api/worlds/[id]/reroll —— 单卡重掷（其余卡组为约束；player_locked 保留）
@@ -88,14 +90,15 @@ function referenceIssue(deck: WorldDeck): string | null {
   }
 }
 
-export async function POST(
+export const POST = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   const { cardKey, note } = BodySchema.parse(await request.json());
 
-  const world = await prisma.world.findUnique({ where: { id } });
+  const world = await prisma.world.findFirst({ where: ownedWhere.world(userId, id) });
   if (world === null) {
     return NextResponse.json({ error: "世界草稿不存在" }, { status: 404 });
   }
@@ -128,7 +131,7 @@ export async function POST(
   try {
     const requestOptions = {
       task: "reroll" as const,
-      userId: "local", // Phase A 单用户;后续波换真实会话用户
+      userId,
       system: genesisSystem(mode),
       user: rerollUserPrompt({
         mode,
@@ -167,7 +170,7 @@ export async function POST(
     try {
       const repairOptions = {
         task: "reroll" as const,
-        userId: "local", // Phase A 单用户;后续波换真实会话用户
+        userId,
         system: genesisSystem(mode),
         user: rerollReferenceRepairPrompt({
           mode,
@@ -203,7 +206,7 @@ export async function POST(
 
   const updatedAt = await prisma.$transaction(async (tx) => {
     const { count } = await tx.world.updateMany({
-      where: { id, mode, status: "draft", updatedAt: world.updatedAt },
+      where: { id, userId, mode, status: "draft", updatedAt: world.updatedAt },
       data: {
         name: deck.worldName,
         draftDeck: deck as unknown as Prisma.InputJsonValue,
@@ -235,4 +238,4 @@ export async function POST(
   }
 
   return NextResponse.json({ deck, updatedAt });
-}
+});

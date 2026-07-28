@@ -14,6 +14,8 @@ import {
   validateAbilityOwnership,
   type AbilityValidationTx,
 } from "@/lib/abilities/validator";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 function isDerivedSourceUniquenessError(
   error: unknown,
@@ -53,13 +55,13 @@ const CreateAbilitySchema = z.object({
 }).strict();
 
 /** POST /api/abilities —— 当前活动时间线中的手动能力创建。 */
-export async function POST(request: Request) {
+export const POST = withAuth(async (userId, request: Request) => {
   let input: z.infer<typeof CreateAbilitySchema> | undefined;
   try {
     const parsedInput = CreateAbilitySchema.parse(await request.json());
     input = parsedInput;
-    const timeline = await prisma.timeline.findUnique({
-      where: { id: parsedInput.timelineId },
+    const timeline = await prisma.timeline.findFirst({
+      where: ownedWhere.timeline(userId, parsedInput.timelineId),
       include: { world: { select: { activeTimelineId: true } } },
     });
     if (timeline === null || timeline.world.activeTimelineId !== parsedInput.timelineId) {
@@ -92,4 +94,4 @@ export async function POST(request: Request) {
     }
     throw error;
   }
-}
+});

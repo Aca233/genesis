@@ -18,10 +18,10 @@ export async function archiveWorldMaterials(worldId: string): Promise<void> {
   }
   try {
     await prisma.$transaction(async (tx) => {
-      const world = await tx.world.findUniqueOrThrow({ where: { id: worldId }, select: { id: true, name: true, draftDeck: true } });
+      const world = await tx.world.findUniqueOrThrow({ where: { id: worldId }, select: { id: true, userId: true, name: true, draftDeck: true } });
       if (!world.draftDeck) throw new Error("世界缺少可归档的最终创世卡组");
       const deck = parsePersistedWorldDeck(world.draftDeck);
-      await archiveInitialDeck(tx, { worldId: world.id, worldName: world.name, deck });
+      await archiveInitialDeck(tx, world.userId, { worldId: world.id, worldName: world.name, deck });
       await tx.world.update({ where: { id: world.id }, data: { materialArchiveStatus: "completed", materialArchiveError: null } });
     }, { isolationLevel: "Serializable" });
   } catch (error) {

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeScript } from "@/components/theme/ThemeScript";
 import { MotionProvider } from "@/components/theme/MotionProvider";
+import { UnauthorizedRedirect } from "@/components/auth/UnauthorizedRedirect";
 
 export const metadata: Metadata = {
   title: "创世",
@@ -19,6 +20,7 @@ export default function RootLayout({
         <ThemeScript />
       </head>
       <body className="min-h-full flex flex-col">
+        <UnauthorizedRedirect />
         <MotionProvider>{children}</MotionProvider>
       </body>
     </html>

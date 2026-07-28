@@ -16,7 +16,7 @@ const worldIds: string[] = [];
 async function fixture() {
   const world = await prisma.world.create({
     data: {
-      name: `reality-tree-${crypto.randomUUID()}`,
+      userId: "test-user", name: `reality-tree-${crypto.randomUUID()}`,
       genesisInput: "测试现实树",
       mode: "creator",
       status: "playing",
@@ -164,7 +164,7 @@ describe("reality tree persistence operations", () => {
     const data = await fixture();
     const foreign = await prisma.world.create({
       data: {
-        name: `foreign-${crypto.randomUUID()}`,
+        userId: "test-user", name: `foreign-${crypto.randomUUID()}`,
         genesisInput: "外部世界",
         mode: "creator",
         status: "playing",

@@ -13,7 +13,7 @@ describe("world activity transaction rollback", () => {
   beforeAll(async () => {
     await prisma.world.create({
       data: {
-        id: worldId,
+        userId: "test-user", id: worldId,
         name: "动态事务测试界",
         genesisInput: "测试",
         status: "playing",

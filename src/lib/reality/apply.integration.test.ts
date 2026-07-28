@@ -30,7 +30,7 @@ function plan(overrides: Partial<RewritePlan> = {}): RewritePlan {
 async function fixture() {
   const world = await prisma.world.create({
     data: {
-      name: `apply-${crypto.randomUUID()}`,
+      userId: "test-user", name: `apply-${crypto.randomUUID()}`,
       genesisInput: "现实应用测试",
       mode: "creator",
       lockedPaths: [],

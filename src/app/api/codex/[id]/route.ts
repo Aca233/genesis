@@ -23,6 +23,8 @@ import {
 import { parseWorldIconTheme } from "@/lib/icons/theme";
 import { resolveIcon } from "@/lib/icons/resolver";
 import { loadLocalIcon } from "@/lib/icons/svg.server";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 /**
  * GET   /api/codex/[id] —— 实体详情（sections + 专属编年史）
@@ -206,13 +208,14 @@ function projectOmniscientAbilityEvents(abilities: readonly AbilityWithEvents[])
   );
 }
 
-export async function GET(
+export const GET = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
-  const entity = await prisma.entity.findUnique({
-    where: { id },
+  const entity = await prisma.entity.findFirst({
+    where: ownedWhere.entity(userId, id),
     include: {
       sections: true,
       abilities: { include: { events: { orderBy: { createdAt: "asc" } } } },
@@ -374,16 +377,19 @@ export async function GET(
       }];
     }),
   });
-}
+});
 
-export async function PATCH(
+export const PATCH = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   const body = PatchSchema.parse(await request.json());
 
-  const entity = await prisma.entity.findUnique({ where: { id } });
+  const entity = await prisma.entity.findFirst({
+    where: ownedWhere.entity(userId, id),
+  });
   if (!entity) return NextResponse.json({ error: "不存在" }, { status: 404 });
 
   // 手改栏目：写 content.text + playerLocked，并入 entity.lockedPaths
@@ -425,4 +431,4 @@ export async function PATCH(
   });
 
   return NextResponse.json({ entity: updated });
-}
+});

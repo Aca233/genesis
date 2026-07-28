@@ -1,61 +1,58 @@
 #!/usr/bin/env bash
-# 《创世》恢复脚本:恢复演练(--drill)与真恢复(--into)
-# 安放:/srv/genesis/bin/restore.sh(chmod 750, chown genesis:genesis)
-#
-# 用法:
-#   restore.sh --drill <dump 文件>          恢复到一次性演练库并核对行数,不碰生产库
-#   restore.sh --into <目标库名> <dump 文件>  覆盖式恢复(危险;先 systemctl stop genesis)
-#
-# 上线前必须完整走一次 --drill;此后建议每月抽查一次。
+# 恢复 age 加密的 PostgreSQL custom dump。
 set -euo pipefail
 
 ENV_FILE="${ENV_FILE:-/etc/genesis/genesis.env}"
+AGE_IDENTITY_FILE="${AGE_IDENTITY_FILE:-/etc/genesis/backup-age-key.txt}"
 DRILL_DB="${DRILL_DB:-genesis_restore_drill}"
 
-usage() { grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed -n '2,8p'; exit 1; }
+usage() { echo "用法: $0 --drill <dump.age> | --into <目标库名> <dump.age>" >&2; exit 2; }
+fail() { echo "RESTORE ERROR: $*" >&2; exit 1; }
+env_value() { local line; line="$(grep -m1 "^$1=" "$ENV_FILE" || true)"; printf "%s" "${line#*=}" | sed "s/^\"//;s/\"$//"; }
 
-MODE="${1:-}"; shift || true
+[[ -r "$ENV_FILE" ]] || fail "$ENV_FILE 不可读"
+[[ -r "$AGE_IDENTITY_FILE" ]] || fail "$AGE_IDENTITY_FILE 不可读"
+for command in age pg_restore psql; do command -v "$command" >/dev/null || fail "缺少命令: $command"; done
 
-# 管理连接:剥掉 query 参数、指向 postgres 库(createdb/dropdb 需要)
-DATABASE_URL="$(grep '^DATABASE_URL=' "$ENV_FILE" | cut -d= -f2-)"
+DATABASE_URL="$(env_value DATABASE_URL)"
+[[ -n "$DATABASE_URL" ]] || fail "DATABASE_URL 未配置"
 DB_URL_NO_QUERY="${DATABASE_URL%%\?*}"
 ADMIN_URL="${DB_URL_NO_QUERY%/*}/postgres"
 
+PLAIN="$(mktemp "${TMPDIR:-/tmp}/genesis-restore.XXXXXX.dump")"
+cleanup() { rm -f "$PLAIN"; }
+trap cleanup EXIT INT TERM
+umask 077
+
 sanity_counts() {
-  local db_url="$1"
-  echo "── 行数核对(与预期世界数量对照)──"
-  psql "$db_url" --no-psqlrc --tuples-only --command "
-    SELECT 'worlds:    ' || count(*) FROM worlds
-    UNION ALL SELECT 'timelines: ' || count(*) FROM timelines
-    UNION ALL SELECT 'chapters:  ' || count(*) FROM chapters
-    UNION ALL SELECT 'messages:  ' || count(*) FROM messages;"
+  psql "$1" --no-psqlrc --tuples-only --command "SELECT count(*) FROM worlds;"
 }
 
+MODE="${1:-}"; shift || true
 case "$MODE" in
   --drill)
-    DUMP="${1:?用法: restore.sh --drill <dump 文件>}"
-    test -r "$DUMP"
-    echo "[drill] 恢复 $DUMP -> 临时库 $DRILL_DB"
-    psql "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $DRILL_DB;"
-    psql "$ADMIN_URL" -c "CREATE DATABASE $DRILL_DB;"
-    pg_restore --no-owner --dbname="${DB_URL_NO_QUERY%/*}/$DRILL_DB" "$DUMP"
+    DUMP="${1:-}"; [[ -r "$DUMP" ]] || fail "加密 dump 不可读"
+    age --decrypt --identity "$AGE_IDENTITY_FILE" --output "$PLAIN" "$DUMP"
+    pg_restore --list "$PLAIN" >/dev/null
+    psql "$ADMIN_URL" --command "DROP DATABASE IF EXISTS $DRILL_DB;"
+    psql "$ADMIN_URL" --command "CREATE DATABASE $DRILL_DB;"
+    pg_restore --no-owner --dbname="${DB_URL_NO_QUERY%/*}/$DRILL_DB" "$PLAIN"
     sanity_counts "${DB_URL_NO_QUERY%/*}/$DRILL_DB"
-    psql "$ADMIN_URL" -c "DROP DATABASE $DRILL_DB;"
-    echo "[drill] 通过:dump 可恢复,临时库已清理"
+    psql "$ADMIN_URL" --command "DROP DATABASE $DRILL_DB;"
+    echo "RESTORE DRILL OK"
     ;;
   --into)
-    TARGET_DB="${1:?用法: restore.sh --into <目标库名> <dump 文件>}"
-    DUMP="${2:?用法: restore.sh --into <目标库名> <dump 文件>}"
-    test -r "$DUMP"
-    echo "!! 即将用 $DUMP 覆盖数据库 [$TARGET_DB] 的现有内容"
-    echo "!! 确认应用已停止(systemctl stop genesis),输入库名以继续:"
+    TARGET_DB="${1:-}"; DUMP="${2:-}"
+    [[ "$TARGET_DB" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || fail "目标库名非法"
+    [[ -r "$DUMP" ]] || fail "加密 dump 不可读"
+    age --decrypt --identity "$AGE_IDENTITY_FILE" --output "$PLAIN" "$DUMP"
+    pg_restore --list "$PLAIN" >/dev/null
+    echo "输入目标库名 [$TARGET_DB] 以确认覆盖："
     read -r CONFIRM
-    [ "$CONFIRM" = "$TARGET_DB" ] || { echo "已取消"; exit 1; }
-    # --clean --if-exists:先删既有对象再重建,得到与 dump 一致的状态
-    pg_restore --clean --if-exists --no-owner \
-      --dbname="${DB_URL_NO_QUERY%/*}/$TARGET_DB" "$DUMP"
+    [[ "$CONFIRM" == "$TARGET_DB" ]] || fail "已取消"
+    pg_restore --clean --if-exists --no-owner --dbname="${DB_URL_NO_QUERY%/*}/$TARGET_DB" "$PLAIN"
     sanity_counts "${DB_URL_NO_QUERY%/*}/$TARGET_DB"
-    echo "[restore] 完成。启动应用前先人工核对上方行数。"
+    echo "RESTORE OK"
     ;;
   *) usage ;;
 esac

@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mocks.prisma }));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
+}));
 
 import { GET } from "./route";
 
@@ -161,7 +164,7 @@ describe("version 4 世界存档导出", () => {
     expect(serialized).not.toContain("safeError");
     expect(serialized).not.toContain("provider raw error");
     expect(mocks.prisma.world.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "world-1", userId: "local" },
+      where: { id: "world-1", userId: "test-user" },
       include: expect.objectContaining({
         timelines: expect.objectContaining({
           include: expect.objectContaining({
@@ -187,7 +190,7 @@ describe("version 4 世界存档导出", () => {
 
     expect(response.status).toBe(404);
     expect(mocks.prisma.world.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "foreign-world", userId: "local" },
+      where: { id: "foreign-world", userId: "test-user" },
     }));
   });
 });

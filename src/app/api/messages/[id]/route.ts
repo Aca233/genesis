@@ -6,6 +6,8 @@ import {
   assertMessageEditable,
   MessageCheckpointError,
 } from "@/lib/chat/message-edit-policy";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 /**
  * 消息四件套之「朱批」与「裁去」（docs/01 §3.2）
@@ -21,10 +23,11 @@ function asVariants(value: unknown): VariantItem[] | null {
   return Array.isArray(value) ? (value as VariantItem[]) : null;
 }
 
-export async function PATCH(
+export const PATCH = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   const parsed = PatchSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
@@ -32,8 +35,8 @@ export async function PATCH(
   }
   const { content } = parsed.data;
 
-  const message = await prisma.message.findUnique({
-    where: { id },
+  const message = await prisma.message.findFirst({
+    where: ownedWhere.message(userId, id),
     include: {
       chapter: {
         select: {
@@ -89,15 +92,16 @@ export async function PATCH(
   });
 
   return NextResponse.json({ message: updated });
-}
+});
 
-export async function DELETE(
+export const DELETE = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
-  const message = await prisma.message.findUnique({
-    where: { id },
+  const message = await prisma.message.findFirst({
+    where: ownedWhere.message(userId, id),
     include: {
       chapter: {
         select: {
@@ -134,4 +138,4 @@ export async function DELETE(
   });
 
   return NextResponse.json({ deleted: count });
-}
+});

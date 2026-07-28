@@ -12,6 +12,8 @@ import {
   renewWorldOperation,
   type WorldOperationClient,
 } from "@/lib/reality/operation-lock";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 /**
  * POST /api/worlds/[id]/conclude —— 陨灭终章：玩家神陨灭后将此界写入史册。
@@ -22,13 +24,14 @@ import {
 
 export const maxDuration = 300;
 
-export async function POST(
+export const POST = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
-  const world = await prisma.world.findUnique({
-    where: { id },
+  const world = await prisma.world.findFirst({
+    where: ownedWhere.world(userId, id),
     select: {
       id: true,
       name: true,
@@ -140,7 +143,7 @@ export async function POST(
 
     const finale = await completeStructured("backstage", {
       task: "finale",
-      userId: "local", // Phase A 单用户;后续波换真实会话用户
+      userId,
       system: finaleSystem(),
       user: finaleUserPrompt({
         worldName: world.name,
@@ -229,4 +232,4 @@ export async function POST(
     clearInterval(heartbeat);
     await releaseWorldOperation(db, id, "settlement", token);
   }
-}
+});

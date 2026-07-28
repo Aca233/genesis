@@ -3,14 +3,17 @@ import { prisma } from "@/lib/db";
 import { parseWorldIconTheme } from "@/lib/icons/theme";
 import { searchIconCatalog, type IconPickerLibrary } from "@/lib/icons/picker";
 import { loadLocalIcon } from "@/lib/icons/svg.server";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
-export async function GET(
+export const GET = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
-  const world = await prisma.world.findUnique({
-    where: { id },
+  const world = await prisma.world.findFirst({
+    where: ownedWhere.world(userId, id),
     select: { iconTheme: true },
   });
   if (!world) return NextResponse.json({ error: "世界不存在" }, { status: 404 });
@@ -32,4 +35,4 @@ export async function GET(
       icon: loadLocalIcon(iconId),
     })),
   });
-}
+});

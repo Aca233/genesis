@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { ensureGenesisTaskRunning, toGenesisTaskDto } from "@/lib/genesis/task-runner";
+import { withAuth } from "@/lib/auth/route";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(
+export const GET = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   const task = await prisma.genesisTask.findFirst({
-    where: { id, userId: "local" },
+    where: { id, userId },
     select: {
       id: true,
       mode: true,
@@ -29,4 +31,4 @@ export async function GET(
     ensureGenesisTaskRunning(id);
   }
   return NextResponse.json({ task: toGenesisTaskDto(task) });
-}
+});

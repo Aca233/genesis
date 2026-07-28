@@ -17,6 +17,8 @@ import {
   switchReality,
   undoReality,
 } from "@/lib/reality/tree";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 const IdSchema = z.string().trim().min(1).max(191);
 const PostBodySchema = z.discriminatedUnion("action", [
@@ -70,10 +72,11 @@ function errorResponse(error: unknown): NextResponse {
 
 /** 创世主与万神殿都可管理现实树；万神殿经检查点回溯获得自己的分叉树。 */
 async function requireManagedWorld(
+  userId: string,
   worldId: string,
 ): Promise<{ mode: "creator" | "pantheon" } | NextResponse> {
-  const world = await prisma.world.findUnique({
-    where: { id: worldId },
+  const world = await prisma.world.findFirst({
+    where: ownedWhere.world(userId, worldId),
     select: { mode: true, status: true },
   });
   if (world === null) return NextResponse.json({ error: "世界不存在" }, { status: 404 });
@@ -86,10 +89,10 @@ async function requireManagedWorld(
   return { mode: world.mode };
 }
 
-export async function GET(_request: Request, { params }: Context) {
+export const GET = withAuth(async (userId, _request: Request, { params }: Context) => {
   const { id } = await params;
-  const world = await prisma.world.findUnique({
-    where: { id },
+  const world = await prisma.world.findFirst({
+    where: ownedWhere.world(userId, id),
     select: { id: true },
   });
   if (world === null) return NextResponse.json({ error: "世界不存在" }, { status: 404 });
@@ -98,11 +101,11 @@ export async function GET(_request: Request, { params }: Context) {
   } catch (error) {
     return errorResponse(error);
   }
-}
+});
 
-export async function POST(request: Request, { params }: Context) {
+export const POST = withAuth(async (userId, request: Request, { params }: Context) => {
   const { id } = await params;
-  const gate = await requireManagedWorld(id);
+  const gate = await requireManagedWorld(userId, id);
   if (gate instanceof NextResponse) return gate;
   try {
     const body = PostBodySchema.parse(await request.json().catch(() => null));
@@ -112,6 +115,7 @@ export async function POST(request: Request, { params }: Context) {
         return NextResponse.json({ error: "仅万神殿模式可回溯检查点" }, { status: 403 });
       }
       const forked = await forkPantheonCheckpoint(prisma, {
+        userId,
         worldId: id,
         sourceChapterId: body.sourceChapterId,
         expectedActiveId: body.expectedActiveId,
@@ -134,11 +138,11 @@ export async function POST(request: Request, { params }: Context) {
   } catch (error) {
     return errorResponse(error);
   }
-}
+});
 
-export async function PATCH(request: Request, { params }: Context) {
+export const PATCH = withAuth(async (userId, request: Request, { params }: Context) => {
   const { id } = await params;
-  const gate = await requireManagedWorld(id);
+  const gate = await requireManagedWorld(userId, id);
   if (gate instanceof NextResponse) return gate;
   try {
     const body = PatchBodySchema.parse(await request.json().catch(() => null));
@@ -150,11 +154,11 @@ export async function PATCH(request: Request, { params }: Context) {
   } catch (error) {
     return errorResponse(error);
   }
-}
+});
 
-export async function DELETE(request: Request, { params }: Context) {
+export const DELETE = withAuth(async (userId, request: Request, { params }: Context) => {
   const { id } = await params;
-  const gate = await requireManagedWorld(id);
+  const gate = await requireManagedWorld(userId, id);
   if (gate instanceof NextResponse) return gate;
   try {
     const body = DeleteBodySchema.parse(await request.json().catch(() => null));
@@ -166,4 +170,4 @@ export async function DELETE(request: Request, { params }: Context) {
   } catch (error) {
     return errorResponse(error);
   }
-}
+});

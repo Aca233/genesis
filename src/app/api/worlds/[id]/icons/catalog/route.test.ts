@@ -2,17 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_WORLD_ICON_THEME } from "@/lib/icons/theme";
 
 const mocks = vi.hoisted(() => ({
-  world: { findUnique: vi.fn() },
+  world: { findFirst: vi.fn() },
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mocks }));
+vi.mock("@/lib/auth/session", () => ({ requireUserId: vi.fn().mockResolvedValue("test-user") }));
 
 import { GET } from "./route";
 
 describe("world icon catalog route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.world.findUnique.mockResolvedValue({
+    mocks.world.findFirst.mockResolvedValue({
       iconTheme: {
         ...DEFAULT_WORLD_ICON_THEME,
         primaryFamily: "tabler",
@@ -52,7 +53,7 @@ describe("world icon catalog route", () => {
   });
 
   it("returns 404 for a missing world", async () => {
-    mocks.world.findUnique.mockResolvedValue(null);
+    mocks.world.findFirst.mockResolvedValue(null);
 
     const response = await GET(
       new Request("http://localhost/api/worlds/missing/icons/catalog"),

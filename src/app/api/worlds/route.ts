@@ -10,6 +10,7 @@ import { parseStWorldbook, lorebookExcerpts } from "@/lib/lorebook/st-import";
 import { WorldModeSchema } from "@/lib/world-mode";
 import { buildWorldIconTheme } from "@/lib/icons/theme";
 import { resolveTemporalState } from "@/lib/chat/continuous-state";
+import { withAuth } from "@/lib/auth/route";
 
 /**
  * POST /api/worlds —— 创世：一句话 → 世界卡组草稿
@@ -25,7 +26,7 @@ const CreateSchema = z.object({
 
 export const maxDuration = 300;
 
-export async function POST(request: Request) {
+export const POST = withAuth(async (userId, request: Request) => {
   let rawBody: unknown;
   try {
     rawBody = await request.json();
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
   try {
     const request = {
       task: "genesis" as const,
-      userId: "local", // Phase A 单用户;后续波换真实会话用户
+      userId,
       system: genesisSystem(body.mode),
       user: genesisUserPrompt({
         mode: body.mode,
@@ -88,6 +89,7 @@ export async function POST(request: Request) {
 
   const world = await prisma.world.create({
     data: {
+      userId,
       name: deck.worldName,
       genesisInput: body.decree,
       mode: body.mode,
@@ -113,7 +115,7 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json({ worldId: world.id, deck });
-}
+});
 
 /** 存档状态行（附加于 playing 世界）：你离开时正在发生什么 */
 type WorldStatusLine = {
@@ -124,8 +126,9 @@ type WorldStatusLine = {
   recentActivityRefs: { id: string; createdAt: string }[];
 };
 
-export async function GET() {
+export const GET = withAuth(async (userId) => {
   const worlds = await prisma.world.findMany({
+    where: { userId, archivedAt: null },
     orderBy: { updatedAt: "desc" },
     select: {
       id: true,
@@ -218,4 +221,4 @@ export async function GET() {
     return { ...world, statusLine };
   }));
   return NextResponse.json({ worlds: rows });
-}
+});

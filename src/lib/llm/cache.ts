@@ -20,7 +20,16 @@ export type PromptCachePlan = {
   stablePrefixEnd: number;
 };
 
-const CACHEABLE_TASKS = new Set(["genesis", "narrative", "settlement", "reroll"]);
+const CACHEABLE_TASKS = new Set([
+  "genesis",
+  "narrative",
+  "settlement",
+  "reroll",
+  // world-director 内核每轮携带 ~11k tokens 的重复系统前缀;其调用点在
+  // task-runner 泳道,只要该泳道传 cache.namespace 即在此放行进入缓存。
+  "world-director",
+  "world-director-probe",
+]);
 
 export function normalizedEndpointKey(slot: ModelSlot): string {
   return `${slot.provider}:${slot.baseUrl.replace(/\/+$/, "")}:${slot.model}`;

@@ -100,9 +100,9 @@ function normalizeRow(row: PersistedLoreIndexRow): LoreIndexRow {
 export async function classifyLoreEntries(
   entries: ClassifiableLoreEntry[],
   slot: SlotName = "backstage",
-  opts: { userId?: string } = {},
+  opts: { userId: string },
 ): Promise<LoreIndexRow[] | null> {
-  const userId = opts.userId ?? "local";
+  const { userId } = opts;
   try {
     const usable = entries.filter(
       (entry) => (entry.enabled ?? true) && entry.content.trim().length > 0,

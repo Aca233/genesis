@@ -19,6 +19,9 @@ vi.mock("@/lib/db", () => ({
     world: { findFirst: mocks.worldFindFirst },
   },
 }));
+vi.mock("@/lib/auth/session", () => ({
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
+}));
 vi.mock("@/lib/reality/task-runner", () => ({
   createRealityRewrite: mocks.create,
   ensureRealityRewriteRunning: mocks.ensure,
@@ -60,7 +63,7 @@ describe("reality rewrite routes", () => {
     }), worldContext);
     expect(response.status).toBe(202);
     expect(mocks.create).toHaveBeenCalledWith(expect.anything(), {
-      worldId: "world-1", decree: "群星改道", scope: "prospective", idempotencyKey: "idem-key-1",
+      userId: "test-user", worldId: "world-1", decree: "群星改道", scope: "prospective", idempotencyKey: "idem-key-1",
     });
     expect(mocks.ensure).toHaveBeenCalledWith("rewrite-1");
 
@@ -69,12 +72,12 @@ describe("reality rewrite routes", () => {
     }), worldContext)).status).toBe(400);
   });
 
-  it("lists and gets only local-user tasks through sanitized DTOs", async () => {
+  it("lists and gets only session-user tasks through sanitized DTOs", async () => {
     expect((await listRewrites(request("http://localhost"), worldContext)).status).toBe(200);
-    expect(mocks.worldFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "world-1", userId: "local" } }));
+    expect(mocks.worldFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "world-1", userId: "test-user" } }));
     expect((await getRewrite(request("http://localhost"), taskContext)).status).toBe(200);
     expect(mocks.taskFindFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "rewrite-1", world: { userId: "local" } },
+      where: { id: "rewrite-1", world: { userId: "test-user" } },
     }));
   });
 

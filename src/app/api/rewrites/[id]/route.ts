@@ -6,29 +6,32 @@ import {
   retryRealityRewrite,
   toRealityRewriteDto,
 } from "@/lib/reality/task-runner";
+import { withAuth } from "@/lib/auth/route";
 
 const RetrySchema = z.object({ action: z.literal("retry") }).strict();
 
-async function findTask(id: string) {
+async function findTask(userId: string, id: string) {
   return prisma.realityRewrite.findFirst({
-    where: { id, world: { userId: "local" } },
+    where: { id, world: { userId } },
   });
 }
 
-export async function GET(
+export const GET = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
-  const task = await findTask(id);
+  const task = await findTask(userId, id);
   if (task === null) return Response.json({ error: "现实改写任务不存在" }, { status: 404 });
   return Response.json({ task: toRealityRewriteDto(task) });
-}
+});
 
-export async function POST(
+export const POST = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   let body: unknown;
   try {
@@ -38,8 +41,11 @@ export async function POST(
   }
   const parsed = RetrySchema.safeParse(body);
   if (!parsed.success) return Response.json({ error: "重试请求无效" }, { status: 400 });
+  if (await findTask(userId, id) === null) {
+    return Response.json({ error: "现实改写任务不存在" }, { status: 404 });
+  }
   try {
-    const task = await retryRealityRewrite(prisma, id);
+    const task = await retryRealityRewrite(prisma, userId, id);
     if (task.status !== "completed") ensureRealityRewriteRunning(task.id);
     return Response.json(
       { task: toRealityRewriteDto(task) },
@@ -51,4 +57,4 @@ export async function POST(
     }
     throw error;
   }
-}
+});

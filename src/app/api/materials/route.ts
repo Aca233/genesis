@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { MaterialKindSchema } from "@/lib/materials/types";
+import { withAuth } from "@/lib/auth/route";
 
 export const dynamic = "force-dynamic";
-export async function GET(request: Request) {
+export const GET = withAuth(async (userId, request: Request) => {
   const url = new URL(request.url);
   const kindRaw = url.searchParams.get("kind");
   const kind = kindRaw ? MaterialKindSchema.safeParse(kindRaw) : null;
@@ -13,7 +14,7 @@ export async function GET(request: Request) {
   const showHidden = url.searchParams.get("showHidden") === "true";
   const favorite = url.searchParams.get("favorite") === "true";
   const where: Prisma.MaterialCardWhereInput = {
-    userId: "local", ...(kind?.success ? { kind: kind.data } : {}),
+    userId, ...(kind?.success ? { kind: kind.data } : {}),
     ...(!showHidden ? { hidden: false } : {}), ...(favorite ? { favorite: true } : {}),
     ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { summary: { contains: q, mode: "insensitive" } }, { sourceWorldName: { contains: q, mode: "insensitive" } }] } : {}),
   };
@@ -24,4 +25,4 @@ export async function GET(request: Request) {
     orderBy: [{ favorite: "desc" }, { lastUsedAt: "desc" }, { updatedAt: "desc" }],
   });
   return NextResponse.json({ materials });
-}
+});

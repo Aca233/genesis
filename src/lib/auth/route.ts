@@ -12,7 +12,10 @@ import { unauthorizedJson } from "@/lib/auth/errors";
  * 既有测试继续以 GET(request, ctx) 调用不变。
  */
 export function withAuth<C>(handler: (userId: string, request: Request, context: C) => Promise<Response>) {
-  return async (request: Request, context: C) => {
+  return async (
+    request: Request = new Request("http://localhost"),
+    context?: C,
+  ) => {
     let userId: string;
     try {
       userId = await requireUserId();
@@ -21,6 +24,6 @@ export function withAuth<C>(handler: (userId: string, request: Request, context:
       if (mapped) return mapped;
       throw e;
     }
-    return handler(userId, request, context);
+    return handler(userId, request, context as C);
   };
 }

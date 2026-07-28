@@ -7,7 +7,7 @@ const { prisma } = await import("@/lib/db");
 
 async function fixture() {
   const world = await prisma.world.create({
-    data: { name: `mutation-${crypto.randomUUID()}`, genesisInput: "test", lockedPaths: [] },
+    data: { userId: "test-user", name: `mutation-${crypto.randomUUID()}`, genesisInput: "test", lockedPaths: [] },
   });
   const timeline = await prisma.timeline.create({ data: { worldId: world.id } });
   const character = await prisma.entity.create({

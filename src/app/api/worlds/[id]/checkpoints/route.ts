@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 /**
  * GET /api/worlds/[id]/checkpoints —— 只读列出当前现实的已结算检查点。
@@ -18,10 +20,10 @@ export type CheckpointDto = {
   settledAt: string;
 };
 
-export async function GET(_request: Request, { params }: Context) {
+export const GET = withAuth(async (userId, _request: Request, { params }: Context) => {
   const { id } = await params;
-  const world = await prisma.world.findUnique({
-    where: { id },
+  const world = await prisma.world.findFirst({
+    where: ownedWhere.world(userId, id),
     select: { activeTimelineId: true },
   });
   if (world === null || world.activeTimelineId === null) {
@@ -73,4 +75,4 @@ export async function GET(_request: Request, { params }: Context) {
   }));
 
   return NextResponse.json({ checkpoints });
-}
+});

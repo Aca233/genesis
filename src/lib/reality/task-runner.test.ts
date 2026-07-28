@@ -115,10 +115,10 @@ describe("reality rewrite creation and leases", () => {
       realityRewrite: { findUnique: vi.fn().mockResolvedValue(existing) },
     };
     await expect(createRealityRewrite(db as never, {
-      worldId: "world-1", decree: "群星改道", scope: "prospective", idempotencyKey: "idem-key-1",
+      userId: "test-user", worldId: "world-1", decree: "群星改道", scope: "prospective", idempotencyKey: "idem-key-1",
     })).resolves.toEqual({ task: existing, replayed: true });
     await expect(createRealityRewrite(db as never, {
-      worldId: "world-1", decree: "海洋升天", scope: "prospective", idempotencyKey: "idem-key-1",
+      userId: "test-user", worldId: "world-1", decree: "海洋升天", scope: "prospective", idempotencyKey: "idem-key-1",
     })).rejects.toBeInstanceOf(RealityRewriteConflictError);
   });
 
@@ -133,10 +133,10 @@ describe("reality rewrite creation and leases", () => {
     });
 
     await expect(createRealityRewrite(makeDb("pantheon") as never, {
-      worldId: "world-1", decree: "群星改道", scope: "prospective", idempotencyKey: "idem-key-1",
+      userId: "test-user", worldId: "world-1", decree: "群星改道", scope: "prospective", idempotencyKey: "idem-key-1",
     })).rejects.toBeInstanceOf(RealityRewriteForbiddenError);
     await expect(createRealityRewrite(makeDb("creator", null) as never, {
-      worldId: "world-1", decree: "群星改道", scope: "prospective", idempotencyKey: "idem-key-1",
+      userId: "test-user", worldId: "world-1", decree: "群星改道", scope: "prospective", idempotencyKey: "idem-key-1",
     })).rejects.toThrow("当前记录段");
   });
 
@@ -172,7 +172,7 @@ describe("reality rewrite creation and leases", () => {
     const updateMany = vi.fn();
     const db = { realityRewrite: { findFirst: vi.fn().mockResolvedValue(failed), updateMany } };
 
-    await expect(retryRealityRewrite(db as never, failed.id)).resolves.toBe(failed);
+    await expect(retryRealityRewrite(db as never, "test-user", failed.id)).resolves.toBe(failed);
     expect(updateMany).not.toHaveBeenCalled();
   });
 
@@ -193,7 +193,7 @@ describe("reality rewrite creation and leases", () => {
     const findUnique = vi.fn().mockResolvedValue(rearmed);
     const db = { realityRewrite: { findFirst: vi.fn().mockResolvedValue(failed), updateMany, findUnique } };
 
-    const retried = await retryRealityRewrite(db as never, failed.id);
+    const retried = await retryRealityRewrite(db as never, "test-user", failed.id);
     expect(retried).toMatchObject({ status: "narrating", resultTimelineId: "child", error: null });
     expect(updateMany).toHaveBeenCalledWith({
       where: expect.objectContaining({
@@ -222,7 +222,7 @@ describe("reality rewrite creation and leases", () => {
     const findUnique = vi.fn().mockResolvedValue(newOwner);
     const db = { realityRewrite: { findFirst: vi.fn().mockResolvedValue(failed), updateMany, findUnique } };
 
-    await expect(retryRealityRewrite(db as never, failed.id)).resolves.toBe(newOwner);
+    await expect(retryRealityRewrite(db as never, "test-user", failed.id)).resolves.toBe(newOwner);
     expect(updateMany).toHaveBeenCalledTimes(1);
     expect(findUnique).toHaveBeenCalledWith({ where: { id: failed.id } });
   });

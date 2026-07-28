@@ -1,17 +1,20 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 /**
  * GET /api/worlds/[id]/entity-index —— 正文实体微光链接的轻量索引
  */
 
-export async function GET(
+export const GET = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
-  const world = await prisma.world.findUnique({
-    where: { id },
+  const world = await prisma.world.findFirst({
+    where: ownedWhere.world(userId, id),
     select: { activeTimelineId: true },
   });
   if (!world?.activeTimelineId) {
@@ -32,4 +35,4 @@ export async function GET(
   });
 
   return NextResponse.json({ index });
-}
+});

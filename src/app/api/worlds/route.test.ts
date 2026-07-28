@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   timelineFindMany: vi.fn(),
   worldEventFindFirst: vi.fn(),
   worldActivityFindMany: vi.fn(),
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
 }));
 
 vi.mock("@/lib/llm/structured", () => ({
@@ -25,6 +26,7 @@ vi.mock("@/lib/db", () => ({
     worldActivity: { findMany: mocks.worldActivityFindMany },
   },
 }));
+vi.mock("@/lib/auth/session", () => ({ requireUserId: mocks.requireUserId }));
 
 import { GET, POST } from "./route";
 
@@ -154,6 +156,7 @@ describe("/api/worlds", () => {
     const response = await GET();
     expect(response.status).toBe(200);
     expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: "test-user", archivedAt: null },
       select: expect.objectContaining({ mode: true }),
     }));
   });
@@ -241,6 +244,7 @@ describe("GET /api/worlds statusLine", () => {
       updatedAt: "2026-07-25T00:00:00.000Z",
     });
     expect(mocks.findMany).toHaveBeenNthCalledWith(1, {
+      where: { userId: "test-user", archivedAt: null },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,

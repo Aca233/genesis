@@ -10,6 +10,8 @@ import {
 } from "@/lib/cards/schemas";
 import { assertModeTransition, WorldModeSchema } from "@/lib/world-mode";
 import { validateDeckReferences } from "@/lib/abilities/validator";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 /**
  * GET    /api/worlds/[id] —— 读取世界（含草稿卡组）
@@ -25,14 +27,15 @@ const PatchSchema = z.object({
   expectedUpdatedAt: z.coerce.date(),
 });
 
-export async function GET(
+export const GET = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   try {
-    const world = await prisma.world.findUnique({
-      where: { id },
+    const world = await prisma.world.findFirst({
+      where: ownedWhere.world(userId, id),
       include: {
         timelines: { select: { id: true }, orderBy: { createdAt: "asc" } },
       },
@@ -54,16 +57,17 @@ export async function GET(
       { status: 500 },
     );
   }
-}
+});
 
-export async function PATCH(
+export const PATCH = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   try {
-    const world = await prisma.world.findUnique({
-      where: { id },
+    const world = await prisma.world.findFirst({
+      where: ownedWhere.world(userId, id),
       select: { mode: true, status: true, lockedPaths: true, updatedAt: true },
     });
     if (!world) return NextResponse.json({ error: "不存在" }, { status: 404 });
@@ -105,7 +109,7 @@ export async function PATCH(
     const lockedPaths = [...new Set([...world.lockedPaths, ...body.editedPaths])];
     const updatedAt = await prisma.$transaction(async (tx) => {
       const { count } = await tx.world.updateMany({
-        where: { id, mode, status: "draft", updatedAt: body.expectedUpdatedAt },
+        where: { id, userId, mode, status: "draft", updatedAt: body.expectedUpdatedAt },
         data: {
           name: deck.worldName,
           draftDeck: deck as unknown as Prisma.InputJsonValue,
@@ -141,25 +145,25 @@ export async function PATCH(
       { status: 500 },
     );
   }
-}
+});
 
-export async function DELETE(
+export const DELETE = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   try {
-    await prisma.world.delete({ where: { id } });
-    return NextResponse.json({ ok: true });
-  } catch (cause) {
-    // Prisma P2025：目标记录不存在——按 404 处理而非空体 500。
-    if ((cause as { code?: string })?.code === "P2025") {
+    const { count } = await prisma.world.deleteMany({ where: ownedWhere.world(userId, id) });
+    if (count === 0) {
       return NextResponse.json({ error: "此界不存在或早已消散" }, { status: 404 });
     }
+    return NextResponse.json({ ok: true });
+  } catch (cause) {
     console.error("DELETE /api/worlds/[id] 未捕获异常：", cause);
     return NextResponse.json(
       { error: "此界消散失败，请稍后再试" },
       { status: 500 },
     );
   }
-}
+});

@@ -9,6 +9,8 @@ import {
   toRealityRewriteDto,
 } from "@/lib/reality/task-runner";
 import { RewriteScopeSchema } from "@/lib/reality/schemas";
+import { withAuth } from "@/lib/auth/route";
+import { requireWorld } from "@/lib/auth/ownership";
 
 const CreateRewriteSchema = z.object({
   decree: z.string().trim().min(1, "现实敕令不能为空").max(4000, "现实敕令过长"),
@@ -29,11 +31,15 @@ function errorResponse(error: unknown): Response {
   throw error;
 }
 
-export async function POST(
+export const POST = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
+  if (await requireWorld(userId, id) === null) {
+    return Response.json({ error: "世界不存在" }, { status: 404 });
+  }
   let body: unknown;
   try {
     body = await request.json();
@@ -50,6 +56,7 @@ export async function POST(
 
   try {
     const { task, replayed } = await createRealityRewrite(prisma, {
+      userId,
       worldId: id,
       ...parsed.data,
     });
@@ -61,15 +68,16 @@ export async function POST(
   } catch (error) {
     return errorResponse(error);
   }
-}
+});
 
-export async function GET(
+export const GET = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   const world = await prisma.world.findFirst({
-    where: { id, userId: "local" },
+    where: { id, userId },
     select: { id: true },
   });
   if (world === null) return Response.json({ error: "世界不存在" }, { status: 404 });
@@ -78,4 +86,4 @@ export async function GET(
     orderBy: { createdAt: "desc" },
   });
   return Response.json({ tasks: tasks.map(toRealityRewriteDto) });
-}
+});

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { withAuth } from "@/lib/auth/route";
 import { projectVersionTwoWorld } from "@/lib/archive/v2";
 import { parseWorldIconTheme } from "@/lib/icons/theme";
 import { collectIconCredits, renderIconCreditsMarkdown } from "@/lib/icons/credits";
@@ -163,14 +164,15 @@ function projectVersionFourWorld(value: unknown) {
   };
 }
 
-export async function GET(
+export const GET = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
 
   const world = await prisma.world.findFirst({
-    where: { id, userId: "local" },
+    where: { id, userId },
     include: {
       timelines: {
         orderBy: { createdAt: "asc" },
@@ -234,4 +236,4 @@ export async function GET(
       "Content-Disposition": `attachment; filename="genesis-world.json"; filename*=UTF-8''${encodedName}`,
     },
   });
-}
+});

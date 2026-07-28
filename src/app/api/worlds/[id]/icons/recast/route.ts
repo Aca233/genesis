@@ -7,24 +7,27 @@ import {
   mergeLockedIconAssignments,
   parseWorldIconTheme,
 } from "@/lib/icons/theme";
+import { withAuth } from "@/lib/auth/route";
+import { ownedWhere } from "@/lib/auth/ownership";
 
 const BodySchema = z.object({
   expectedRevision: z.number().int().nonnegative(),
   idempotencyKey: z.string().trim().min(8).max(200),
 }).strict();
 
-export async function POST(
+export const POST = withAuth(async (
+  userId,
   request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   const parsedBody = BodySchema.safeParse(await request.json().catch(() => null));
   if (!parsedBody.success) {
     return NextResponse.json({ error: "重铸请求无效" }, { status: 400 });
   }
 
-  const world = await prisma.world.findUnique({
-    where: { id },
+  const world = await prisma.world.findFirst({
+    where: ownedWhere.world(userId, id),
     select: {
       id: true,
       status: true,
@@ -65,7 +68,7 @@ export async function POST(
     world.iconTheme,
   );
   const result = await prisma.world.updateMany({
-    where: { id, iconThemeRevision: parsedBody.data.expectedRevision },
+    where: { id, userId, iconThemeRevision: parsedBody.data.expectedRevision },
     data: {
       iconTheme: candidate as unknown as Prisma.InputJsonValue,
       iconThemeOperationKey: parsedBody.data.idempotencyKey,
@@ -85,4 +88,4 @@ export async function POST(
     idempotent: false,
     affectsUnlockedNarrativeIcons: world.status !== "draft",
   });
-}
+});

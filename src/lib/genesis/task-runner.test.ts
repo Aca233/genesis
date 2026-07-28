@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildGenesisRepairRequest,
   buildGenesisRequest,
   claimGenesisTask,
   persistWorld,
@@ -68,9 +69,9 @@ describe("resolveLorebookExcerpts（§11 T4b 创世注入切换）", () => {
     const classify = vi.fn(async () => rows);
     const select = vi.fn(selectLoreForGenesis);
 
-    const result = await resolveLorebookExcerpts(entries, { classify, select });
+    const result = await resolveLorebookExcerpts(entries, "test-user", { classify, select });
 
-    expect(classify).toHaveBeenCalledWith(entries, "backstage");
+    expect(classify).toHaveBeenCalledWith(entries, "backstage", { userId: "test-user" });
     expect(select).toHaveBeenCalledWith(rows, LORE_GENESIS_BUDGET_CHARS);
     expect(LORE_GENESIS_BUDGET_CHARS).toBe(8000);
     expect(result).toBe(selectLoreForGenesis(rows, LORE_GENESIS_BUDGET_CHARS).excerpt);
@@ -83,7 +84,7 @@ describe("resolveLorebookExcerpts（§11 T4b 创世注入切换）", () => {
     const classify = vi.fn(async () => null);
     const select = vi.fn(selectLoreForGenesis);
 
-    const result = await resolveLorebookExcerpts(entries, { classify, select });
+    const result = await resolveLorebookExcerpts(entries, "test-user", { classify, select });
 
     expect(select).not.toHaveBeenCalled();
     expect(result).toBe(`资料索引不可用，按原始顺序注入\n${lorebookExcerpts(entries)}`);
@@ -97,7 +98,7 @@ describe("resolveLorebookExcerpts（§11 T4b 创世注入切换）", () => {
     const classify = vi.fn(async () => null);
     const select = vi.fn(selectLoreForGenesis);
 
-    await expect(resolveLorebookExcerpts([], { classify, select })).resolves.toBeUndefined();
+    await expect(resolveLorebookExcerpts([], "test-user", { classify, select })).resolves.toBeUndefined();
     expect(classify).not.toHaveBeenCalled();
   });
 
@@ -106,7 +107,7 @@ describe("resolveLorebookExcerpts（§11 T4b 创世注入切换）", () => {
     const select = vi.fn(selectLoreForGenesis);
 
     await expect(
-      resolveLorebookExcerpts([loreEntry(["禁"], "全部禁用", false)], { classify, select }),
+      resolveLorebookExcerpts([loreEntry(["禁"], "全部禁用", false)], "test-user", { classify, select }),
     ).resolves.toBeUndefined();
   });
 });
@@ -188,7 +189,6 @@ describe("genesis task runner", () => {
     expect(db.genesisTask.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         id: "task-1",
-        userId: "local",
         OR: expect.arrayContaining([
           { status: "queued" },
           expect.objectContaining({ status: { in: ["running", "repairing"] } }),
@@ -196,6 +196,7 @@ describe("genesis task runner", () => {
       }),
       data: expect.objectContaining({ status: "running" }),
     }));
+    expect(db.genesisTask.updateMany.mock.calls[0]![0].where).not.toHaveProperty("userId");
   });
 
   it("按冻结模式构造生成 system、user 与精确 schema", () => {
@@ -214,6 +215,35 @@ describe("genesis task runner", () => {
     expect(pantheon.system).toContain('mode="pantheon"');
     expect(pantheon.user).toContain('mode="pantheon"');
     expect(pantheon.schema).toBe(PantheonWorldDeckSchema);
+  });
+
+  it("创世整套修补只允许一次语义尝试，避免在外层修补轮内重复生成三套长 JSON", () => {
+    const request = buildGenesisRepairRequest({
+      mode: "pantheon",
+      userId: "test-user",
+      decree: "创造测试界",
+      invalidOutput: "{\"mode\":\"pantheon\"}",
+      validationError: "races.0.abilities 至少需要两项",
+    });
+
+    expect(request).toMatchObject({
+      task: "genesis",
+      userId: "test-user",
+      schema: PantheonWorldDeckSchema,
+      maxTokens: 4096,
+      maxAttempts: 1,
+      transportMaxAttempts: 1,
+      allowTransportFallback: false,
+    });
+  });
+
+  it("创世初稿使用短轮输出上限，由续写接力完成整套卡组", () => {
+    const request = buildGenesisRequest({
+      mode: "pantheon",
+      decree: "创造测试界",
+    });
+
+    expect(request.maxTokens).toBe(4096);
   });
 
   it("持久化世界复制任务模式并从实际 creator 卡组导出完成键", async () => {

@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   prisma: {
-    chapter: { findUnique: vi.fn(), update: vi.fn() },
+    chapter: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   },
   claimWorldOperation: vi.fn(),
   releaseWorldOperation: vi.fn(),
   settleChapter: vi.fn(),
   ensureSettlementRunning: vi.fn(),
   createSettlementTaskSSE: vi.fn(),
+  requireUserId: vi.fn().mockResolvedValue("test-user"),
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mocks.prisma }));
@@ -26,13 +27,14 @@ vi.mock("@/lib/settle/task-runner", () => ({
   ensureSettlementRunning: mocks.ensureSettlementRunning,
   createSettlementTaskSSE: mocks.createSettlementTaskSSE,
 }));
+vi.mock("@/lib/auth/session", () => ({ requireUserId: mocks.requireUserId }));
 
 import { POST } from "./route";
 
 describe("POST /api/chapters/[id]/settle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.prisma.chapter.findUnique.mockImplementation(async ({ where }: { where: { id?: string; timelineId_index?: unknown } }) => {
+    mocks.prisma.chapter.findFirst.mockImplementation(async ({ where }: { where: { id?: string; timelineId_index?: unknown } }) => {
       if (where.id === "chapter-1") return {
         id: "chapter-1",
         index: 1,
@@ -52,6 +54,7 @@ describe("POST /api/chapters/[id]/settle", () => {
       };
       return null;
     });
+    mocks.prisma.chapter.findUnique.mockImplementation(mocks.prisma.chapter.findFirst);
     mocks.claimWorldOperation.mockResolvedValue({ acquired: true });
     mocks.releaseWorldOperation.mockResolvedValue(true);
     mocks.prisma.chapter.update.mockResolvedValue({});
@@ -77,7 +80,7 @@ describe("POST /api/chapters/[id]/settle", () => {
   });
 
   it("preserves the active-reality freeze guard before claiming a lease", async () => {
-    mocks.prisma.chapter.findUnique.mockResolvedValue({
+    mocks.prisma.chapter.findFirst.mockResolvedValue({
       id: "chapter-1", index: 1, timelineId: "timeline-old",
       timeline: { id: "timeline-old", worldId: "world-1", world: { activeTimelineId: "timeline-new" } },
       messages: [{ id: "message-1" }],
@@ -119,6 +122,7 @@ describe("POST /api/chapters/[id]/settle", () => {
       worldId: "world-1",
       token: "chapter-1",
       claimed: true,
+      userId: "test-user",
     });
     expect(emit).toHaveBeenCalledWith(expect.objectContaining({
       type: "progress",

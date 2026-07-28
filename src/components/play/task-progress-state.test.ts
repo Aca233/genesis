@@ -8,6 +8,17 @@ import {
 const now = "2026-07-23T00:00:01.000Z";
 
 describe("task progress view state", () => {
+  it("忽略服务端下发的未知阶段而不让对局页面崩溃", () => {
+    expect(reduceTaskProgress(null, {
+      taskKind: "settlement",
+      taskId: "settle-legacy",
+      stage: "done",
+      status: "running",
+      retryable: true,
+      updatedAt: now,
+    })).toBeNull();
+  });
+
   it("刷新后的 durable 阶段补全此前步骤且不会被旧事件倒退", () => {
     const applying: DurableTaskProgress = {
       taskKind: "chat",

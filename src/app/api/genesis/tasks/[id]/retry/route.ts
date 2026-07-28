@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { ensureGenesisTaskRunning } from "@/lib/genesis/task-runner";
+import { withAuth } from "@/lib/auth/route";
 
-export async function POST(
+export const POST = withAuth(async (
+  userId,
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
-) {
+) => {
   const { id } = await params;
   const updated = await prisma.genesisTask.updateMany({
-    where: { id, userId: "local", status: "failed" },
+    where: { id, userId, status: "failed" },
     data: {
       status: "queued",
       rawOutput: "",
@@ -24,4 +26,4 @@ export async function POST(
   }
   ensureGenesisTaskRunning(id);
   return NextResponse.json({ ok: true }, { status: 202 });
-}
+});

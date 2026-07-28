@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_WORLD_ICON_THEME } from "@/lib/icons/theme";
 
 const mocks = vi.hoisted(() => ({
-  world: { findUnique: vi.fn() },
+  world: { findUnique: vi.fn(), findFirst: vi.fn() },
   timeline: { findFirst: vi.fn() },
   entity: { findFirst: vi.fn() },
   god: { findFirst: vi.fn() },
@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: mocks }));
+vi.mock("@/lib/auth/session", () => ({ requireUserId: vi.fn().mockResolvedValue("test-user") }));
 
 import { DELETE, PUT } from "./route";
 
@@ -37,6 +38,7 @@ describe("world icon assignments route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.world.findUnique.mockResolvedValue({ iconTheme: DEFAULT_WORLD_ICON_THEME });
+    mocks.world.findFirst.mockResolvedValue({ id: "world-1" });
     mocks.timeline.findFirst.mockResolvedValue({ id: "timeline-1" });
     mocks.entity.findFirst.mockResolvedValue({ id: "entity-1" });
     mocks.iconAssignment.findUnique.mockResolvedValue(null);

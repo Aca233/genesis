@@ -11,8 +11,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/db", () => ({
-  prisma: { world: { findUnique: mocks.worldFindUnique } },
+  prisma: { world: { findFirst: mocks.worldFindUnique } },
 }));
+vi.mock("@/lib/auth/session", () => ({ requireUserId: vi.fn().mockResolvedValue("test-user") }));
 vi.mock("@/lib/reality/tree", () => ({
   RealityConflictError: class RealityConflictError extends Error {},
   RealityNotFoundError: class RealityNotFoundError extends Error {},
@@ -104,6 +105,7 @@ describe("/api/worlds/[id]/realities", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ activeId: "fork-1" });
     expect(mocks.forkPantheonCheckpoint).toHaveBeenCalledWith(expect.anything(), {
+      userId: "test-user",
       worldId: "world-1",
       sourceChapterId: "chapter-2",
       expectedActiveId: "root",

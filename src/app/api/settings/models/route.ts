@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { decryptSecret } from "@/lib/crypto";
 import { adapters } from "@/lib/llm/adapters";
 import { ModelSlotSchema } from "@/lib/llm/types";
+import { withAuth } from "@/lib/auth/route";
 
 /**
  * POST /api/settings/models —— 获取端点可用模型列表
@@ -18,14 +19,14 @@ const BodySchema = z.object({
   useSaved: z.enum(["narrative", "backstage"]).optional(),
 });
 
-export async function POST(request: Request) {
+export const POST = withAuth(async (userId, request: Request) => {
   const { provider, baseUrl, apiKey: plainKey, useSaved } = BodySchema.parse(
     await request.json(),
   );
 
   let apiKey = plainKey;
   if (!apiKey && useSaved) {
-    const settings = await prisma.settings.findUnique({ where: { userId: "local" } });
+    const settings = await prisma.settings.findUnique({ where: { userId } });
     const saved = ModelSlotSchema.safeParse(
       useSaved === "narrative" ? settings?.narrativeSlot : settings?.backstageSlot,
     );
@@ -44,4 +45,4 @@ export async function POST(request: Request) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ ok: false, error: message }, { status: 502 });
   }
-}
+});
