@@ -29,7 +29,6 @@ export function InputDeck({
   scale,
   onScaleChange,
   suggestions,
-  powerHints,
   busyKind,
   canContinue,
   onSend,
@@ -42,12 +41,9 @@ export function InputDeck({
   onRetryTask,
   onRefreshWorld,
 }: {
-  mode: "pantheon" | "creator";
   scale: Scale;
   onScaleChange: (s: Scale) => void;
   suggestions: string[];
-  /** 神权提示条：玩家神的神赋能力（万神殿模式；creator 传空数组即隐藏） */
-  powerHints?: { id: string; name: string; effect: string; cost?: string }[];
   busyKind: "idle" | "narrating" | "settling" | "rewriting";
   /** 消息流非空时才允许续笔 */
   canContinue: boolean;
@@ -65,7 +61,6 @@ export function InputDeck({
   onRefreshWorld?: () => void;
 }) {
   const [text, setText] = useState("");
-  const [inputFocused, setInputFocused] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const { candle, setMode } = useTheme();
   const busy = busyKind !== "idle";
@@ -169,34 +164,6 @@ export function InputDeck({
         </div>
       )}
 
-      {/* 神权提示条：输入聚焦时列出玩家神的神赋能力，点击仅插入名称文本（非发动按钮） */}
-      {inputFocused && !busy && (powerHints?.length ?? 0) > 0 && (
-        <div className="mb-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 px-2">
-          <span className="select-none pl-[0.3em] text-[10px] font-medium tracking-[0.3em] text-ink-faint">
-            神权
-          </span>
-          {powerHints!.map((h) => (
-            <button
-              key={h.id}
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                setText((t) => {
-                  if (!t) return h.name;
-                  const tail = t.slice(-1);
-                  return /[\s，。：；、！？]/.test(tail) ? `${t}${h.name}` : `${t}，${h.name}`;
-                });
-                taRef.current?.focus();
-              }}
-              title={`${h.effect}${h.cost ? `（代价：${h.cost}）` : ""}`}
-              className="rounded-full border border-gilt/40 bg-paper-raised/85 px-2.5 py-0.5 text-[11px] text-gilt-strong shadow-[0_1px_6px_var(--shadow-warm)] transition hover:border-gilt/80 hover:text-gilt hover:shadow-[0_0_0.6rem_var(--gilt-glow)]"
-            >
-              {h.name}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* AI 建议（淡金小字，生成中淡出；高度恒定不顶起输入区） */}
       {suggestionsEnabled && (
         <div
@@ -242,14 +209,12 @@ export function InputDeck({
             </span>
           </div>
 
-          {/* 羊皮纸砚井：聚焦时暖光聚拢 */}
-          <div className="min-w-0 flex-1 rounded-lg border border-gilt/25 bg-paper-sunken px-3 py-2 shadow-[inset_0_1px_3px_rgba(0,0,0,0.16)] transition-[border-color,box-shadow] duration-300 focus-within:border-gilt/60 focus-within:shadow-[inset_0_1px_3px_rgba(0,0,0,0.12),0_0_1.4rem_var(--seal-glow)]">
+          {/* 与主菜单世界模式同源的纸面卡片：默认细墨边，落笔时暖金浅染 */}
+          <div className="play-input-card min-w-0 flex-1 overflow-hidden rounded-lg border border-line bg-paper-raised px-4 py-3 shadow-[0_2px_12px_var(--shadow-warm)]">
             <textarea
               ref={taRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              onFocus={() => setInputFocused(true)}
-              onBlur={() => setInputFocused(false)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                   e.preventDefault();
@@ -264,7 +229,7 @@ export function InputDeck({
                   ? "世界演化中，稍候…"
                   : current.placeholder}
               rows={2}
-              className="w-full resize-none bg-transparent leading-relaxed text-ink outline-none placeholder:text-ink-faint/70 disabled:opacity-60"
+              className="play-input-textarea w-full resize-none bg-transparent leading-relaxed text-ink placeholder:text-ink-faint/70 disabled:opacity-60"
             />
           </div>
         </div>
