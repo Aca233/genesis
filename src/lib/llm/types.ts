@@ -86,6 +86,7 @@ export type CompletionRequest = {
     genesisJobId?: string;
     leaseEpoch?: number;
     leaseExpiresAt?: string;
+    budgetScope?: "primary" | "shadow";
   };
   /** Enables provider prompt-cache hints when the stable prefix is large enough. */
   cache?: PromptCacheRequest;

@@ -121,46 +121,59 @@ model World {
 }
 
 model GenesisTask {
-  id                String          @id @default(cuid())
-  userId            String          @map("user_id")
-  user              User            @relation(fields: [userId], references: [id], onDelete: Restrict)
-  idempotencyKey    String?         @map("idempotency_key")
-  requestHash       String?         @map("request_hash")
-  engineVersion     String          @default("legacy-v1") @map("engine_version")
-  aggregateVersion  Int             @default(1) @map("aggregate_version")
-  budgetMaxCalls    Int             @default(12) @map("budget_max_calls")
-  budgetMaxInput    Int             @default(500000) @map("budget_max_input_tokens")
-  budgetMaxOutput   Int             @default(65536) @map("budget_max_output_tokens")
-  budgetCallCount   Int             @default(0) @map("budget_call_count")
-  budgetReservedIn  Int             @default(0) @map("budget_reserved_input_tokens")
-  budgetReservedOut Int             @default(0) @map("budget_reserved_output_tokens")
-  budgetSettledIn   Int             @default(0) @map("budget_settled_input_tokens")
-  budgetSettledOut  Int             @default(0) @map("budget_settled_output_tokens")
-  decree            String
-  lorebook          Json?
-  lorebookName      String?         @map("lorebook_name")
-  materialSelection Json?           @map("material_selection")
-  mode              String          @default("pantheon")
-  status            String          @default("queued") // queued | running | repairing | completed | failed
-  stage             String          @default("oracle")
-  completedKeys     String[]        @map("completed_keys")
-  rawOutput         String          @default("") @map("raw_output") @db.Text
-  rawExpiresAt      DateTime?       @map("raw_expires_at")
-  error             String?
+  id                      String            @id @default(cuid())
+  userId                  String            @map("user_id")
+  user                    User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  idempotencyKey          String?           @map("idempotency_key")
+  requestHash             String?           @map("request_hash")
+  engineVersion           String            @default("legacy-v1") @map("engine_version")
+  aggregateVersion        Int               @default(1) @map("aggregate_version")
+  budgetMaxCalls          Int               @default(12) @map("budget_max_calls")
+  budgetMaxInput          Int               @default(500000) @map("budget_max_input_tokens")
+  budgetMaxOutput         Int               @default(65536) @map("budget_max_output_tokens")
+  budgetCallCount         Int               @default(0) @map("budget_call_count")
+  budgetReservedIn        Int               @default(0) @map("budget_reserved_input_tokens")
+  budgetReservedOut       Int               @default(0) @map("budget_reserved_output_tokens")
+  budgetSettledIn         Int               @default(0) @map("budget_settled_input_tokens")
+  budgetSettledOut        Int               @default(0) @map("budget_settled_output_tokens")
+  shadowEnabled           Boolean           @default(false) @map("shadow_enabled")
+  shadowStatus            String            @default("disabled") @map("shadow_status")
+  shadowPreflight         Json?             @map("shadow_preflight")
+  shadowPreflightHash     String?           @map("shadow_preflight_hash")
+  shadowBudgetMaxCalls    Int               @default(5) @map("shadow_budget_max_calls")
+  shadowBudgetMaxInput    Int               @default(120000) @map("shadow_budget_max_input_tokens")
+  shadowBudgetMaxOutput   Int               @default(30000) @map("shadow_budget_max_output_tokens")
+  shadowBudgetCallCount   Int               @default(0) @map("shadow_budget_call_count")
+  shadowBudgetReservedIn  Int               @default(0) @map("shadow_budget_reserved_input_tokens")
+  shadowBudgetReservedOut Int               @default(0) @map("shadow_budget_reserved_output_tokens")
+  shadowBudgetSettledIn   Int               @default(0) @map("shadow_budget_settled_input_tokens")
+  shadowBudgetSettledOut  Int               @default(0) @map("shadow_budget_settled_output_tokens")
+  decree                  String
+  lorebook                Json?
+  lorebookName            String?           @map("lorebook_name")
+  materialSelection       Json?             @map("material_selection")
+  mode                    String            @default("pantheon")
+  status                  String            @default("queued") // queued | running | repairing | completed | failed
+  stage                   String            @default("oracle")
+  completedKeys           String[]          @map("completed_keys")
+  rawOutput               String            @default("") @map("raw_output") @db.Text
+  rawExpiresAt            DateTime?         @map("raw_expires_at")
+  error                   String?
   /**
    * 时间一致设计稿 §10.4：报告型 AI 语义审计结果（TemporalAuditResult）；仅 IP 世界产出，审计失败/旧任务为 NULL
    */
-  auditReport       Json?           @map("audit_report")
-  attempt           Int             @default(0)
-  leaseToken        String?         @map("lease_token")
-  leaseExpiresAt    DateTime?       @map("lease_expires_at")
-  worldId           String?         @unique @map("world_id")
-  world             World?          @relation(fields: [worldId], references: [id], onDelete: SetNull)
-  jobs              GenesisJob[]
-  outboxEvents      GenesisOutbox[]
-  llmAttempts       LlmAttempt[]
-  createdAt         DateTime        @default(now()) @map("created_at")
-  updatedAt         DateTime        @updatedAt @map("updated_at")
+  auditReport             Json?             @map("audit_report")
+  attempt                 Int               @default(0)
+  leaseToken              String?           @map("lease_token")
+  leaseExpiresAt          DateTime?         @map("lease_expires_at")
+  worldId                 String?           @unique @map("world_id")
+  world                   World?            @relation(fields: [worldId], references: [id], onDelete: SetNull)
+  jobs                    GenesisJob[]
+  outboxEvents            GenesisOutbox[]
+  llmAttempts             LlmAttempt[]
+  artifacts               GenesisArtifact[]
+  createdAt               DateTime          @default(now()) @map("created_at")
+  updatedAt               DateTime          @updatedAt @map("updated_at")
 
   @@unique([userId, idempotencyKey])
   @@index([userId, status])
@@ -170,28 +183,29 @@ model GenesisTask {
 }
 
 model GenesisJob {
-  id                String       @id @default(cuid())
-  userId            String       @map("user_id")
-  genesisTaskId     String       @map("genesis_task_id")
-  task              GenesisTask  @relation(fields: [genesisTaskId], references: [id], onDelete: Cascade)
-  nodeKey           String       @map("node_key")
-  engineVersion     String       @map("engine_version")
-  priority          Int          @default(0)
-  status            String       @default("queued")
-  dependencyKeys    String[]     @default([]) @map("dependency_keys")
-  inputHash         String?      @map("input_hash")
-  leaseToken        String?      @map("lease_token")
-  leaseEpoch        Int          @default(0) @map("lease_epoch")
-  leaseExpiresAt    DateTime?    @map("lease_expires_at")
-  attempt           Int          @default(0)
-  estimatedDuration Int?         @map("estimated_duration")
-  estimatedTokens   Int?         @map("estimated_tokens")
-  startedAt         DateTime?    @map("started_at")
-  completedAt       DateTime?    @map("completed_at")
+  id                String            @id @default(cuid())
+  userId            String            @map("user_id")
+  genesisTaskId     String            @map("genesis_task_id")
+  task              GenesisTask       @relation(fields: [genesisTaskId], references: [id], onDelete: Cascade)
+  nodeKey           String            @map("node_key")
+  engineVersion     String            @map("engine_version")
+  priority          Int               @default(0)
+  status            String            @default("queued")
+  dependencyKeys    String[]          @default([]) @map("dependency_keys")
+  inputHash         String?           @map("input_hash")
+  leaseToken        String?           @map("lease_token")
+  leaseEpoch        Int               @default(0) @map("lease_epoch")
+  leaseExpiresAt    DateTime?         @map("lease_expires_at")
+  attempt           Int               @default(0)
+  estimatedDuration Int?              @map("estimated_duration")
+  estimatedTokens   Int?              @map("estimated_tokens")
+  startedAt         DateTime?         @map("started_at")
+  completedAt       DateTime?         @map("completed_at")
   error             String?
-  createdAt         DateTime     @default(now()) @map("created_at")
-  updatedAt         DateTime     @updatedAt @map("updated_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
   llmAttempts       LlmAttempt[]
+  artifacts         GenesisArtifact[]
 
   @@unique([genesisTaskId, nodeKey])
   @@index([status, priority, createdAt])
@@ -228,6 +242,7 @@ model LlmAttempt {
   genesisJob           GenesisJob?  @relation(fields: [genesisJobId], references: [id], onDelete: SetNull)
   userId               String       @map("user_id")
   leaseEpoch           Int?         @map("lease_epoch")
+  budgetScope          String       @default("primary") @map("budget_scope")
   state                String       @default("reserved")
   transportKind        String       @map("transport_kind")
   transportOutcome     String?      @map("transport_outcome")
@@ -278,6 +293,34 @@ model LlmPermitRequest {
   @@index([state, priority, requestedAt])
   @@index([userId, state])
   @@map("llm_permit_requests")
+}
+
+model GenesisArtifact {
+  id               String      @id @default(cuid())
+  genesisTaskId    String      @map("genesis_task_id")
+  task             GenesisTask @relation(fields: [genesisTaskId], references: [id], onDelete: Cascade)
+  genesisJobId     String?     @map("genesis_job_id")
+  job              GenesisJob? @relation(fields: [genesisJobId], references: [id], onDelete: SetNull)
+  stageKey         String      @map("stage_key")
+  version          Int
+  status           String      @default("candidate")
+  visibility       String      @default("shadow")
+  inputHash        String      @map("input_hash")
+  outputHash       String      @map("output_hash")
+  reuseKey         String      @map("reuse_key")
+  dependencyHashes String[]    @default([]) @map("dependency_hashes")
+  content          Json
+  validation       Json?
+  acceptedAt       DateTime?   @map("accepted_at")
+  supersededAt     DateTime?   @map("superseded_at")
+  sealedAt         DateTime?   @map("sealed_at")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+
+  @@unique([genesisTaskId, stageKey, version])
+  @@index([genesisTaskId, stageKey, status])
+  @@index([reuseKey, status])
+  @@map("genesis_artifacts")
 }
 
 model LlmFairness {

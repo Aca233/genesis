@@ -52,6 +52,7 @@ beforeEach(() => {
     logicalCallId: input.logicalCallId,
     physicalAttemptIndex: input.physicalAttemptIndex,
     requestId: `request-${input.physicalAttemptIndex}`,
+    budgetScope: input.req.owner?.budgetScope ?? "primary",
     reservedInputTokens: input.reservedInputTokens,
     reservedOutputTokens: input.req.maxTokens ?? 4096,
   }));

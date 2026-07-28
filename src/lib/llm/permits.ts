@@ -20,7 +20,7 @@ const priorityByTask: Record<string, number> = {
   extract: 150,
   chronicle: 150,
   "world-director": 150,
-  "world-director-probe": 100,
+  "world-director-probe": 25,
   test: 50,
 };
 
@@ -64,6 +64,7 @@ type Permit = {
   physicalAttemptIndex: number;
   requestId: string;
   genesisTaskId?: string;
+  budgetScope?: "primary" | "shadow";
   reservedInputTokens: number;
   reservedOutputTokens: number;
 };
@@ -187,6 +188,7 @@ async function tryAcquire(db: PermitDb, input: AcquireInput, requestId: string):
 
     const reservedOutputTokens = reservationOutput(input.req);
     const owner = input.req.owner;
+    const budgetScope = owner?.budgetScope ?? "primary";
     if (owner?.genesisTaskId) {
       if (!owner.genesisJobId || owner.leaseEpoch === undefined) {
         throw new Error("创世模型调用缺少持久作业归属");
@@ -213,24 +215,55 @@ async function tryAcquire(db: PermitDb, input: AcquireInput, requestId: string):
           budgetReservedOut: true,
           budgetSettledIn: true,
           budgetSettledOut: true,
+          shadowBudgetMaxCalls: true,
+          shadowBudgetMaxInput: true,
+          shadowBudgetMaxOutput: true,
+          shadowBudgetCallCount: true,
+          shadowBudgetReservedIn: true,
+          shadowBudgetReservedOut: true,
+          shadowBudgetSettledIn: true,
+          shadowBudgetSettledOut: true,
         },
       });
+      const maxCalls = budgetScope === "shadow" ? currentBudget?.shadowBudgetMaxCalls : currentBudget?.budgetMaxCalls;
+      const maxInput = budgetScope === "shadow" ? currentBudget?.shadowBudgetMaxInput : currentBudget?.budgetMaxInput;
+      const maxOutput = budgetScope === "shadow" ? currentBudget?.shadowBudgetMaxOutput : currentBudget?.budgetMaxOutput;
+      const callCount = budgetScope === "shadow" ? currentBudget?.shadowBudgetCallCount : currentBudget?.budgetCallCount;
+      const reservedIn = budgetScope === "shadow" ? currentBudget?.shadowBudgetReservedIn : currentBudget?.budgetReservedIn;
+      const reservedOut = budgetScope === "shadow" ? currentBudget?.shadowBudgetReservedOut : currentBudget?.budgetReservedOut;
+      const settledIn = budgetScope === "shadow" ? currentBudget?.shadowBudgetSettledIn : currentBudget?.budgetSettledIn;
+      const settledOut = budgetScope === "shadow" ? currentBudget?.shadowBudgetSettledOut : currentBudget?.budgetSettledOut;
       if (!currentBudget
-        || currentBudget.budgetCallCount + 1 > currentBudget.budgetMaxCalls
-        || currentBudget.budgetSettledIn + currentBudget.budgetReservedIn + input.reservedInputTokens > currentBudget.budgetMaxInput
-        || currentBudget.budgetSettledOut + currentBudget.budgetReservedOut + reservedOutputTokens > currentBudget.budgetMaxOutput) {
+        || callCount === undefined || reservedIn === undefined || reservedOut === undefined
+        || settledIn === undefined || settledOut === undefined
+        || maxCalls === undefined || maxInput === undefined || maxOutput === undefined
+        || callCount + 1 > maxCalls
+        || settledIn + reservedIn + input.reservedInputTokens > maxInput
+        || settledOut + reservedOut + reservedOutputTokens > maxOutput) {
         throw new LlmBudgetError();
       }
       const budget = await tx.genesisTask.updateMany({
         where: {
           id: owner.genesisTaskId,
-          budgetCallCount: currentBudget.budgetCallCount,
-          budgetReservedIn: currentBudget.budgetReservedIn,
-          budgetReservedOut: currentBudget.budgetReservedOut,
-          budgetSettledIn: currentBudget.budgetSettledIn,
-          budgetSettledOut: currentBudget.budgetSettledOut,
+          ...(budgetScope === "shadow" ? {
+            shadowBudgetCallCount: currentBudget.shadowBudgetCallCount,
+            shadowBudgetReservedIn: currentBudget.shadowBudgetReservedIn,
+            shadowBudgetReservedOut: currentBudget.shadowBudgetReservedOut,
+            shadowBudgetSettledIn: currentBudget.shadowBudgetSettledIn,
+            shadowBudgetSettledOut: currentBudget.shadowBudgetSettledOut,
+          } : {
+            budgetCallCount: currentBudget.budgetCallCount,
+            budgetReservedIn: currentBudget.budgetReservedIn,
+            budgetReservedOut: currentBudget.budgetReservedOut,
+            budgetSettledIn: currentBudget.budgetSettledIn,
+            budgetSettledOut: currentBudget.budgetSettledOut,
+          }),
         },
-        data: {
+        data: budgetScope === "shadow" ? {
+          shadowBudgetCallCount: { increment: 1 },
+          shadowBudgetReservedIn: { increment: input.reservedInputTokens },
+          shadowBudgetReservedOut: { increment: reservedOutputTokens },
+        } : {
           budgetCallCount: { increment: 1 },
           budgetReservedIn: { increment: input.reservedInputTokens },
           budgetReservedOut: { increment: reservedOutputTokens },
@@ -258,6 +291,7 @@ async function tryAcquire(db: PermitDb, input: AcquireInput, requestId: string):
         genesisJobId: owner?.genesisJobId,
         userId: input.req.userId,
         leaseEpoch: owner?.leaseEpoch,
+        budgetScope,
         ownerLeaseExpiresAt: owner?.leaseExpiresAt ? new Date(owner.leaseExpiresAt) : null,
         transportKind: input.transportKind,
         reservedInputTokens: input.reservedInputTokens,
@@ -287,6 +321,7 @@ async function tryAcquire(db: PermitDb, input: AcquireInput, requestId: string):
       physicalAttemptIndex: input.physicalAttemptIndex,
       requestId,
       genesisTaskId: owner?.genesisTaskId,
+      budgetScope,
       reservedInputTokens: input.reservedInputTokens,
       reservedOutputTokens,
     };
@@ -375,7 +410,12 @@ export async function settleLlmPermit(
     if (permit.genesisTaskId && terminal) {
       await tx.genesisTask.update({
         where: { id: permit.genesisTaskId },
-        data: {
+        data: permit.budgetScope === "shadow" ? {
+          shadowBudgetReservedIn: { decrement: permit.reservedInputTokens },
+          shadowBudgetReservedOut: { decrement: permit.reservedOutputTokens },
+          shadowBudgetSettledIn: { increment: settledInput },
+          shadowBudgetSettledOut: { increment: settledOutput },
+        } : {
           budgetReservedIn: { decrement: permit.reservedInputTokens },
           budgetReservedOut: { decrement: permit.reservedOutputTokens },
           budgetSettledIn: { increment: settledInput },
@@ -443,6 +483,7 @@ export async function resolveUnknownLlmAttempt(
     physicalAttemptIndex: attempt.physicalAttemptIndex,
     requestId: "operator-resolution",
     genesisTaskId: attempt.genesisTaskId ?? undefined,
+    budgetScope: attempt.budgetScope === "shadow" ? "shadow" : "primary",
     reservedInputTokens: attempt.reservedInputTokens,
     reservedOutputTokens: attempt.reservedOutputTokens,
   }, {

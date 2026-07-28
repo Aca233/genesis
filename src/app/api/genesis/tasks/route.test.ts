@@ -17,7 +17,10 @@ vi.mock("@/lib/genesis/scheduler", () => ({ wakeGenesisScheduler: mocks.wake }))
 import { POST } from "./route";
 
 describe("POST /api/genesis/tasks", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.GENESIS_V2_SHADOW_ENABLED;
+  });
 
   it("持久化任务后立即以 202 返回 taskId", async () => {
     mocks.create.mockResolvedValue({ id: "task-1" });
@@ -34,7 +37,7 @@ describe("POST /api/genesis/tasks", () => {
         decree: "创造星海",
         mode: "pantheon",
         completedKeys: [],
-        jobs: { create: expect.objectContaining({ nodeKey: "legacy-world-deck" }) },
+        jobs: { create: [expect.objectContaining({ nodeKey: "legacy-world-deck" })] },
         outboxEvents: { create: expect.objectContaining({ aggregateVersion: 1 }) },
       }),
     }));
@@ -98,6 +101,33 @@ describe("POST /api/genesis/tasks", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining("世界书") });
     expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it("shadow 开关开启时在同一创建事务冻结预检和五个低优先级节点", async () => {
+    process.env.GENESIS_V2_SHADOW_ENABLED = "1";
+    mocks.create.mockResolvedValue({ id: "task-shadow" });
+
+    const response = await POST(new Request("http://localhost/api/genesis/tasks", {
+      method: "POST",
+      body: JSON.stringify({ decree: "创造受潮汐支配的星海" }),
+    }));
+
+    expect(response.status).toBe(202);
+    const data = mocks.create.mock.calls[0]![0].data;
+    expect(data).toMatchObject({
+      shadowEnabled: true,
+      shadowStatus: "pending_legacy",
+      shadowPreflightHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      shadowBudgetMaxCalls: 5,
+    });
+    expect(data.jobs.create).toHaveLength(6);
+    expect(data.jobs.create.slice(1)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ nodeKey: "shadow:blueprint", priority: -100 }),
+      expect.objectContaining({
+        nodeKey: "shadow:characters",
+        dependencyKeys: ["shadow:pantheon_domain", "shadow:civilizations", "shadow:eras"],
+      }),
+    ]));
   });
 
   it("同一用户重复提交同一幂等键时返回同一任务", async () => {

@@ -151,6 +151,83 @@ describe("LLM global permits", () => {
     expect(tx.llmAttempt.create).not.toHaveBeenCalled();
   });
 
+  it("shadow 调用只预留独立 shadow 预算，不消耗 legacy 预算", async () => {
+    const budgetUpdate = vi.fn().mockResolvedValue({ count: 1 });
+    const attemptCreate = vi.fn().mockResolvedValue({});
+    const tx = {
+      llmCircuit: { findUnique: vi.fn().mockResolvedValue(null) },
+      llmPermitRequest: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: "request-1", userId: "user-a", priority: 100, requestedAt: new Date(),
+        }]),
+        count: vi.fn().mockResolvedValue(0),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      llmFairness: {
+        findMany: vi.fn().mockResolvedValue([]),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      llmAttempt: { count: vi.fn().mockResolvedValue(0), create: attemptCreate },
+      llmSlot: { update: vi.fn().mockResolvedValue({}) },
+      genesisJob: { findFirst: vi.fn().mockResolvedValue({ id: "shadow-job" }) },
+      genesisTask: {
+        findUnique: vi.fn().mockResolvedValue({
+          budgetMaxCalls: 12,
+          budgetMaxInput: 500_000,
+          budgetMaxOutput: 65_536,
+          budgetCallCount: 9,
+          budgetReservedIn: 100,
+          budgetReservedOut: 100,
+          budgetSettledIn: 1000,
+          budgetSettledOut: 1000,
+          shadowBudgetMaxCalls: 5,
+          shadowBudgetMaxInput: 120_000,
+          shadowBudgetMaxOutput: 30_000,
+          shadowBudgetCallCount: 1,
+          shadowBudgetReservedIn: 2,
+          shadowBudgetReservedOut: 3,
+          shadowBudgetSettledIn: 4,
+          shadowBudgetSettledOut: 5,
+        }),
+        updateMany: budgetUpdate,
+      },
+      $queryRaw: vi.fn().mockResolvedValue([{ slot_no: 3, slot_epoch: 4 }]),
+    };
+    const db = { $transaction: vi.fn((callback) => callback(tx)) };
+    const shadowRequest = {
+      ...request,
+      req: {
+        ...request.req,
+        task: "world-director-probe" as const,
+        owner: {
+          kind: "genesis_shadow_job",
+          id: "shadow-job",
+          genesisTaskId: "task-1",
+          genesisJobId: "shadow-job",
+          leaseEpoch: 2,
+          budgetScope: "shadow" as const,
+        },
+      },
+    };
+
+    await expect(tryAcquireLlmPermit(db as never, shadowRequest, "request-1"))
+      .resolves.toMatchObject({ budgetScope: "shadow" });
+    expect(budgetUpdate).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: "task-1",
+        shadowBudgetCallCount: 1,
+        shadowBudgetReservedIn: 2,
+        shadowBudgetReservedOut: 3,
+      }),
+      data: {
+        shadowBudgetCallCount: { increment: 1 },
+        shadowBudgetReservedIn: { increment: 5 },
+        shadowBudgetReservedOut: { increment: 4096 },
+      },
+    });
+    expect(attemptCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ budgetScope: "shadow" }) });
+  });
+
   it("terminal_unknown 保留槽，明确 EOF 则结算预算并 CAS 释放", async () => {
     const attemptUpdate = vi.fn().mockResolvedValue({ count: 1 });
     const slotUpdate = vi.fn().mockResolvedValue({ count: 1 });
@@ -171,6 +248,7 @@ describe("LLM global permits", () => {
       logicalCallId: "logical-1",
       physicalAttemptIndex: 0,
       requestId: "request-1",
+      budgetScope: "primary" as const,
       reservedInputTokens: 5,
       reservedOutputTokens: 10,
     };
@@ -278,6 +356,7 @@ describe("LLM global permits", () => {
       logicalCallId: "logical-probe",
       physicalAttemptIndex: 0,
       requestId: "request-probe",
+      budgetScope: "primary",
       reservedInputTokens: 5,
       reservedOutputTokens: 10,
     }, {

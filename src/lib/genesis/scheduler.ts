@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { ensureGenesisTaskRunning } from "./task-runner";
+import { ensureGenesisShadowJobRunning } from "./v2/shadow-runner";
 
 const POLL_INTERVAL_MS = 2_000;
 let scanPromise: Promise<void> | null = null;
@@ -35,6 +36,7 @@ export async function scanGenesisJobs(now = new Date()): Promise<void> {
   });
   const jobs = await prisma.genesisJob.findMany({
     where: {
+      engineVersion: "legacy-v1",
       status: { in: ["queued", "running"] },
       OR: [
         { status: "queued" },
@@ -47,6 +49,21 @@ export async function scanGenesisJobs(now = new Date()): Promise<void> {
     select: { genesisTaskId: true },
   });
   for (const job of jobs) ensureGenesisTaskRunning(job.genesisTaskId);
+  const shadowJobs = await prisma.genesisJob.findMany({
+    where: {
+      engineVersion: "dag-v2-shadow",
+      status: { in: ["queued", "running"] },
+      OR: [
+        { status: "queued" },
+        { status: "running", leaseExpiresAt: { lt: now } },
+      ],
+      task: { status: "completed", shadowEnabled: true, shadowStatus: { in: ["pending_legacy", "running"] } },
+    },
+    orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+    take: 20,
+    select: { id: true },
+  });
+  for (const job of shadowJobs) ensureGenesisShadowJobRunning(job.id);
 }
 
 export function wakeGenesisScheduler(): void {

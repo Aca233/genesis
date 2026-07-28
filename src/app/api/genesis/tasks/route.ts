@@ -14,6 +14,9 @@ import {
   readUtf8Body,
 } from "@/lib/genesis/limits";
 import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
+import { isGenesisV2ShadowEnabled } from "@/lib/genesis/v2/config";
+import { runDeterministicPreflight } from "@/lib/genesis/v2/preflight";
+import { GENESIS_V2_STAGE_REGISTRY } from "@/lib/genesis/v2/stage-registry";
 
 const CreateGenesisTaskSchema = z.object({
   mode: WorldModeSchema.default("pantheon"),
@@ -82,15 +85,46 @@ export const POST = withAuth(async (userId, request: Request) => {
     lorebookName: taskInput.lorebookName ?? null,
     materialSelection: taskInput.materialSelection,
   }), "utf8").digest("hex");
+  const shadowEnabled = isGenesisV2ShadowEnabled();
+  const shadowPreflight = shadowEnabled
+    ? runDeterministicPreflight({
+        mode: taskInput.mode,
+        decree: taskInput.decree,
+        lorebook: taskInput.lorebook,
+        materialSelection,
+      })
+    : null;
   const taskData = {
     ...taskInput,
+    shadowEnabled,
+    shadowStatus: shadowEnabled ? "pending_legacy" : "disabled",
+    ...(shadowPreflight ? {
+      shadowPreflight: shadowPreflight as unknown as Prisma.InputJsonValue,
+    } : {}),
+    shadowPreflightHash: shadowPreflight?.preflightHash,
+    shadowBudgetMaxCalls: shadowPreflight?.budgetPlan.maxCalls ?? 5,
+    shadowBudgetMaxInput: shadowPreflight?.budgetPlan.maxInputTokens ?? 120_000,
+    shadowBudgetMaxOutput: shadowPreflight?.budgetPlan.maxOutputTokens ?? 30_000,
     jobs: {
-      create: {
-        userId,
-        nodeKey: "legacy-world-deck",
-        engineVersion: "legacy-v1",
-        inputHash: requestHash,
-      },
+      create: [
+        {
+          userId,
+          nodeKey: "legacy-world-deck",
+          engineVersion: "legacy-v1",
+          inputHash: requestHash,
+        },
+        ...(shadowEnabled ? GENESIS_V2_STAGE_REGISTRY.map((stage) => ({
+          userId,
+          nodeKey: `shadow:${stage.id}`,
+          engineVersion: "dag-v2-shadow",
+          priority: -100,
+          status: "queued",
+          dependencyKeys: stage.dependencies.map((dependency) => `shadow:${dependency}`),
+          inputHash: shadowPreflight!.preflightHash,
+          estimatedTokens: shadowPreflight!.budgetPlan.stages
+            .find((budget) => budget.stage === stage.id)?.maxOutputTokens,
+        })) : []),
+      ],
     },
     outboxEvents: {
       create: {
