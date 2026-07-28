@@ -5,6 +5,14 @@ import { adapters } from "./adapters";
 import { buildPromptCachePlan, normalizedEndpointKey } from "./cache";
 import { cacheCapabilitySnapshot } from "./cache-capabilities";
 import {
+  classifyTransportFailure,
+  classifyTransportSuccess,
+  safeTransportError,
+  type TerminalEvidenceType,
+  type TransportKind,
+  type TransportOutcome,
+} from "./transport";
+import {
   ModelSlotSchema,
   type CompletionRequest,
   type ModelSlot,
@@ -67,7 +75,9 @@ export function isTransientLlmError(error: unknown): boolean {
 }
 
 function describeError(error: unknown): Error {
+  const safeError = safeTransportError(error);
   const message = error instanceof Error ? error.message : String(error);
+  if (safeError.message !== message) return safeError;
   if (isNetworkError(message) && !/^HTTP \d/.test(message)) {
     return new Error(`与模型端点的连接中断（${message}）——多为中转站在长响应中途掐断连接。已自动重试仍失败，可稍后再试或换用更稳的端点/模型。`);
   }
@@ -94,6 +104,14 @@ type CallLog = {
   agentRunId?: string;
   /** 运行内轮号:0 = 首轮请求,1+ = 后续轮,按落库顺序递增(F5 可观测)。 */
   agentCallIndex?: number;
+  /** Every physical Provider request for one Gateway call shares this ID. */
+  logicalCallId?: string;
+  /** Zero-based physical Provider request index within logicalCallId. */
+  physicalAttemptIndex?: number;
+  transportKind?: TransportKind;
+  transportOutcome?: TransportOutcome;
+  terminalEvidence?: TerminalEvidenceType;
+  stableErrorCode?: string | null;
   startedAt: number;
   ok: boolean;
   error?: string;
@@ -125,6 +143,12 @@ async function logCall(log: CallLog) {
         stablePrefixHash: log.stablePrefixHash ?? null,
         agentRunId: log.agentRunId ?? null,
         agentCallIndex: log.agentCallIndex ?? null,
+        logicalCallId: log.logicalCallId ?? null,
+        physicalAttemptIndex: log.physicalAttemptIndex ?? null,
+        transportKind: log.transportKind ?? null,
+        transportOutcome: log.transportOutcome ?? null,
+        terminalEvidence: log.terminalEvidence ?? null,
+        stableErrorCode: log.stableErrorCode ?? null,
       },
     });
   } catch {
@@ -132,17 +156,53 @@ async function logCall(log: CallLog) {
   }
 }
 
-type RunLogBase = Omit<CallLog, "ok" | "error" | "usage" | "cacheRequested" | "cacheFallback" | "agentRunId" | "agentCallIndex">;
-type RunLogEntry = Pick<CallLog, "ok" | "error" | "usage" | "cacheRequested" | "cacheFallback">;
+type RunLogBase = Omit<CallLog,
+  | "startedAt"
+  | "ok"
+  | "error"
+  | "usage"
+  | "cacheRequested"
+  | "cacheFallback"
+  | "agentRunId"
+  | "agentCallIndex"
+  | "logicalCallId"
+  | "physicalAttemptIndex"
+  | "transportKind"
+  | "transportOutcome"
+  | "terminalEvidence"
+  | "stableErrorCode"
+>;
+type RunLogEntry = Pick<CallLog,
+  | "startedAt"
+  | "ok"
+  | "error"
+  | "usage"
+  | "cacheRequested"
+  | "cacheFallback"
+  | "transportKind"
+  | "transportOutcome"
+  | "terminalEvidence"
+  | "stableErrorCode"
+>;
 
 /**
  * 一条业务请求(含全部续写接力/断点续传/非流式回退轮)共享同一 agentRunId;
  * agentCallIndex 按落库顺序从 0 递增,使「一次请求发了几轮、每轮读/写了多少缓存」可归因。
  */
 function createRunLogger(base: RunLogBase): (entry: RunLogEntry) => Promise<void> {
-  const agentRunId = randomUUID();
-  let agentCallIndex = 0;
-  return (entry) => logCall({ ...base, agentRunId, agentCallIndex: agentCallIndex++, ...entry });
+  const logicalCallId = randomUUID();
+  let physicalAttemptIndex = 0;
+  return (entry) => {
+    const index = physicalAttemptIndex++;
+    return logCall({
+      ...base,
+      agentRunId: logicalCallId,
+      agentCallIndex: index,
+      logicalCallId,
+      physicalAttemptIndex: index,
+      ...entry,
+    });
+  };
 }
 
 type CollectedStream = {
@@ -153,28 +213,102 @@ type CollectedStream = {
   truncated: boolean;
 };
 
+type CompletedCall = Awaited<ReturnType<(typeof adapters)[keyof typeof adapters]["complete"]>>;
+
 async function collectStream(
   adapter: (typeof adapters)[keyof typeof adapters],
   slot: ModelSlot,
   req: CompletionRequest,
   apiKey: string,
+  logPhysicalCall: (entry: RunLogEntry) => Promise<void>,
+  cachePlanned: boolean,
 ): Promise<CollectedStream> {
+  const startedAt = Date.now();
   let text = "";
   let usage: NormalizedUsage | undefined;
   let cacheRequested = false;
   let cacheFallback = false;
   let truncated = false;
-  for await (const chunk of adapter.stream(slot, req, apiKey)) {
-    if (chunk.type === "text") text += chunk.text;
-    if (chunk.type === "usage") {
-      usage = chunk.usage;
-      cacheRequested = chunk.cacheRequested;
-      cacheFallback = chunk.cacheFallback;
-      truncated = chunk.truncated ?? false;
+  try {
+    for await (const chunk of adapter.stream(slot, req, apiKey)) {
+      if (chunk.type === "text") text += chunk.text;
+      if (chunk.type === "usage") {
+        usage = chunk.usage;
+        cacheRequested = chunk.cacheRequested;
+        cacheFallback = chunk.cacheFallback;
+        truncated = chunk.truncated ?? false;
+      }
     }
+    if (!text.trim()) throw new Error("流式响应为空");
+    const transport = classifyTransportSuccess("stream", truncated);
+    await logPhysicalCall({
+      startedAt,
+      ok: true,
+      usage,
+      cacheRequested,
+      cacheFallback,
+      transportKind: "stream",
+      transportOutcome: transport.outcome,
+      terminalEvidence: transport.terminalEvidence,
+      stableErrorCode: transport.stableErrorCode,
+    });
+    return { text, usage, cacheRequested, cacheFallback, truncated };
+  } catch (error) {
+    const failure = classifyTransportFailure(error);
+    await logPhysicalCall({
+      startedAt,
+      ok: false,
+      error: failure.errorDetails,
+      usage,
+      cacheRequested: cacheRequested || cachePlanned,
+      cacheFallback,
+      transportKind: "stream",
+      transportOutcome: failure.outcome,
+      terminalEvidence: failure.terminalEvidence,
+      stableErrorCode: failure.stableErrorCode,
+    });
+    throw error;
   }
-  if (!text.trim()) throw new Error("流式响应为空");
-  return { text, usage, cacheRequested, cacheFallback, truncated };
+}
+
+async function collectCompletion(
+  adapter: (typeof adapters)[keyof typeof adapters],
+  slot: ModelSlot,
+  req: CompletionRequest,
+  apiKey: string,
+  logPhysicalCall: (entry: RunLogEntry) => Promise<void>,
+  cachePlanned: boolean,
+): Promise<CompletedCall> {
+  const startedAt = Date.now();
+  try {
+    const result = await adapter.complete(slot, req, apiKey);
+    const transport = classifyTransportSuccess("complete", result.truncated ?? false);
+    await logPhysicalCall({
+      startedAt,
+      ok: true,
+      usage: result.usage,
+      cacheRequested: result.cacheRequested,
+      cacheFallback: result.cacheFallback,
+      transportKind: "complete",
+      transportOutcome: transport.outcome,
+      terminalEvidence: transport.terminalEvidence,
+      stableErrorCode: transport.stableErrorCode,
+    });
+    return result;
+  } catch (error) {
+    const failure = classifyTransportFailure(error);
+    await logPhysicalCall({
+      startedAt,
+      ok: false,
+      error: failure.errorDetails,
+      cacheRequested: cachePlanned,
+      transportKind: "complete",
+      transportOutcome: failure.outcome,
+      terminalEvidence: failure.terminalEvidence,
+      stableErrorCode: failure.stableErrorCode,
+    });
+    throw error;
+  }
 }
 
 // ───────────── 输出上限续写拼接:让 4096 上限的通道也能完成长文生成 ─────────────
@@ -267,7 +401,6 @@ export async function complete(
 ): Promise<string> {
   const { slot, apiKey, slotName: used } = await resolveSlot(slotName, req.userId);
   const adapter = adapters[slot.provider];
-  const startedAt = Date.now();
   const plan = buildPromptCachePlan(slot, req);
   const logRound = createRunLogger({
     task: req.task,
@@ -277,37 +410,42 @@ export async function complete(
     userId: req.userId,
     endpoint: normalizedEndpointKey(slot),
     stablePrefixHash: plan.key,
-    startedAt,
   });
 
   /** 需要完整输出时,对截断结果做续写接力;超过轮数上限才判失败。 */
   const stitchStreamed = async (): Promise<string> => {
-    let result = await collectStream(adapter, slot, req, apiKey);
-    await logRound({ ok: true, usage: result.usage,
-      cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+    let result = await collectStream(adapter, slot, req, apiKey, logRound, plan.enabled);
     if (!req.failOnTruncation) return result.text;
     let text = result.text;
     for (let round = 0; needsContinuation(req, result.truncated, text); round += 1) {
       if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
-      result = await collectStream(adapter, slot, continuationRequest(req, text), apiKey);
-      await logRound({ ok: true, usage: result.usage,
-        cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+      result = await collectStream(
+        adapter,
+        slot,
+        continuationRequest(req, text),
+        apiKey,
+        logRound,
+        plan.enabled,
+      );
       text += trimOverlap(text, result.text);
     }
     return text;
   };
 
   const stitchCompleted = async (): Promise<string> => {
-    let result = await adapter.complete(slot, req, apiKey);
-    await logRound({ ok: true, usage: result.usage,
-      cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+    let result = await collectCompletion(adapter, slot, req, apiKey, logRound, plan.enabled);
     if (!req.failOnTruncation) return result.text;
     let text = result.text;
     for (let round = 0; needsContinuation(req, result.truncated, text); round += 1) {
       if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
-      result = await adapter.complete(slot, continuationRequest(req, text), apiKey);
-      await logRound({ ok: true, usage: result.usage,
-        cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+      result = await collectCompletion(
+        adapter,
+        slot,
+        continuationRequest(req, text),
+        apiKey,
+        logRound,
+        plan.enabled,
+      );
       text += trimOverlap(text, result.text);
     }
     return text;
@@ -331,15 +469,10 @@ export async function complete(
       return await stitchCompleted();
     } catch (fallbackError) {
       const finalError = lastError ?? fallbackError;
-      const message = finalError instanceof Error ? finalError.message : String(finalError);
-      // 失败轮也记录缓存意图:plan.enabled 即该请求本会携带缓存标记
-      await logRound({ ok: false, error: message, cacheRequested: plan.enabled });
       throw describeError(finalError);
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : String(lastError);
-  await logRound({ ok: false, error: message, cacheRequested: plan.enabled });
   throw describeError(lastError);
 }
 
@@ -351,7 +484,6 @@ export async function* stream(
 ): AsyncGenerator<StreamChunk> {
   const { slot, apiKey, slotName: used } = await resolveSlot(slotName, req.userId);
   const adapter = adapters[slot.provider];
-  const startedAt = Date.now();
   const plan = buildPromptCachePlan(slot, req);
   const logRound = createRunLogger({
     task: req.task,
@@ -361,13 +493,13 @@ export async function* stream(
     userId: req.userId,
     endpoint: normalizedEndpointKey(slot),
     stablePrefixHash: plan.key,
-    startedAt,
   });
 
   try {
     let accumulated = "";
     let truncated = false;
     const runRound = async function* (roundReq: CompletionRequest, overlapBase: string) {
+      const startedAt = Date.now();
       let usage: NormalizedUsage | undefined;
       let cacheRequested = false;
       let cacheFallback = false;
@@ -375,41 +507,69 @@ export async function* stream(
       truncated = false;
       // 接缝缓冲:续写轮开头可能与已产出结尾重叠,先攒足 400 字符做去重
       let seamBuffer: string | null = overlapBase ? "" : null;
-      for await (const chunk of adapter.stream(slot, roundReq, apiKey, options)) {
-        if (chunk.type === "usage") {
-          usage = chunk.usage;
-          cacheRequested = chunk.cacheRequested;
-          cacheFallback = chunk.cacheFallback;
-          truncated = chunk.truncated ?? false;
-        } else if (chunk.type === "text") {
-          if (chunk.text) receivedText = true;
-          if (seamBuffer !== null) {
-            seamBuffer += chunk.text;
-            if (seamBuffer.length >= 400) {
-              const deduped = trimOverlap(overlapBase, seamBuffer);
-              seamBuffer = null;
-              if (deduped) {
-                accumulated += deduped;
-                yield { type: "text", text: deduped } as StreamChunk;
+      try {
+        for await (const chunk of adapter.stream(slot, roundReq, apiKey, options)) {
+          if (chunk.type === "usage") {
+            usage = chunk.usage;
+            cacheRequested = chunk.cacheRequested;
+            cacheFallback = chunk.cacheFallback;
+            truncated = chunk.truncated ?? false;
+          } else if (chunk.type === "text") {
+            if (chunk.text) receivedText = true;
+            if (seamBuffer !== null) {
+              seamBuffer += chunk.text;
+              if (seamBuffer.length >= 400) {
+                const deduped = trimOverlap(overlapBase, seamBuffer);
+                seamBuffer = null;
+                if (deduped) {
+                  accumulated += deduped;
+                  yield { type: "text", text: deduped } as StreamChunk;
+                }
               }
+            } else {
+              accumulated += chunk.text;
+              yield chunk;
             }
           } else {
-            accumulated += chunk.text;
             yield chunk;
           }
-        } else {
-          yield chunk;
         }
-      }
-      if (!receivedText) throw new Error("流式响应为空");
-      if (seamBuffer !== null && seamBuffer) {
-        const deduped = trimOverlap(overlapBase, seamBuffer);
-        if (deduped) {
-          accumulated += deduped;
-          yield { type: "text", text: deduped } as StreamChunk;
+        if (!receivedText) throw new Error("流式响应为空");
+        if (seamBuffer !== null && seamBuffer) {
+          const deduped = trimOverlap(overlapBase, seamBuffer);
+          if (deduped) {
+            accumulated += deduped;
+            yield { type: "text", text: deduped } as StreamChunk;
+          }
         }
+        const transport = classifyTransportSuccess("stream", truncated);
+        await logRound({
+          startedAt,
+          ok: true,
+          usage,
+          cacheRequested,
+          cacheFallback,
+          transportKind: "stream",
+          transportOutcome: transport.outcome,
+          terminalEvidence: transport.terminalEvidence,
+          stableErrorCode: transport.stableErrorCode,
+        });
+      } catch (error) {
+        const failure = classifyTransportFailure(error);
+        await logRound({
+          startedAt,
+          ok: false,
+          error: failure.errorDetails,
+          usage,
+          cacheRequested: cacheRequested || plan.enabled,
+          cacheFallback,
+          transportKind: "stream",
+          transportOutcome: failure.outcome,
+          terminalEvidence: failure.terminalEvidence,
+          stableErrorCode: failure.stableErrorCode,
+        });
+        throw error;
       }
-      await logRound({ ok: true, usage, cacheRequested, cacheFallback });
     };
 
     // 断点续传:接力途中的瞬时网络错误不废弃整条流,以已累积文本为基础改走续写。
@@ -447,10 +607,7 @@ export async function* stream(
     }
   } catch (error) {
     if (options?.signal?.aborted) return;
-    const message = error instanceof Error ? error.message : String(error);
-    // 失败轮也记录缓存意图:plan.enabled 即该请求本会携带缓存标记
-    await logRound({ ok: false, error: message, cacheRequested: plan.enabled });
-    throw error;
+    throw safeTransportError(error);
   }
 }
 
@@ -460,7 +617,6 @@ export async function* stream(
  */
 export async function testSlot(slot: ModelSlot, apiKey: string, userId: string): Promise<string> {
   const adapter = adapters[slot.provider];
-  const startedAt = Date.now();
   const req: CompletionRequest = {
     task: "test",
     userId,
@@ -475,21 +631,16 @@ export async function testSlot(slot: ModelSlot, apiKey: string, userId: string):
     userId,
     endpoint: normalizedEndpointKey(slot),
     stablePrefixHash: null,
-    startedAt,
   });
   try {
     try {
-      const result = await collectStream(adapter, slot, req, apiKey);
-      await logRound({ ok: true, usage: result.usage });
+      const result = await collectStream(adapter, slot, req, apiKey, logRound, false);
       return result.text;
     } catch {
-      const result = await adapter.complete(slot, req, apiKey);
-      await logRound({ ok: true, usage: result.usage });
+      const result = await collectCompletion(adapter, slot, req, apiKey, logRound, false);
       return result.text;
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await logRound({ ok: false, error: message });
-    throw error;
+    throw safeTransportError(error);
   }
 }

@@ -147,6 +147,16 @@ describe("prompt cache call logging", () => {
     expect(second.agentRunId).toBe(first.agentRunId);
     expect(first.agentCallIndex).toBe(0);
     expect(second.agentCallIndex).toBe(1);
+    expect(first).toEqual(expect.objectContaining({
+      transportOutcome: "truncated",
+      terminalEvidence: "stream_eof",
+      stableErrorCode: "OUTPUT_TRUNCATED",
+    }));
+    expect(second).toEqual(expect.objectContaining({
+      transportOutcome: "success",
+      terminalEvidence: "stream_eof",
+      stableErrorCode: null,
+    }));
   });
 
   it("records cache intent and run metadata on failed rounds", async () => {
@@ -196,6 +206,104 @@ describe("complete transport attempts", () => {
 
     expect(mocks.stream).toHaveBeenCalledTimes(1);
     expect(mocks.complete).not.toHaveBeenCalled();
+  });
+
+  it("每次流式重试都写入独立物理调用行", async () => {
+    mocks.stream
+      .mockImplementationOnce(async function* () {
+        throw new Error("terminated");
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: "recovered" };
+        yield { type: "done" };
+      });
+
+    await expect(complete("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      messages: [{ role: "user", content: "create" }],
+    }, { maxAttempts: 2, allowFallback: false })).resolves.toBe("recovered");
+
+    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(2);
+    const rows = mocks.llmCallCreate.mock.calls.map(([call]) => call.data);
+    expect(rows.map((row) => row.physicalAttemptIndex)).toEqual([0, 1]);
+    expect(rows[0].logicalCallId).toBe(rows[1].logicalCallId);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      ok: false,
+      transportOutcome: "network_terminated",
+      terminalEvidence: "terminal_unknown",
+      stableErrorCode: "NETWORK_TERMINATED",
+    }));
+    expect(rows[1]).toEqual(expect.objectContaining({
+      ok: true,
+      transportOutcome: "success",
+      terminalEvidence: "stream_eof",
+      stableErrorCode: null,
+    }));
+  });
+
+  it("兼容性非流式回落作为同一逻辑调用的下一次物理请求记录", async () => {
+    mocks.stream.mockImplementationOnce(async function* () {
+      throw new Error("HTTP 401: bad key");
+    });
+    mocks.complete.mockResolvedValueOnce({
+      text: "fallback response",
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheWriteTokens: null },
+      cacheRequested: false,
+      cacheFallback: false,
+      truncated: false,
+    });
+
+    await expect(complete("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      messages: [{ role: "user", content: "create" }],
+    }, { maxAttempts: 1, allowFallback: true })).resolves.toBe("fallback response");
+
+    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(2);
+    const rows = mocks.llmCallCreate.mock.calls.map(([call]) => call.data);
+    expect(rows.map((row) => row.physicalAttemptIndex)).toEqual([0, 1]);
+    expect(rows[0].logicalCallId).toBe(rows[1].logicalCallId);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      ok: false,
+      transportOutcome: "http_error",
+      stableErrorCode: "HTTP_ERROR",
+    }));
+    expect(rows[1]).toEqual(expect.objectContaining({
+      ok: true,
+      transportKind: "complete",
+      transportOutcome: "success",
+      terminalEvidence: "response_complete",
+    }));
+  });
+
+  it("504 页面不会原样落库或返回给调用方", async () => {
+    const raw = 'HTTP 504: <html><head><title>504 Gateway Time-out</title></head><body>openresty</body></html>';
+    mocks.stream.mockImplementationOnce(async function* () {
+      throw new Error(raw);
+    });
+
+    let rejected: Error | undefined;
+    try {
+      await complete("narrative", {
+        task: "genesis",
+        userId: "test-user",
+        messages: [{ role: "user", content: "create" }],
+      }, { maxAttempts: 1, allowFallback: false });
+    } catch (error) {
+      rejected = error as Error;
+    }
+
+    expect(rejected?.message).toBe("上游模型服务超时（HTTP 504）");
+    const row = mocks.llmCallCreate.mock.calls[0][0].data;
+    expect(row).toEqual(expect.objectContaining({
+      transportOutcome: "upstream_timeout",
+      terminalEvidence: "terminal_unknown",
+      stableErrorCode: "UPSTREAM_TIMEOUT",
+      error: "上游模型服务超时（HTTP 504）",
+    }));
+    expect(JSON.stringify(row)).not.toContain("<html>");
+    expect(JSON.stringify(row)).not.toContain("openresty");
   });
 });
 
@@ -402,6 +510,15 @@ describe("输出上限续写接力", () => {
 
     expect(text).toBe("{\"ok\":true}");
     expect(mocks.stream).toHaveBeenCalledTimes(2);
+    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(2);
+    const rows = mocks.llmCallCreate.mock.calls.map(([call]) => call.data);
+    expect(rows.map((row) => row.physicalAttemptIndex)).toEqual([0, 1]);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      ok: false,
+      transportOutcome: "empty_response",
+      terminalEvidence: "stream_eof",
+      stableErrorCode: "EMPTY_RESPONSE",
+    }));
   });
 
   it("stream: 连续截断超过轮数上限时报可操作错误", async () => {

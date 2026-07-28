@@ -686,53 +686,80 @@ model Settings {
 }
 
 model LlmCall {
-  id               String   @id @default(cuid())
-  task             String // narrative | genesis | settlement | reroll | pantheon | extract | chronicle | test
-  slot             String // narrative | backstage
-  provider         String?
-  model            String?
-  durationMs       Int      @map("duration_ms")
-  ok               Boolean
-  error            String?
-  inputTokens      Int?     @map("input_tokens")
-  outputTokens     Int?     @map("output_tokens")
-  cacheReadTokens  Int?     @map("cache_read_tokens")
-  cacheWriteTokens Int?     @map("cache_write_tokens")
-  cacheRequested   Boolean  @default(false) @map("cache_requested")
-  cacheFallback    Boolean  @default(false) @map("cache_fallback")
+  id                   String   @id @default(cuid())
+  task                 String // narrative | genesis | settlement | reroll | pantheon | extract | chronicle | test
+  slot                 String // narrative | backstage
+  provider             String?
+  model                String?
+  durationMs           Int      @map("duration_ms")
+  ok                   Boolean
+  error                String?
+  inputTokens          Int?     @map("input_tokens")
+  outputTokens         Int?     @map("output_tokens")
+  cacheReadTokens      Int?     @map("cache_read_tokens")
+  cacheWriteTokens     Int?     @map("cache_write_tokens")
+  cacheRequested       Boolean  @default(false) @map("cache_requested")
+  cacheFallback        Boolean  @default(false) @map("cache_fallback")
   /**
    * 端点缓存能力降级快照(能力位 + 最近一次降级原因);全部完好为 NULL(F8 可观测)
    */
-  cacheCapability  String?  @map("cache_capability")
+  cacheCapability      String?  @map("cache_capability")
   /**
    * 缓存前缀指纹(buildPromptCachePlan().key);同 hash 短窗口内第 2+ 次调用「应命中」(F5 可观测)
    */
-  stablePrefixHash String?  @map("stable_prefix_hash")
+  stablePrefixHash     String?  @map("stable_prefix_hash")
   /**
    * 一条业务请求(含全部续写/断点续传轮)共享的运行 ID(F5 可观测)
    */
-  agentRunId       String?  @map("agent_run_id")
+  agentRunId           String?  @map("agent_run_id")
   /**
    * 运行内轮号:0 = 首轮请求,1+ = 续写接力/回退轮(F5 可观测)
    */
-  agentCallIndex   Int?     @map("agent_call_index")
-  dynamicTokens    Int?     @map("dynamic_tokens")
-  toolResultTokens Int?     @map("tool_result_tokens")
-  cacheLayer       String?  @map("cache_layer")
+  agentCallIndex       Int?     @map("agent_call_index")
+  /**
+   * One business-level Gateway request shared by every physical Provider request.
+   */
+  logicalCallId        String?  @map("logical_call_id")
+  /**
+   * Zero-based index of the real Provider request within logicalCallId.
+   */
+  physicalAttemptIndex Int?     @map("physical_attempt_index")
+  /**
+   * stream | complete
+   */
+  transportKind        String?  @map("transport_kind")
+  /**
+   * Stable transport result classification; distinct from business validation.
+   */
+  transportOutcome     String?  @map("transport_outcome")
+  /**
+   * Evidence proving what is known about Provider-side termination.
+   */
+  terminalEvidence     String?  @map("terminal_evidence")
+  /**
+   * Stable machine-readable failure code; error remains the bounded redacted detail.
+   */
+  stableErrorCode      String?  @map("stable_error_code")
+  dynamicTokens        Int?     @map("dynamic_tokens")
+  toolResultTokens     Int?     @map("tool_result_tokens")
+  cacheLayer           String?  @map("cache_layer")
   /**
    * 归因:发起调用的用户(多租户 Phase A);历史行保持 NULL 不回填
    */
-  userId           String?  @map("user_id")
+  userId               String?  @map("user_id")
   /**
    * 归因:调用所属世界(设计 §3.1 顺手可加);无世界语境的调用(test 等)为 NULL
    */
-  worldId          String?  @map("world_id")
-  createdAt        DateTime @default(now()) @map("created_at")
+  worldId              String?  @map("world_id")
+  createdAt            DateTime @default(now()) @map("created_at")
 
+  @@unique([logicalCallId, physicalAttemptIndex])
   @@index([createdAt])
   @@index([task, createdAt])
   @@index([stablePrefixHash])
   @@index([agentRunId])
+  @@index([logicalCallId])
+  @@index([transportOutcome, createdAt])
   @@index([userId, createdAt])
   @@map("llm_calls")
 }
