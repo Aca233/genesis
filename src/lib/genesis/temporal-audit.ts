@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { completeStructured } from "@/lib/llm/structured";
-import type { SlotName } from "@/lib/llm/types";
+import type { CompletionRequest, SlotName } from "@/lib/llm/types";
 
 /**
  * AI 语义审计（时间一致设计稿 §10.4，阶段 2 报告型）。
@@ -94,6 +94,7 @@ type AuditDeps = {
       task: "extract";
       /** 发起审计的用户(多租户 Phase A 归因)。 */
       userId: string;
+      owner?: CompletionRequest["owner"];
       system: string;
       user: string;
       schema: z.ZodType<TemporalAuditResult>;
@@ -114,7 +115,7 @@ type AuditDeps = {
  */
 export async function auditTemporalSemantics(
   deck: TemporalAuditDeckView,
-  opts: { userId: string; slot?: SlotName; lorebookExcerpts?: string },
+  opts: { userId: string; slot?: SlotName; lorebookExcerpts?: string; owner?: CompletionRequest["owner"] },
   deps: AuditDeps = { complete: completeStructured },
 ): Promise<TemporalAuditResult | null> {
   const anchor = deck.temporalAnchor;
@@ -124,6 +125,7 @@ export async function auditTemporalSemantics(
     const result = await deps.complete(opts.slot ?? "backstage", {
       task: "extract",
       userId: opts.userId,
+      owner: opts.owner,
       system: TEMPORAL_AUDIT_SYSTEM,
       user: temporalAuditUserPrompt(deck, opts.lorebookExcerpts),
       schema: TemporalAuditResultSchema,

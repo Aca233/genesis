@@ -128,6 +128,14 @@ model GenesisTask {
   requestHash       String?         @map("request_hash")
   engineVersion     String          @default("legacy-v1") @map("engine_version")
   aggregateVersion  Int             @default(1) @map("aggregate_version")
+  budgetMaxCalls    Int             @default(12) @map("budget_max_calls")
+  budgetMaxInput    Int             @default(500000) @map("budget_max_input_tokens")
+  budgetMaxOutput   Int             @default(65536) @map("budget_max_output_tokens")
+  budgetCallCount   Int             @default(0) @map("budget_call_count")
+  budgetReservedIn  Int             @default(0) @map("budget_reserved_input_tokens")
+  budgetReservedOut Int             @default(0) @map("budget_reserved_output_tokens")
+  budgetSettledIn   Int             @default(0) @map("budget_settled_input_tokens")
+  budgetSettledOut  Int             @default(0) @map("budget_settled_output_tokens")
   decree            String
   lorebook          Json?
   lorebookName      String?         @map("lorebook_name")
@@ -150,6 +158,7 @@ model GenesisTask {
   world             World?          @relation(fields: [worldId], references: [id], onDelete: SetNull)
   jobs              GenesisJob[]
   outboxEvents      GenesisOutbox[]
+  llmAttempts       LlmAttempt[]
   createdAt         DateTime        @default(now()) @map("created_at")
   updatedAt         DateTime        @updatedAt @map("updated_at")
 
@@ -161,33 +170,138 @@ model GenesisTask {
 }
 
 model GenesisJob {
-  id                String      @id @default(cuid())
-  userId            String      @map("user_id")
-  genesisTaskId     String      @map("genesis_task_id")
-  task              GenesisTask @relation(fields: [genesisTaskId], references: [id], onDelete: Cascade)
-  nodeKey           String      @map("node_key")
-  engineVersion     String      @map("engine_version")
-  priority          Int         @default(0)
-  status            String      @default("queued")
-  dependencyKeys    String[]    @default([]) @map("dependency_keys")
-  inputHash         String?     @map("input_hash")
-  leaseToken        String?     @map("lease_token")
-  leaseEpoch        Int         @default(0) @map("lease_epoch")
-  leaseExpiresAt    DateTime?   @map("lease_expires_at")
-  attempt           Int         @default(0)
-  estimatedDuration Int?        @map("estimated_duration")
-  estimatedTokens   Int?        @map("estimated_tokens")
-  startedAt         DateTime?   @map("started_at")
-  completedAt       DateTime?   @map("completed_at")
+  id                String       @id @default(cuid())
+  userId            String       @map("user_id")
+  genesisTaskId     String       @map("genesis_task_id")
+  task              GenesisTask  @relation(fields: [genesisTaskId], references: [id], onDelete: Cascade)
+  nodeKey           String       @map("node_key")
+  engineVersion     String       @map("engine_version")
+  priority          Int          @default(0)
+  status            String       @default("queued")
+  dependencyKeys    String[]     @default([]) @map("dependency_keys")
+  inputHash         String?      @map("input_hash")
+  leaseToken        String?      @map("lease_token")
+  leaseEpoch        Int          @default(0) @map("lease_epoch")
+  leaseExpiresAt    DateTime?    @map("lease_expires_at")
+  attempt           Int          @default(0)
+  estimatedDuration Int?         @map("estimated_duration")
+  estimatedTokens   Int?         @map("estimated_tokens")
+  startedAt         DateTime?    @map("started_at")
+  completedAt       DateTime?    @map("completed_at")
   error             String?
-  createdAt         DateTime    @default(now()) @map("created_at")
-  updatedAt         DateTime    @updatedAt @map("updated_at")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  llmAttempts       LlmAttempt[]
 
   @@unique([genesisTaskId, nodeKey])
   @@index([status, priority, createdAt])
   @@index([userId, status])
   @@index([leaseExpiresAt])
   @@map("genesis_jobs")
+}
+
+model LlmSlot {
+  slotNo           Int         @id @map("slot_no")
+  currentAttemptId String?     @unique @map("current_attempt_id")
+  slotEpoch        Int         @default(0) @map("slot_epoch")
+  boundAt          DateTime?   @map("bound_at")
+  currentAttempt   LlmAttempt? @relation("CurrentLlmSlotAttempt", fields: [currentAttemptId], references: [id], onDelete: Restrict)
+
+  @@map("llm_slots")
+}
+
+model LlmAttempt {
+  id                   String       @id @default(cuid())
+  logicalCallId        String       @map("logical_call_id")
+  physicalAttemptIndex Int          @map("physical_attempt_index")
+  usedSlotNo           Int          @map("used_slot_no")
+  slotEpoch            Int          @map("slot_epoch")
+  cacheIsolationDomain String       @map("cache_isolation_domain")
+  endpointKey          String       @map("endpoint_key")
+  model                String
+  taskClass            String       @map("task_class")
+  ownerKind            String       @map("owner_kind")
+  ownerId              String       @map("owner_id")
+  genesisTaskId        String?      @map("genesis_task_id")
+  genesisTask          GenesisTask? @relation(fields: [genesisTaskId], references: [id], onDelete: SetNull)
+  genesisJobId         String?      @map("genesis_job_id")
+  genesisJob           GenesisJob?  @relation(fields: [genesisJobId], references: [id], onDelete: SetNull)
+  userId               String       @map("user_id")
+  leaseEpoch           Int?         @map("lease_epoch")
+  state                String       @default("reserved")
+  transportKind        String       @map("transport_kind")
+  transportOutcome     String?      @map("transport_outcome")
+  terminalEvidence     String?      @map("terminal_evidence")
+  stableErrorCode      String?      @map("stable_error_code")
+  reservedInputTokens  Int          @map("reserved_input_tokens")
+  reservedOutputTokens Int          @map("reserved_output_tokens")
+  settledInputTokens   Int?         @map("settled_input_tokens")
+  settledOutputTokens  Int?         @map("settled_output_tokens")
+  inputTokens          Int?         @map("input_tokens")
+  outputTokens         Int?         @map("output_tokens")
+  cacheReadTokens      Int?         @map("cache_read_tokens")
+  cacheWriteTokens     Int?         @map("cache_write_tokens")
+  acquiredAt           DateTime     @default(now()) @map("acquired_at")
+  ownerLeaseExpiresAt  DateTime?    @map("owner_lease_expires_at")
+  hardCallDeadline     DateTime?    @map("hard_call_deadline")
+  heartbeatAt          DateTime?    @map("heartbeat_at")
+  providerStartedAt    DateTime?    @map("provider_started_at")
+  providerFinishedAt   DateTime?    @map("provider_finished_at")
+  releasedAt           DateTime?    @map("released_at")
+  error                String?
+  currentSlot          LlmSlot?     @relation("CurrentLlmSlotAttempt")
+
+  @@unique([logicalCallId, physicalAttemptIndex])
+  @@index([state, acquiredAt])
+  @@index([endpointKey, model, taskClass, state])
+  @@index([userId, state])
+  @@index([genesisTaskId, state])
+  @@map("llm_attempts")
+}
+
+model LlmPermitRequest {
+  id                   String    @id @default(cuid())
+  logicalCallId        String    @map("logical_call_id")
+  physicalAttemptIndex Int       @map("physical_attempt_index")
+  userId               String    @map("user_id")
+  taskClass            String    @map("task_class")
+  priority             Int
+  endpointKey          String    @map("endpoint_key")
+  model                String
+  cacheIsolationDomain String    @map("cache_isolation_domain")
+  state                String    @default("waiting")
+  requestedAt          DateTime  @default(now()) @map("requested_at")
+  acquiredAt           DateTime? @map("acquired_at")
+  cancelledAt          DateTime? @map("cancelled_at")
+
+  @@unique([logicalCallId, physicalAttemptIndex])
+  @@index([state, priority, requestedAt])
+  @@index([userId, state])
+  @@map("llm_permit_requests")
+}
+
+model LlmFairness {
+  userId        String    @id @map("user_id")
+  virtualFinish Float     @default(0) @map("virtual_finish")
+  lastGrantedAt DateTime? @map("last_granted_at")
+
+  @@map("llm_fairness")
+}
+
+model LlmCircuit {
+  circuitKey      String    @id @map("circuit_key")
+  endpointKey     String    @map("endpoint_key")
+  model           String
+  taskClass       String    @map("task_class")
+  state           String    @default("closed")
+  failureCount    Int       @default(0) @map("failure_count")
+  openUntil       DateTime? @map("open_until")
+  probeRequestId  String?   @map("probe_request_id")
+  lastFailureCode String?   @map("last_failure_code")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([state, openUntil])
+  @@map("llm_circuits")
 }
 
 model GenesisOutbox {

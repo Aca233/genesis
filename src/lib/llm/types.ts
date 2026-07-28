@@ -78,6 +78,15 @@ export type CompletionRequest = {
    * 适配器忽略该字段。Phase A 入口一律传 "local"，后续波换真实会话用户。
    */
   userId: string;
+  /** 持久调用归属；创世 Worker 用它把许可证、预算和当前 Job 租约绑定。 */
+  owner?: {
+    kind: string;
+    id: string;
+    genesisTaskId?: string;
+    genesisJobId?: string;
+    leaseEpoch?: number;
+    leaseExpiresAt?: string;
+  };
   /** Enables provider prompt-cache hints when the stable prefix is large enough. */
   cache?: PromptCacheRequest;
   /**

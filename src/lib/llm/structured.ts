@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { complete } from "./gateway";
-import type { LlmTask, SlotName } from "./types";
+import type { CompletionRequest, LlmTask, SlotName } from "./types";
 
 /**
  * 结构化输出：要求模型输出 JSON，Zod 校验失败则携错误重问（×2）。
@@ -41,6 +41,7 @@ export async function completeStructured<T>(
     task: LlmTask;
     /** 发起调用的用户(多租户 Phase A 归因;槽位解析亦按此用户)。 */
     userId: string;
+    owner?: CompletionRequest["owner"];
     system: string;
     user: string;
     schema: z.ZodType<T>;
@@ -73,6 +74,7 @@ export async function completeStructured<T>(
     const text = await complete(slotName, {
       task: opts.task,
       userId: opts.userId,
+      owner: opts.owner,
       temperature: opts.temperature,
       maxTokens: opts.maxTokens,
       // 结构化输出必须完整:截断的 JSON 只会在校验层莫名失败

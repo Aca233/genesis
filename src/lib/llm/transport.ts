@@ -25,6 +25,10 @@ export type TransportFailure = {
     | "EMPTY_RESPONSE"
     | "NETWORK_TERMINATED"
     | "UPSTREAM_TIMEOUT"
+    | "AUTH_ERROR"
+    | "BALANCE_ERROR"
+    | "RATE_LIMITED"
+    | "SERVER_ERROR"
     | "HTTP_ERROR"
     | "ABORTED"
     | "OUTPUT_LIMIT_EXCEEDED"
@@ -106,6 +110,42 @@ export function classifyTransportFailure(error: unknown): TransportFailure {
     };
   }
 
+  if (status === 401 || status === 403) {
+    return {
+      outcome: "http_error",
+      terminalEvidence: "response_complete",
+      stableErrorCode: "AUTH_ERROR",
+      errorDetails: `模型端点认证失败（HTTP ${status}）`,
+    };
+  }
+
+  if (status === 402) {
+    return {
+      outcome: "http_error",
+      terminalEvidence: "response_complete",
+      stableErrorCode: "BALANCE_ERROR",
+      errorDetails: "模型端点余额不足（HTTP 402）",
+    };
+  }
+
+  if (status === 429) {
+    return {
+      outcome: "http_error",
+      terminalEvidence: "response_complete",
+      stableErrorCode: "RATE_LIMITED",
+      errorDetails: "模型端点请求过载（HTTP 429）",
+    };
+  }
+
+  if (status !== null && status >= 500) {
+    return {
+      outcome: "http_error",
+      terminalEvidence: "response_complete",
+      stableErrorCode: "SERVER_ERROR",
+      errorDetails: `模型端点服务错误（HTTP ${status}）`,
+    };
+  }
+
   if (/fetch failed|terminated|other side closed|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|socket|UND_ERR/i.test(message)) {
     return {
       outcome: "network_terminated",
@@ -118,7 +158,7 @@ export function classifyTransportFailure(error: unknown): TransportFailure {
   if (status !== null) {
     return {
       outcome: "http_error",
-      terminalEvidence: "terminal_unknown",
+      terminalEvidence: "response_complete",
       stableErrorCode: "HTTP_ERROR",
       errorDetails: /<[^>]+>/.test(message)
         ? `模型端点请求失败（HTTP ${status}）`

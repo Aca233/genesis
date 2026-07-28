@@ -14,6 +14,12 @@ import {
   type TransportOutcome,
 } from "./transport";
 import {
+  acquireLlmPermit,
+  settleLlmPermit,
+  type Permit,
+  type PermitSettlement,
+} from "./permits";
+import {
   ModelSlotSchema,
   type CompletionRequest,
   type ModelSlot,
@@ -41,6 +47,10 @@ type StreamOptions = {
 
 function completionInputBytes(req: CompletionRequest): number {
   return req.messages.reduce((total, message) => total + utf8Bytes(message.content), 0);
+}
+
+function estimatedInputTokens(req: CompletionRequest): number {
+  return Math.max(1, Math.ceil(completionInputBytes(req) / 3));
 }
 
 function assertInputLimit(req: CompletionRequest, limitBytes?: number): void {
@@ -83,6 +93,9 @@ function isNetworkError(message: string): boolean {
 }
 
 function isRetryable(error: unknown): boolean {
+  const failure = classifyTransportFailure(error);
+  if (failure.terminalEvidence === "terminal_unknown") return false;
+  if (["AUTH_ERROR", "BALANCE_ERROR"].includes(failure.stableErrorCode)) return false;
   const message = error instanceof Error ? error.message : String(error);
   if (message === "流式响应为空") return true;
   if (/HTTP (429|500|502|503|504|529)/.test(message)) return true;
@@ -92,7 +105,10 @@ function isRetryable(error: unknown): boolean {
 
 /** 供任务运行器判断：该错误是否属于值得整体重试的瞬时故障（网络断流/上游过载）。 */
 export function isTransientLlmError(error: unknown): boolean {
-  return isRetryable(error);
+  const failure = classifyTransportFailure(error);
+  return failure.terminalEvidence !== "terminal_unknown"
+    && ["EMPTY_RESPONSE", "RATE_LIMITED", "SERVER_ERROR", "HTTP_ERROR"]
+      .includes(failure.stableErrorCode);
 }
 
 function describeError(error: unknown): Error {
@@ -210,20 +226,76 @@ type RunLogEntry = Pick<CallLog,
  * 一条业务请求(含全部续写接力/断点续传/非流式回退轮)共享同一 agentRunId;
  * agentCallIndex 按落库顺序从 0 递增,使「一次请求发了几轮、每轮读/写了多少缓存」可归因。
  */
-function createRunLogger(base: RunLogBase): (entry: RunLogEntry) => Promise<void> {
+type PhysicalCallLog = {
+  logicalCallId: string;
+  physicalAttemptIndex: number;
+  finish(entry: RunLogEntry): Promise<void>;
+};
+
+type RunLogger = { begin(): PhysicalCallLog };
+
+function createRunLogger(base: RunLogBase): RunLogger {
   const logicalCallId = randomUUID();
   let physicalAttemptIndex = 0;
-  return (entry) => {
-    const index = physicalAttemptIndex++;
-    return logCall({
-      ...base,
-      agentRunId: logicalCallId,
-      agentCallIndex: index,
-      logicalCallId,
-      physicalAttemptIndex: index,
-      ...entry,
-    });
+  return {
+    begin() {
+      const index = physicalAttemptIndex++;
+      return {
+        logicalCallId,
+        physicalAttemptIndex: index,
+        finish: (entry) => logCall({
+          ...base,
+          agentRunId: logicalCallId,
+          agentCallIndex: index,
+          logicalCallId,
+          physicalAttemptIndex: index,
+          ...entry,
+        }),
+      };
+    },
   };
+}
+
+function canFallback(error: unknown): boolean {
+  const failure = classifyTransportFailure(error);
+  return failure.terminalEvidence !== "terminal_unknown"
+    && !["AUTH_ERROR", "BALANCE_ERROR"].includes(failure.stableErrorCode);
+}
+
+async function acquirePhysicalPermit(
+  logger: RunLogger,
+  transportKind: TransportKind,
+  slot: ModelSlot,
+  req: CompletionRequest,
+): Promise<{ call: PhysicalCallLog; permit: Permit; endpointKey: string }> {
+  const call = logger.begin();
+  const endpointKey = normalizedEndpointKey(slot);
+  const permit = await acquireLlmPermit({
+    logicalCallId: call.logicalCallId,
+    physicalAttemptIndex: call.physicalAttemptIndex,
+    transportKind,
+    endpointKey,
+    slot,
+    req,
+    reservedInputTokens: estimatedInputTokens(req),
+  });
+  return { call, permit, endpointKey };
+}
+
+async function settlePhysicalPermit(
+  acquired: { permit: Permit; endpointKey: string },
+  slot: ModelSlot,
+  req: CompletionRequest,
+  settlement: PermitSettlement,
+) {
+  await settleLlmPermit(
+    acquired.permit,
+    settlement,
+    acquired.endpointKey,
+    slot.model,
+    req.task,
+    req.userId,
+  );
 }
 
 type CollectedStream = {
@@ -241,11 +313,12 @@ async function collectStream(
   slot: ModelSlot,
   req: CompletionRequest,
   apiKey: string,
-  logPhysicalCall: (entry: RunLogEntry) => Promise<void>,
+  logger: RunLogger,
   cachePlanned: boolean,
   maxOutputBytes?: number,
   outputOffsetBytes = 0,
 ): Promise<CollectedStream> {
+  const acquired = await acquirePhysicalPermit(logger, "stream", slot, req);
   const startedAt = Date.now();
   const controller = new AbortController();
   let text = "";
@@ -253,6 +326,7 @@ async function collectStream(
   let cacheRequested = false;
   let cacheFallback = false;
   let truncated = false;
+  let providerTerminal = false;
   try {
     for await (const chunk of adapter.stream(slot, req, apiKey, { signal: controller.signal })) {
       if (chunk.type === "text") {
@@ -281,7 +355,14 @@ async function collectStream(
     }
     if (!text.trim()) throw new Error("流式响应为空");
     const transport = classifyTransportSuccess("stream", truncated);
-    await logPhysicalCall({
+    providerTerminal = true;
+    await settlePhysicalPermit(acquired, slot, req, {
+      transportOutcome: transport.outcome,
+      terminalEvidence: transport.terminalEvidence,
+      stableErrorCode: transport.stableErrorCode,
+      usage,
+    });
+    await acquired.call.finish({
       startedAt,
       ok: true,
       usage,
@@ -294,8 +375,16 @@ async function collectStream(
     });
     return { text, usage, cacheRequested, cacheFallback, truncated };
   } catch (error) {
+    if (providerTerminal) throw error;
     const failure = classifyTransportFailure(error);
-    await logPhysicalCall({
+    await settlePhysicalPermit(acquired, slot, req, {
+      transportOutcome: failure.outcome,
+      terminalEvidence: failure.terminalEvidence,
+      stableErrorCode: failure.stableErrorCode,
+      usage,
+      error: failure.errorDetails,
+    });
+    await acquired.call.finish({
       startedAt,
       ok: false,
       error: failure.errorDetails,
@@ -316,12 +405,14 @@ async function collectCompletion(
   slot: ModelSlot,
   req: CompletionRequest,
   apiKey: string,
-  logPhysicalCall: (entry: RunLogEntry) => Promise<void>,
+  logger: RunLogger,
   cachePlanned: boolean,
   maxOutputBytes?: number,
   outputOffsetBytes = 0,
 ): Promise<CompletedCall> {
+  const acquired = await acquirePhysicalPermit(logger, "complete", slot, req);
   const startedAt = Date.now();
+  let providerTerminal = false;
   try {
     const result = await adapter.complete(slot, req, apiKey);
     const observedBytes = outputOffsetBytes + utf8Bytes(result.text);
@@ -334,7 +425,14 @@ async function collectCompletion(
       );
     }
     const transport = classifyTransportSuccess("complete", result.truncated ?? false);
-    await logPhysicalCall({
+    providerTerminal = true;
+    await settlePhysicalPermit(acquired, slot, req, {
+      transportOutcome: transport.outcome,
+      terminalEvidence: transport.terminalEvidence,
+      stableErrorCode: transport.stableErrorCode,
+      usage: result.usage,
+    });
+    await acquired.call.finish({
       startedAt,
       ok: true,
       usage: result.usage,
@@ -347,8 +445,15 @@ async function collectCompletion(
     });
     return result;
   } catch (error) {
+    if (providerTerminal) throw error;
     const failure = classifyTransportFailure(error);
-    await logPhysicalCall({
+    await settlePhysicalPermit(acquired, slot, req, {
+      transportOutcome: failure.outcome,
+      terminalEvidence: failure.terminalEvidence,
+      stableErrorCode: failure.stableErrorCode,
+      error: failure.errorDetails,
+    });
+    await acquired.call.finish({
       startedAt,
       ok: false,
       error: failure.errorDetails,
@@ -526,7 +631,7 @@ export async function complete(
 
   if (lastError instanceof PayloadLimitError) throw lastError;
 
-  if (allowFallback) {
+  if (allowFallback && canFallback(lastError)) {
     try {
       return await stitchCompleted();
     } catch (fallbackError) {
@@ -562,6 +667,7 @@ export async function* stream(
     let accumulated = "";
     let truncated = false;
     const runRound = async function* (roundReq: CompletionRequest, overlapBase: string) {
+      const acquired = await acquirePhysicalPermit(logRound, "stream", slot, roundReq);
       const startedAt = Date.now();
       const controller = new AbortController();
       const signal = options?.signal
@@ -571,6 +677,7 @@ export async function* stream(
       let cacheRequested = false;
       let cacheFallback = false;
       let receivedText = false;
+      let providerTerminal = false;
       truncated = false;
       // 接缝缓冲:续写轮开头可能与已产出结尾重叠,先攒足 400 字符做去重
       let seamBuffer: string | null = overlapBase ? "" : null;
@@ -630,7 +737,14 @@ export async function* stream(
           }
         }
         const transport = classifyTransportSuccess("stream", truncated);
-        await logRound({
+        providerTerminal = true;
+        await settlePhysicalPermit(acquired, slot, roundReq, {
+          transportOutcome: transport.outcome,
+          terminalEvidence: transport.terminalEvidence,
+          stableErrorCode: transport.stableErrorCode,
+          usage,
+        });
+        await acquired.call.finish({
           startedAt,
           ok: true,
           usage,
@@ -642,8 +756,16 @@ export async function* stream(
           stableErrorCode: transport.stableErrorCode,
         });
       } catch (error) {
+        if (providerTerminal) throw error;
         const failure = classifyTransportFailure(error);
-        await logRound({
+        await settlePhysicalPermit(acquired, slot, roundReq, {
+          transportOutcome: failure.outcome,
+          terminalEvidence: failure.terminalEvidence,
+          stableErrorCode: failure.stableErrorCode,
+          usage,
+          error: failure.errorDetails,
+        });
+        await acquired.call.finish({
           startedAt,
           ok: false,
           error: failure.errorDetails,

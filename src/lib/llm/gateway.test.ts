@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   complete: vi.fn(),
   settingsFindUnique: vi.fn(),
   llmCallCreate: vi.fn(),
+  acquirePermit: vi.fn(),
+  settlePermit: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -22,11 +24,17 @@ vi.mock("./adapters", () => ({
     },
   },
 }));
+vi.mock("./permits", () => ({
+  acquireLlmPermit: mocks.acquirePermit,
+  settleLlmPermit: mocks.settlePermit,
+}));
 
 import { complete, isTransientLlmError, stream } from "./gateway";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.stream.mockReset();
+  mocks.complete.mockReset();
   mocks.settingsFindUnique.mockResolvedValue({
     narrativeSlot: {
       provider: "openai-compatible",
@@ -37,6 +45,17 @@ beforeEach(() => {
     backstageSlot: null,
   });
   mocks.llmCallCreate.mockResolvedValue({});
+  mocks.acquirePermit.mockImplementation((input) => Promise.resolve({
+    attemptId: `attempt-${input.physicalAttemptIndex}`,
+    slotNo: 1,
+    slotEpoch: input.physicalAttemptIndex + 1,
+    logicalCallId: input.logicalCallId,
+    physicalAttemptIndex: input.physicalAttemptIndex,
+    requestId: `request-${input.physicalAttemptIndex}`,
+    reservedInputTokens: input.reservedInputTokens,
+    reservedOutputTokens: input.req.maxTokens ?? 4096,
+  }));
+  mocks.settlePermit.mockResolvedValue(undefined);
 });
 
 describe("prompt cache call logging", () => {
@@ -185,7 +204,7 @@ describe("prompt cache call logging", () => {
 });
 
 describe("complete transport attempts", () => {
-  it("将空流视为可由任务级调度恢复的瞬时故障", () => {
+  it("空流有 EOF 终局证据，可由任务级调度恢复", () => {
     expect(isTransientLlmError(new Error("流式响应为空"))).toBe(true);
   });
 
@@ -208,41 +227,38 @@ describe("complete transport attempts", () => {
     expect(mocks.complete).not.toHaveBeenCalled();
   });
 
-  it("每次流式重试都写入独立物理调用行", async () => {
-    mocks.stream
-      .mockImplementationOnce(async function* () {
-        throw new Error("terminated");
-      })
-      .mockImplementationOnce(async function* () {
-        yield { type: "text", text: "recovered" };
-        yield { type: "done" };
-      });
+  it("终局未知的断流失败关闭端点且不启动第二个物理请求", async () => {
+    mocks.stream.mockImplementationOnce(async function* () {
+      throw new Error("terminated");
+    });
 
     await expect(complete("narrative", {
       task: "genesis",
       userId: "test-user",
       messages: [{ role: "user", content: "create" }],
-    }, { maxAttempts: 2, allowFallback: false })).resolves.toBe("recovered");
+    }, { maxAttempts: 2, allowFallback: true })).rejects.toThrow("terminated");
 
-    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(2);
+    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.stream).toHaveBeenCalledTimes(1);
+    expect(mocks.complete).not.toHaveBeenCalled();
     const rows = mocks.llmCallCreate.mock.calls.map(([call]) => call.data);
-    expect(rows.map((row) => row.physicalAttemptIndex)).toEqual([0, 1]);
-    expect(rows[0].logicalCallId).toBe(rows[1].logicalCallId);
     expect(rows[0]).toEqual(expect.objectContaining({
       ok: false,
       transportOutcome: "network_terminated",
       terminalEvidence: "terminal_unknown",
       stableErrorCode: "NETWORK_TERMINATED",
     }));
-    expect(rows[1]).toEqual(expect.objectContaining({
-      ok: true,
-      transportOutcome: "success",
-      terminalEvidence: "stream_eof",
-      stableErrorCode: null,
-    }));
+    expect(mocks.settlePermit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ terminalEvidence: "terminal_unknown" }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
-  it("兼容性非流式回落作为同一逻辑调用的下一次物理请求记录", async () => {
+  it("认证错误明确终局但不触发非流式回落", async () => {
     mocks.stream.mockImplementationOnce(async function* () {
       throw new Error("HTTP 401: bad key");
     });
@@ -258,22 +274,15 @@ describe("complete transport attempts", () => {
       task: "genesis",
       userId: "test-user",
       messages: [{ role: "user", content: "create" }],
-    }, { maxAttempts: 1, allowFallback: true })).resolves.toBe("fallback response");
+    }, { maxAttempts: 1, allowFallback: true })).rejects.toThrow("HTTP 401");
 
-    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(2);
+    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.complete).not.toHaveBeenCalled();
     const rows = mocks.llmCallCreate.mock.calls.map(([call]) => call.data);
-    expect(rows.map((row) => row.physicalAttemptIndex)).toEqual([0, 1]);
-    expect(rows[0].logicalCallId).toBe(rows[1].logicalCallId);
     expect(rows[0]).toEqual(expect.objectContaining({
       ok: false,
       transportOutcome: "http_error",
-      stableErrorCode: "HTTP_ERROR",
-    }));
-    expect(rows[1]).toEqual(expect.objectContaining({
-      ok: true,
-      transportKind: "complete",
-      transportOutcome: "success",
-      terminalEvidence: "response_complete",
+      stableErrorCode: "AUTH_ERROR",
     }));
   });
 
@@ -498,7 +507,7 @@ describe("输出上限续写接力", () => {
     expect(mocks.stream).toHaveBeenCalledTimes(1);
   });
 
-  it("stream: 接力途中瞬时网络错误断点续传,不废弃已产出文本", async () => {
+  it("stream: 终局未知时不续传", async () => {
     mocks.stream
       .mockImplementationOnce(async function* () {
         yield { type: "text", text: '{"chapter":"上卷' };
@@ -516,21 +525,17 @@ describe("输出上限续写接力", () => {
         yield { type: "done" };
       });
 
-    let text = "";
-    for await (const chunk of stream("narrative", {
+    const consume = async () => { for await (const chunk of stream("narrative", {
       task: "genesis",
       userId: "test-user",
       failOnTruncation: true,
       messages: [{ role: "user", content: "create" }],
-    })) {
-      if (chunk.type === "text") text += chunk.text;
-    }
-    // 断线轮的未交付片段不进入结果(消费者从未收到),续传轮从已确认文本接续
-    expect(text).toBe('{"chapter":"上卷下卷"}');
-    expect(mocks.stream).toHaveBeenCalledTimes(3);
+    })) void chunk; };
+    await expect(consume()).rejects.toThrow("fetch failed");
+    expect(mocks.stream).toHaveBeenCalledTimes(2);
   });
 
-  it("stream: 首字符前连接终止时在当前任务内重试", async () => {
+  it("stream: 首字符前终局未知时不重试", async () => {
     mocks.stream
       .mockImplementationOnce(async function* () {
         throw new Error("terminated");
@@ -541,18 +546,14 @@ describe("输出上限续写接力", () => {
         yield { type: "done" };
       });
 
-    let text = "";
-    for await (const chunk of stream("narrative", {
+    const consume = async () => { for await (const chunk of stream("narrative", {
       task: "genesis",
       userId: "test-user",
       failOnTruncation: true,
       messages: [{ role: "user", content: "create" }],
-    })) {
-      if (chunk.type === "text") text += chunk.text;
-    }
-
-    expect(text).toBe("{\"ok\":true}");
-    expect(mocks.stream).toHaveBeenCalledTimes(2);
+    })) void chunk; };
+    await expect(consume()).rejects.toThrow("terminated");
+    expect(mocks.stream).toHaveBeenCalledTimes(1);
   });
 
   it("stream: 上游正常结束却没有文本时在当前任务内重试", async () => {

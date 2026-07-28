@@ -60,6 +60,7 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
       latestTask.current = next;
       setTask(next);
       setPageError(null);
+      if (next.status === "waiting_for_provider") setConnection("reconnecting");
       if (next.status === "completed" && next.worldId && !redirected.current) {
         redirected.current = true;
         router.replace(`/genesis/${next.worldId}`);

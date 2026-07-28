@@ -48,6 +48,15 @@ describe("LLM transport classification", () => {
       });
   });
 
+  it("treats an explicit HTTP response as terminal evidence", () => {
+    expect(classifyTransportFailure(new Error("HTTP 500: upstream failed")))
+      .toEqual(expect.objectContaining({
+        outcome: "http_error",
+        terminalEvidence: "response_complete",
+        stableErrorCode: "SERVER_ERROR",
+      }));
+  });
+
   it("bounds unknown diagnostics and redacts credential-like values", () => {
     const failure = classifyTransportFailure(new Error(
       `provider exploded authorization=secret-token ${"x".repeat(800)}`,

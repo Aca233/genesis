@@ -5,6 +5,34 @@ const POLL_INTERVAL_MS = 2_000;
 let scanPromise: Promise<void> | null = null;
 
 export async function scanGenesisJobs(now = new Date()): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const recovering = await tx.genesisTask.findMany({
+      where: { status: "waiting_for_provider", updatedAt: { lt: new Date(now.getTime() - 30_000) } },
+      take: 20,
+      select: { id: true, aggregateVersion: true, stage: true },
+    });
+    if (!recovering.length) return;
+    for (const task of recovering) {
+      const aggregateVersion = task.aggregateVersion + 1;
+      const updated = await tx.genesisTask.updateMany({
+        where: { id: task.id, status: "waiting_for_provider", aggregateVersion: task.aggregateVersion },
+        data: { status: "queued", error: null, aggregateVersion },
+      });
+      if (updated.count !== 1) continue;
+      await tx.genesisJob.updateMany({
+        where: { genesisTaskId: task.id, nodeKey: "legacy-world-deck", status: "waiting_for_provider" },
+        data: { status: "queued", error: null },
+      });
+      await tx.genesisOutbox.create({
+        data: {
+          taskId: task.id,
+          aggregateVersion,
+          eventType: "provider_probe_queued",
+          payloadProjection: { status: "queued", stage: task.stage },
+        },
+      });
+    }
+  });
   const jobs = await prisma.genesisJob.findMany({
     where: {
       status: { in: ["queued", "running"] },

@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { GenesisTask, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { isTransientLlmError, stream } from "@/lib/llm/gateway";
+import { LlmCircuitOpenError } from "@/lib/llm/permits";
+import { classifyTransportFailure } from "@/lib/llm/transport";
 import { completeStructured } from "@/lib/llm/structured";
 import {
   CreatorWorldDeckSchema,
@@ -112,6 +114,14 @@ type GenesisRepairRequest = {
   cache: { namespace: string };
   maxInputBytes: number;
   maxOutputBytes: number;
+  owner?: {
+    kind: string;
+    id: string;
+    genesisTaskId?: string;
+    genesisJobId?: string;
+    leaseEpoch?: number;
+    leaseExpiresAt?: string;
+  };
 };
 
 export function buildGenesisRequest(input: GenesisRequestInput) {
@@ -323,6 +333,18 @@ async function runGenesisTask(taskId: string): Promise<void> {
   if (!task?.leaseToken) return;
 
   const leaseToken = task.leaseToken;
+  const legacyJob = await prisma.genesisJob.findUniqueOrThrow({
+    where: { genesisTaskId_nodeKey: { genesisTaskId: taskId, nodeKey: "legacy-world-deck" } },
+    select: { id: true, leaseEpoch: true, leaseExpiresAt: true },
+  });
+  const llmOwner = {
+    kind: "genesis_job",
+    id: legacyJob.id,
+    genesisTaskId: taskId,
+    genesisJobId: legacyJob.id,
+    leaseEpoch: legacyJob.leaseEpoch,
+    leaseExpiresAt: legacyJob.leaseExpiresAt?.toISOString(),
+  };
   let persistedKeys = mergeCompletedKeys([], task.completedKeys as GenesisTopLevelKey[]);
   let persistedStage = task.stage as GenesisStageId;
   let latestRaw = "";
@@ -412,6 +434,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
         for await (const chunk of stream("narrative", {
           task: "genesis",
           userId: task.userId,
+          owner: llmOwner,
           maxTokens: genesisRequest.maxTokens,
           failOnTruncation: true,
           cache: { namespace: `genesis:v1:${mode}` },
@@ -429,6 +452,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
       repairCompletion: (input) => {
         const sharedRepairRequest = {
           userId: task.userId,
+          owner: llmOwner,
           decree: task.decree,
           lorebookExcerpts: excerpts,
           invalidOutput: input.invalidOutput,
@@ -493,6 +517,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
     const auditReport = await auditTemporalSemantics(deck, {
       userId: task.userId,
       lorebookExcerpts: excerpts,
+      owner: llmOwner,
     });
 
     persistedStage = furthestStage(persistedStage, "saving");
@@ -510,7 +535,11 @@ async function runGenesisTask(taskId: string): Promise<void> {
     await persistWorld(prisma as unknown as PersistWorldDb, task, leaseToken, deck, parsedEntries);
   } catch (error) {
     // 瞬时网络故障（中转站掐断长响应等）自动重排队，而非终局失败；其余错误照旧终局。
-    const transient = isTransientLlmError(error) && task.attempt < MAX_TRANSIENT_ATTEMPTS;
+    const waitingForProvider = error instanceof LlmCircuitOpenError
+      || classifyTransportFailure(error).terminalEvidence === "terminal_unknown";
+    const transient = !waitingForProvider
+      && isTransientLlmError(error)
+      && task.attempt < MAX_TRANSIENT_ATTEMPTS;
     const terminalError = transient ? null : safeError(error);
     await prisma.$transaction(async (tx) => {
       const current = await tx.genesisTask.findFirst({
@@ -522,7 +551,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
       const updated = await tx.genesisTask.updateMany({
         where: { id: taskId, leaseToken, aggregateVersion: current.aggregateVersion },
         data: {
-          status: transient ? "queued" : "failed",
+          status: waitingForProvider ? "waiting_for_provider" : transient ? "queued" : "failed",
           error: terminalError,
           rawOutput: latestRaw,
           rawExpiresAt: latestRaw ? new Date(Date.now() + GENESIS_RAW_TTL_MS) : null,
@@ -535,11 +564,11 @@ async function runGenesisTask(taskId: string): Promise<void> {
       const mirrored = await tx.genesisJob.updateMany({
         where: { genesisTaskId: taskId, nodeKey: "legacy-world-deck", leaseToken },
         data: {
-          status: transient ? "queued" : "failed",
+          status: waitingForProvider ? "waiting_for_provider" : transient ? "queued" : "failed",
           error: terminalError,
           leaseToken: null,
           leaseExpiresAt: null,
-          completedAt: transient ? null : new Date(),
+          completedAt: transient || waitingForProvider ? null : new Date(),
         },
       });
       if (mirrored.count !== 1) throw new Error("创世任务作业租约已失效");
@@ -547,16 +576,18 @@ async function runGenesisTask(taskId: string): Promise<void> {
         data: {
           taskId,
           aggregateVersion,
-          eventType: transient ? "task_requeued" : "task_failed",
+          eventType: waitingForProvider
+            ? "task_waiting_for_provider"
+            : transient ? "task_requeued" : "task_failed",
           payloadProjection: {
-            status: transient ? "queued" : "failed",
+            status: waitingForProvider ? "waiting_for_provider" : transient ? "queued" : "failed",
             stage: persistedStage,
             ...(terminalError ? { error: terminalError } : {}),
           },
         },
       });
     });
-    if (transient) {
+    if (transient || waitingForProvider) {
       const { wakeGenesisScheduler } = await import("./scheduler");
       wakeGenesisScheduler();
     }
