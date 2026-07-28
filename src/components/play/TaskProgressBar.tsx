@@ -22,15 +22,15 @@ export function TaskProgressBar({
   if (!progress) return null;
   return (
     <section
-      className="relative mb-2 rounded-lg border border-gilt/30 bg-paper-raised/95 px-3.5 py-2 text-xs shadow-[0_2px_12px_var(--shadow-warm)]"
+      className="task-progress-strip relative mb-1 px-1.5 py-1 text-[11px]"
       aria-label="任务进度"
     >
-      {/* 上缘鎏金发丝线（两端淡出） */}
+      {/* 页边批注弦：不承载面板，只轻轻界定任务状态 */}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-gilt/50 to-transparent"
+        className="pointer-events-none absolute inset-x-8 bottom-0 h-px bg-gradient-to-r from-transparent via-line/80 to-transparent"
       />
-      <ol className="grid gap-1 sm:grid-cols-2">
+      <ol className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1">
         {progress.steps.map((step) => (
           <li
             key={step.id}
@@ -40,8 +40,8 @@ export function TaskProgressBar({
                 : step.status === "running"
                   ? "text-gilt"
                   : step.status === "completed"
-                    ? "text-ink-soft"
-                    : "text-ink-faint"
+                     ? "text-ink-faint"
+                     : "text-ink-faint/55"
             }
           >
             <span
@@ -53,7 +53,7 @@ export function TaskProgressBar({
         ))}
       </ol>
       {progress.status === "failed" && (
-        <div className="mt-2 flex items-center justify-between gap-3 text-cinnabar">
+        <div className="mt-1 flex items-center justify-center gap-3 text-cinnabar">
           <span>{progress.safeError ?? "任务中断"}</span>
           {progress.retryable && onRetry ? (
             <button

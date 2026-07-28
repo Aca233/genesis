@@ -14,15 +14,13 @@ describe("InputDeck", () => {
     expect(playPageSource).not.toContain("powerHints");
   });
 
-  it("输入区复用主菜单卡片语言，不使用亮金表单描边", () => {
+  it("输入区直接复用设置页典籍面板与凹纸字段", () => {
     const inputDeckSource = readFileSync(new URL("./InputDeck.tsx", import.meta.url), "utf8");
-    const globalStyles = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
 
-    expect(inputDeckSource).toContain("play-input-card");
+    expect(inputDeckSource).toContain("tome-plate tome-plate--corners");
     expect(inputDeckSource).toContain("play-input-textarea");
-    expect(inputDeckSource).not.toContain("play-input-well");
-    expect(inputDeckSource).toContain("bg-paper-raised");
-    expect(globalStyles).toMatch(/\.play-input-card:focus-within\s*\{[\s\S]*?var\(--gilt-glow\)/);
-    expect(globalStyles).toMatch(/\.play-input-textarea:focus-visible\s*\{[\s\S]*?outline:\s*none/);
+    expect(inputDeckSource).toContain("bg-paper-sunken");
+    expect(inputDeckSource).not.toContain("play-input-card");
+    expect(inputDeckSource).not.toContain("seal-ground-hi");
   });
 });
