@@ -1,7 +1,7 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { ensureGenesisTaskRunning } from "@/lib/genesis/task-runner";
+import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
 import { ensureRealityRewriteRunning, retryRealityRewrite } from "@/lib/reality/task-runner";
 import { assertAdminConfirmation, assertAdminMutationAllowed, redactAdminError } from "./security";
 
@@ -70,12 +70,61 @@ export async function mutateAdminTask(ctx: AdminActionContext, input: { kind: "g
   let targetLabel = input.taskId;
   try {
   if (input.kind === "genesis") {
-    const task = await db.genesisTask.findUnique({ where: { id: input.taskId }, select: { id: true, userId: true, status: true, stage: true } });
+    const task = await db.genesisTask.findUnique({ where: { id: input.taskId }, select: { id: true, userId: true, status: true, stage: true, aggregateVersion: true } });
     if (!task) throw new Error("任务不存在");
     targetType = "genesis-task";
     targetLabel = task.stage;
-    if (input.action === "cancel") { const result = await db.genesisTask.updateMany({ where: { id: task.id, status: { in: ["queued", "running", "repairing"] } }, data: { status: "cancelled", leaseToken: null, leaseExpiresAt: null, error: "管理员已取消" } }); if (result.count !== 1) throw new Error("任务当前不可取消"); }
-    else { const result = await db.genesisTask.updateMany({ where: { id: task.id, ...(input.action === "retry" ? { status: "failed" } : { status: { in: ["running", "repairing"] }, leaseExpiresAt: { lt: new Date() } }) }, data: { status: "queued", error: null, leaseToken: null, leaseExpiresAt: null, attempt: 0 } }); if (result.count !== 1) throw new Error("任务当前不可恢复"); ensureGenesisTaskRunning(task.id); }
+    const nextStatus = input.action === "cancel" ? "cancelled" : "queued";
+    const aggregateVersion = task.aggregateVersion + 1;
+    const changed = await db.$transaction(async (tx) => {
+      const result = await tx.genesisTask.updateMany({
+        where: {
+          id: task.id,
+          aggregateVersion: task.aggregateVersion,
+          ...(input.action === "cancel"
+            ? { status: { in: ["queued", "running", "repairing"] } }
+            : input.action === "retry"
+              ? { status: "failed" }
+              : { status: { in: ["running", "repairing"] }, leaseExpiresAt: { lt: new Date() } }),
+        },
+        data: {
+          status: nextStatus,
+          error: input.action === "cancel" ? "管理员已取消" : null,
+          leaseToken: null,
+          leaseExpiresAt: null,
+          ...(input.action === "cancel" ? {} : { attempt: 0 }),
+          aggregateVersion,
+        },
+      });
+      if (result.count !== 1) return false;
+      const job = await tx.genesisJob.updateMany({
+        where: { genesisTaskId: task.id, nodeKey: "legacy-world-deck" },
+        data: {
+          status: nextStatus,
+          error: input.action === "cancel" ? "管理员已取消" : null,
+          leaseToken: null,
+          leaseExpiresAt: null,
+          completedAt: input.action === "cancel" ? new Date() : null,
+          ...(input.action === "cancel" ? {} : { attempt: 0 }),
+        },
+      });
+      if (job.count !== 1) throw new Error("创世任务缺少持久作业");
+      await tx.genesisOutbox.create({
+        data: {
+          taskId: task.id,
+          aggregateVersion,
+          eventType: input.action === "cancel" ? "task_cancelled" : "task_requeued",
+          payloadProjection: {
+            status: nextStatus,
+            stage: task.stage,
+            ...(input.action === "cancel" ? { error: "管理员已取消" } : {}),
+          },
+        },
+      });
+      return true;
+    });
+    if (!changed) throw new Error(input.action === "cancel" ? "任务当前不可取消" : "任务当前不可恢复");
+    if (input.action !== "cancel") wakeGenesisScheduler();
     await audit(db, ctx, { action: `${input.action}-task`, targetType: "genesis-task", targetId: task.id, targetLabel: task.stage, reason: input.reason.trim(), success: true });
   } else if (input.kind === "narrative") {
     if (input.action !== "cancel") throw new Error("叙事任务只能由原世界请求重试");

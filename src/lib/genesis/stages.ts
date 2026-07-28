@@ -18,7 +18,7 @@ export const GENESIS_STAGES = [
 ] as const;
 
 export type GenesisStageId = (typeof GENESIS_STAGES)[number]["id"];
-export type GenesisTaskStatus = "queued" | "running" | "repairing" | "completed" | "failed";
+export type GenesisTaskStatus = "queued" | "running" | "repairing" | "completed" | "failed" | "cancelled";
 
 const sharedRequirements: Array<{ stage: GenesisStageId; keys: GenesisTopLevelKey[] }> = [
   { stage: "laws", keys: ["mode", "worldName", "cosmology", "fusionAxiom"] },

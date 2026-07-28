@@ -13,6 +13,7 @@ import {
   PayloadLimitError,
   readUtf8Body,
 } from "@/lib/genesis/limits";
+import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
 
 const CreateGenesisTaskSchema = z.object({
   mode: WorldModeSchema.default("pantheon"),
@@ -61,7 +62,7 @@ export const POST = withAuth(async (userId, request: Request) => {
   try { materialSelection = await buildGenesisMaterialSnapshot(parsed.data.materialSelections, userId); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 }); }
 
-  const taskData = {
+  const taskInput = {
     userId,
     mode: parsed.data.mode,
     decree: parsed.data.decree,
@@ -75,12 +76,30 @@ export const POST = withAuth(async (userId, request: Request) => {
     return NextResponse.json({ error: "创世幂等键长度必须为 8–128 字符" }, { status: 400 });
   }
   const requestHash = createHash("sha256").update(JSON.stringify({
-    mode: taskData.mode,
-    decree: taskData.decree,
-    lorebook: taskData.lorebook ?? null,
-    lorebookName: taskData.lorebookName ?? null,
-    materialSelection: taskData.materialSelection,
+    mode: taskInput.mode,
+    decree: taskInput.decree,
+    lorebook: taskInput.lorebook ?? null,
+    lorebookName: taskInput.lorebookName ?? null,
+    materialSelection: taskInput.materialSelection,
   }), "utf8").digest("hex");
+  const taskData = {
+    ...taskInput,
+    jobs: {
+      create: {
+        userId,
+        nodeKey: "legacy-world-deck",
+        engineVersion: "legacy-v1",
+        inputHash: requestHash,
+      },
+    },
+    outboxEvents: {
+      create: {
+        aggregateVersion: 1,
+        eventType: "task_created",
+        payloadProjection: { status: "queued", stage: "oracle" },
+      },
+    },
+  };
 
   const task = idempotencyKey
     ? await prisma.genesisTask.upsert({
@@ -98,5 +117,6 @@ export const POST = withAuth(async (userId, request: Request) => {
     return NextResponse.json({ error: "幂等键已用于不同的创世请求" }, { status: 409 });
   }
 
+  wakeGenesisScheduler();
   return NextResponse.json({ taskId: task.id }, { status: 202 });
 });

@@ -5,6 +5,8 @@ export async function register() {
     && !state.__genesisRawCleanupStarted) {
     state.__genesisRawCleanupStarted = true;
     const { startGenesisRawCleanup } = await import("@/lib/genesis/raw-cleanup");
+    const { startGenesisScheduler } = await import("@/lib/genesis/scheduler");
     startGenesisRawCleanup();
+    startGenesisScheduler();
   }
 }

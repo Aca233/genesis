@@ -121,39 +121,90 @@ model World {
 }
 
 model GenesisTask {
-  id                String    @id @default(cuid())
-  userId            String    @map("user_id")
-  user              User      @relation(fields: [userId], references: [id], onDelete: Restrict)
-  idempotencyKey    String?   @map("idempotency_key")
-  requestHash       String?   @map("request_hash")
+  id                String          @id @default(cuid())
+  userId            String          @map("user_id")
+  user              User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  idempotencyKey    String?         @map("idempotency_key")
+  requestHash       String?         @map("request_hash")
+  engineVersion     String          @default("legacy-v1") @map("engine_version")
+  aggregateVersion  Int             @default(1) @map("aggregate_version")
   decree            String
   lorebook          Json?
-  lorebookName      String?   @map("lorebook_name")
-  materialSelection Json?     @map("material_selection")
-  mode              String    @default("pantheon")
-  status            String    @default("queued") // queued | running | repairing | completed | failed
-  stage             String    @default("oracle")
-  completedKeys     String[]  @map("completed_keys")
-  rawOutput         String    @default("") @map("raw_output") @db.Text
-  rawExpiresAt      DateTime? @map("raw_expires_at")
+  lorebookName      String?         @map("lorebook_name")
+  materialSelection Json?           @map("material_selection")
+  mode              String          @default("pantheon")
+  status            String          @default("queued") // queued | running | repairing | completed | failed
+  stage             String          @default("oracle")
+  completedKeys     String[]        @map("completed_keys")
+  rawOutput         String          @default("") @map("raw_output") @db.Text
+  rawExpiresAt      DateTime?       @map("raw_expires_at")
   error             String?
   /**
    * 时间一致设计稿 §10.4：报告型 AI 语义审计结果（TemporalAuditResult）；仅 IP 世界产出，审计失败/旧任务为 NULL
    */
-  auditReport       Json?     @map("audit_report")
-  attempt           Int       @default(0)
-  leaseToken        String?   @map("lease_token")
-  leaseExpiresAt    DateTime? @map("lease_expires_at")
-  worldId           String?   @unique @map("world_id")
-  world             World?    @relation(fields: [worldId], references: [id], onDelete: SetNull)
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  auditReport       Json?           @map("audit_report")
+  attempt           Int             @default(0)
+  leaseToken        String?         @map("lease_token")
+  leaseExpiresAt    DateTime?       @map("lease_expires_at")
+  worldId           String?         @unique @map("world_id")
+  world             World?          @relation(fields: [worldId], references: [id], onDelete: SetNull)
+  jobs              GenesisJob[]
+  outboxEvents      GenesisOutbox[]
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
 
   @@unique([userId, idempotencyKey])
   @@index([userId, status])
   @@index([rawExpiresAt])
   @@index([status, leaseExpiresAt])
   @@map("genesis_tasks")
+}
+
+model GenesisJob {
+  id                String      @id @default(cuid())
+  userId            String      @map("user_id")
+  genesisTaskId     String      @map("genesis_task_id")
+  task              GenesisTask @relation(fields: [genesisTaskId], references: [id], onDelete: Cascade)
+  nodeKey           String      @map("node_key")
+  engineVersion     String      @map("engine_version")
+  priority          Int         @default(0)
+  status            String      @default("queued")
+  dependencyKeys    String[]    @default([]) @map("dependency_keys")
+  inputHash         String?     @map("input_hash")
+  leaseToken        String?     @map("lease_token")
+  leaseEpoch        Int         @default(0) @map("lease_epoch")
+  leaseExpiresAt    DateTime?   @map("lease_expires_at")
+  attempt           Int         @default(0)
+  estimatedDuration Int?        @map("estimated_duration")
+  estimatedTokens   Int?        @map("estimated_tokens")
+  startedAt         DateTime?   @map("started_at")
+  completedAt       DateTime?   @map("completed_at")
+  error             String?
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  @@unique([genesisTaskId, nodeKey])
+  @@index([status, priority, createdAt])
+  @@index([userId, status])
+  @@index([leaseExpiresAt])
+  @@map("genesis_jobs")
+}
+
+model GenesisOutbox {
+  eventId           String      @id @default(cuid()) @map("event_id")
+  taskId            String      @map("task_id")
+  task              GenesisTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  aggregateVersion  Int         @map("aggregate_version")
+  eventType         String      @map("event_type")
+  payloadProjection Json        @map("payload_projection")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  publishedAt       DateTime?   @map("published_at")
+  deliveryAttempts  Int         @default(0) @map("delivery_attempts")
+
+  @@unique([taskId, aggregateVersion])
+  @@index([taskId, createdAt])
+  @@index([publishedAt, createdAt])
+  @@map("genesis_outbox")
 }
 
 model Timeline {

@@ -143,6 +143,8 @@ describe("genesis task runner", () => {
       createdAt: "2026-07-21T00:00:00.000Z",
       updatedAt: "2026-07-21T00:00:10.000Z",
       auditReport: null,
+      aggregateVersion: 0,
+      snapshotHash: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(dto).not.toHaveProperty("rawOutput");
     expect(dto).not.toHaveProperty("decree");
@@ -172,7 +174,9 @@ describe("genesis task runner", () => {
 
   it("长时间修补期间只由当前 lease token 续租并刷新心跳", async () => {
     const updateMany = vi.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
-    const db = { genesisTask: { updateMany } };
+    const jobUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = { genesisTask: { updateMany }, genesisJob: { updateMany: jobUpdateMany } };
+    const db = { $transaction: vi.fn((callback) => callback(tx)) };
 
     await expect(renewGenesisLease(db, "task-1", "lease-current", new Date("2026-07-21T00:00:00Z")))
       .resolves.toBe(true);
@@ -182,22 +186,33 @@ describe("genesis task runner", () => {
       where: { id: "task-1", leaseToken: "lease-current", status: { in: ["running", "repairing"] } },
       data: { leaseExpiresAt: new Date("2026-07-21T00:01:00.000Z") },
     }));
+    expect(jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ leaseToken: "lease-current", status: "running" }),
+    }));
   });
 
   it("只有 queued 或租约过期的运行任务能被原子认领", async () => {
-    const db = {
+    const tx = {
       genesisTask: {
         updateMany: vi.fn().mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 }),
-        findUnique: vi.fn().mockResolvedValue(task({ decree: "神谕", lorebook: null })),
+        findUnique: vi.fn().mockResolvedValue(task({
+          decree: "神谕",
+          lorebook: null,
+          attempt: 1,
+          aggregateVersion: 2,
+        })),
       },
+      genesisJob: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      genesisOutbox: { create: vi.fn().mockResolvedValue({}) },
     };
+    const db = { $transaction: vi.fn((callback) => callback(tx)) };
 
     await expect(claimGenesisTask(db, "task-1", new Date("2026-07-21T00:00:00Z")))
       .resolves.toMatchObject({ id: "task-1" });
     await expect(claimGenesisTask(db, "task-1", new Date("2026-07-21T00:00:00Z")))
       .resolves.toBeNull();
 
-    expect(db.genesisTask.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(tx.genesisTask.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         id: "task-1",
         OR: expect.arrayContaining([
@@ -207,7 +222,13 @@ describe("genesis task runner", () => {
       }),
       data: expect.objectContaining({ status: "running" }),
     }));
-    expect(db.genesisTask.updateMany.mock.calls[0]![0].where).not.toHaveProperty("userId");
+    expect(tx.genesisTask.updateMany.mock.calls[0]![0].where).not.toHaveProperty("userId");
+    expect(tx.genesisJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "running", attempt: 1 }),
+    }));
+    expect(tx.genesisOutbox.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ aggregateVersion: 2, eventType: "task_started" }),
+    });
   });
 
   it("按冻结模式构造生成 system、user 与精确 schema", () => {
@@ -289,9 +310,11 @@ describe("genesis task runner", () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const tx = {
       genesisTask: {
-        findFirst: vi.fn().mockResolvedValue({ id: "task-1" }),
+        findFirst: vi.fn().mockResolvedValue({ id: "task-1", aggregateVersion: 3 }),
         updateMany,
       },
+      genesisJob: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      genesisOutbox: { create: vi.fn().mockResolvedValue({}) },
       world: { create },
     };
     const db = { $transaction: vi.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)) };
@@ -308,6 +331,14 @@ describe("genesis task runner", () => {
     const completedKeys = updateMany.mock.calls[0]![0].data.completedKeys as string[];
     expect(completedKeys).toEqual(Object.keys(creator));
     expect(completedKeys).not.toContain("playerGod");
+    expect(tx.genesisOutbox.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      aggregateVersion: 4,
+      eventType: "task_completed",
+    }) });
+    expect(tx.genesisJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ leaseToken: "lease-1" }),
+      data: expect.objectContaining({ status: "completed" }),
+    }));
   });
 
   it("持久化前拒绝任务模式与卡组模式不一致", async () => {

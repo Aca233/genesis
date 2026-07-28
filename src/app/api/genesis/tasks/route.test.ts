@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   upsert: vi.fn(),
+  wake: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -11,6 +12,7 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/auth/session", () => ({
   requireUserId: vi.fn().mockResolvedValue("test-user"),
 }));
+vi.mock("@/lib/genesis/scheduler", () => ({ wakeGenesisScheduler: mocks.wake }));
 
 import { POST } from "./route";
 
@@ -28,8 +30,15 @@ describe("POST /api/genesis/tasks", () => {
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({ taskId: "task-1" });
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ decree: "创造星海", mode: "pantheon", completedKeys: [] }),
+      data: expect.objectContaining({
+        decree: "创造星海",
+        mode: "pantheon",
+        completedKeys: [],
+        jobs: { create: expect.objectContaining({ nodeKey: "legacy-world-deck" }) },
+        outboxEvents: { create: expect.objectContaining({ aggregateVersion: 1 }) },
+      }),
     }));
+    expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
 
   it("接受并持久化 creator 模式", async () => {
