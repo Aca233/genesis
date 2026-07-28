@@ -6,6 +6,35 @@ import { redactAdminError } from "./security";
 
 type AdminDb = typeof prisma;
 export type AdminListInput = { search: string; page: number; pageSize: number; skip: number };
+export type OverviewStatus = "healthy" | "warning" | "critical";
+
+type OverviewStatusInput = {
+  database: boolean;
+  stalledTasks: number;
+  failedTasks: number;
+  llmSuccessRate: number;
+  memoryUsedRate: number;
+  diskUsedRate: number | null;
+};
+
+export function deriveOverviewStatus(input: OverviewStatusInput): OverviewStatus {
+  if (!input.database || input.stalledTasks > 0) return "critical";
+  if (input.failedTasks > 0 || input.llmSuccessRate < 0.97 || input.memoryUsedRate >= 0.85 || (input.diskUsedRate !== null && input.diskUsedRate >= 0.85)) return "warning";
+  return "healthy";
+}
+
+export function buildDailyTrend(rows: Array<{ createdAt: Date }>, now = new Date(), days = 7) {
+  const format = (date: Date) => date.toISOString().slice(0, 10);
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(format(row.createdAt), (counts.get(format(row.createdAt)) ?? 0) + 1);
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date(now);
+    date.setUTCHours(0, 0, 0, 0);
+    date.setUTCDate(date.getUTCDate() - (days - index - 1));
+    const key = format(date);
+    return { date: key, count: counts.get(key) ?? 0 };
+  });
+}
 
 function searchFilter(search: string) {
   const value = search.trim();

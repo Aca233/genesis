@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/auth/admin";
-import { loadAdminOverview } from "@/lib/admin/data";
+import { loadAdminDashboard } from "@/lib/admin/dashboard";
 
 export const dynamic = "force-dynamic";
-export const GET = withAdmin(async () => NextResponse.json(await loadAdminOverview()));
+export const GET = withAdmin(async () => NextResponse.json(await loadAdminDashboard()));
