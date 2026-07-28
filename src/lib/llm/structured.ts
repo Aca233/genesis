@@ -54,6 +54,8 @@ export async function completeStructured<T>(
     allowTransportFallback?: boolean;
     /** Provider prompt-cache namespace for stable global/world messages. */
     cache?: { namespace: string };
+    maxInputBytes?: number;
+    maxOutputBytes?: number;
     /** Stable world-specific context, placed after global system and before dynamic input. */
     stableContext?: string[];
   },
@@ -88,6 +90,8 @@ export async function completeStructured<T>(
     }, {
       maxAttempts: opts.transportMaxAttempts,
       allowFallback: opts.allowTransportFallback,
+      maxInputBytes: opts.maxInputBytes,
+      maxOutputBytes: opts.maxOutputBytes,
     });
 
     try {

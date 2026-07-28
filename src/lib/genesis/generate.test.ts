@@ -67,6 +67,35 @@ describe("generateGenesisDeck", () => {
     expectTypeOf<GenesisGenerationOptions>().toMatchObjectType<{ mode: WorldMode }>();
   });
 
+  it("输出超过字节上限时保留有界前缀并且不进入校验或修补", async () => {
+    const repairCompletion = vi.fn();
+    const onChunk = vi.fn();
+    const onStage = vi.fn();
+
+    await expect(generateGenesisDeck({
+      mode: "creator",
+      decree: "创造星海",
+      maxOutputBytes: 10,
+      streamCompletion: async function* () {
+        yield "星".repeat(8);
+      },
+      repairCompletion,
+      onChunk,
+      onProgress: vi.fn(),
+      onStage,
+    })).rejects.toMatchObject({
+      code: "OUTPUT_LIMIT_EXCEEDED",
+      observedBytes: 24,
+      limitBytes: 10,
+      boundedPrefix: "星星星",
+    });
+
+    expect(onChunk).toHaveBeenCalledWith("星星星");
+    expect(onStage).not.toHaveBeenCalledWith("validation");
+    expect(onStage).not.toHaveBeenCalledWith("repair");
+    expect(repairCompletion).not.toHaveBeenCalled();
+  });
+
   it("合法 creator 首轮输出无需修补即可成功", async () => {
     const creator = completeCreatorDeck();
     const repairCompletion = vi.fn();

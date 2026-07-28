@@ -6,6 +6,7 @@ import {
   persistWorld,
   renewGenesisLease,
   resolveLorebookExcerpts,
+  safeError,
   toGenesisTaskDto,
 } from "./task-runner";
 import { CreatorWorldDeckSchema, PantheonWorldDeckSchema } from "@/lib/cards/schemas";
@@ -113,6 +114,16 @@ describe("resolveLorebookExcerpts（§11 T4b 创世注入切换）", () => {
 });
 
 describe("genesis task runner", () => {
+  it("失败摘要移除 HTML 与凭证并限制长度", () => {
+    const error = safeError(new Error(
+      `HTTP 504 <html><body>openresty</body></html> authorization=secret-token ${"x".repeat(2000)}`,
+    ));
+    expect(error).not.toContain("<html>");
+    expect(error).not.toContain("secret-token");
+    expect(error).toContain("authorization=[已隐藏]");
+    expect(error.length).toBeLessThanOrEqual(1000);
+  });
+
   it("DTO 不会泄露神谕、世界书或模型原始输出", () => {
     const dto = toGenesisTaskDto({
       ...task(),
@@ -234,6 +245,8 @@ describe("genesis task runner", () => {
       maxAttempts: 1,
       transportMaxAttempts: 1,
       allowTransportFallback: false,
+      maxInputBytes: 262144,
+      maxOutputBytes: 2097152,
     });
   });
 

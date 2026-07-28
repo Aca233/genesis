@@ -19,7 +19,7 @@ export type TerminalEvidenceType =
   | "terminal_unknown";
 
 export type TransportFailure = {
-  outcome: Exclude<TransportOutcome, "success" | "truncated">;
+  outcome: Exclude<TransportOutcome, "success">;
   terminalEvidence: TerminalEvidenceType;
   stableErrorCode:
     | "EMPTY_RESPONSE"
@@ -27,6 +27,7 @@ export type TransportFailure = {
     | "UPSTREAM_TIMEOUT"
     | "HTTP_ERROR"
     | "ABORTED"
+    | "OUTPUT_LIMIT_EXCEEDED"
     | "UNKNOWN_ERROR";
   errorDetails: string;
 };
@@ -66,6 +67,16 @@ function boundedPlainText(message: string): string {
 
 export function classifyTransportFailure(error: unknown): TransportFailure {
   const message = errorMessage(error);
+
+  if (error && typeof error === "object" && "code" in error
+    && (error as { code?: unknown }).code === "OUTPUT_LIMIT_EXCEEDED") {
+    return {
+      outcome: "truncated",
+      terminalEvidence: "terminal_unknown",
+      stableErrorCode: "OUTPUT_LIMIT_EXCEEDED",
+      errorDetails: boundedPlainText(message),
+    };
+  }
 
   if (message === "流式响应为空") {
     return {

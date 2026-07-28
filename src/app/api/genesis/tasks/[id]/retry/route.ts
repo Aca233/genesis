@@ -14,6 +14,7 @@ export const POST = withAuth(async (
     data: {
       status: "queued",
       rawOutput: "",
+      rawExpiresAt: null,
       error: null,
       leaseToken: null,
       leaseExpiresAt: null,

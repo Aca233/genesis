@@ -124,6 +124,8 @@ model GenesisTask {
   id                String    @id @default(cuid())
   userId            String    @map("user_id")
   user              User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  idempotencyKey    String?   @map("idempotency_key")
+  requestHash       String?   @map("request_hash")
   decree            String
   lorebook          Json?
   lorebookName      String?   @map("lorebook_name")
@@ -133,6 +135,7 @@ model GenesisTask {
   stage             String    @default("oracle")
   completedKeys     String[]  @map("completed_keys")
   rawOutput         String    @default("") @map("raw_output") @db.Text
+  rawExpiresAt      DateTime? @map("raw_expires_at")
   error             String?
   /**
    * 时间一致设计稿 §10.4：报告型 AI 语义审计结果（TemporalAuditResult）；仅 IP 世界产出，审计失败/旧任务为 NULL
@@ -146,7 +149,9 @@ model GenesisTask {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
+  @@unique([userId, idempotencyKey])
   @@index([userId, status])
+  @@index([rawExpiresAt])
   @@index([status, leaseExpiresAt])
   @@map("genesis_tasks")
 }

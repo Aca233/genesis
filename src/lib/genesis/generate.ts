@@ -15,6 +15,13 @@ import {
   type GenesisTopLevelKey,
 } from "./json-progress";
 import { mergeCompletedKeys, type GenesisStageId } from "./stages";
+import {
+  GENESIS_NORMALIZED_MAX_BYTES,
+  GENESIS_VALIDATION_MAX_BYTES,
+  PayloadLimitError,
+  takeUtf8Prefix,
+  utf8Bytes,
+} from "./limits";
 
 /** 定向修复轮数上限:第二轮可解决第一轮修复稿的残余语义错误。 */
 const MAX_REPAIR_ROUNDS = 2;
@@ -36,6 +43,7 @@ export type GenesisGenerationOptions = {
   decree: string;
   lorebookExcerpts?: string;
   materialSnapshot?: GenesisMaterialSnapshot | null;
+  maxOutputBytes?: number;
   streamCompletion: () => AsyncIterable<string>;
   repairCompletion: (input: RepairInput) => Promise<unknown>;
   onProgress: (completedKeys: GenesisTopLevelKey[], rawOutput: string) => Promise<void> | void;
@@ -54,6 +62,16 @@ function validateParsedDeck(
   expectedMode: WorldMode,
   materialSnapshot: GenesisMaterialSnapshot | null,
 ): WorldDeck {
+  const normalized = JSON.stringify(rawDeck);
+  const normalizedBytes = utf8Bytes(normalized);
+  if (normalizedBytes > GENESIS_NORMALIZED_MAX_BYTES) {
+    throw new PayloadLimitError(
+      "OUTPUT_LIMIT_EXCEEDED",
+      normalizedBytes,
+      GENESIS_NORMALIZED_MAX_BYTES,
+      takeUtf8Prefix(normalized, GENESIS_NORMALIZED_MAX_BYTES),
+    );
+  }
   // Parse the union first so a valid opposite-mode response yields a clear mode error.
   const deck = WorldDeckSchema.parse(rawDeck);
   assertExpectedMode(deck, expectedMode);
@@ -74,9 +92,15 @@ function parseAndValidate(
 
 function describeValidationError(error: unknown): string {
   if (error && typeof error === "object" && "issues" in error) {
-    return JSON.stringify((error as { issues: unknown }).issues, null, 2).slice(0, 4000);
+    return takeUtf8Prefix(
+      JSON.stringify((error as { issues: unknown }).issues, null, 2),
+      GENESIS_VALIDATION_MAX_BYTES,
+    );
   }
-  return (error instanceof Error ? error.message : String(error)).slice(0, 4000);
+  return takeUtf8Prefix(
+    error instanceof Error ? error.message : String(error),
+    GENESIS_VALIDATION_MAX_BYTES,
+  );
 }
 
 /** Performs one observable streaming attempt, then a targeted repair if needed. */
@@ -90,6 +114,20 @@ export async function generateGenesisDeck(
 
   for await (const text of options.streamCompletion()) {
     if (!text) continue;
+    const raw = scanner.getRaw();
+    const observedBytes = utf8Bytes(raw) + utf8Bytes(text);
+    if (options.maxOutputBytes !== undefined && observedBytes > options.maxOutputBytes) {
+      const boundedText = takeUtf8Prefix(text, options.maxOutputBytes - utf8Bytes(raw));
+      if (boundedText) scanner.push(boundedText);
+      const boundedPrefix = scanner.getRaw();
+      await options.onChunk(boundedPrefix);
+      throw new PayloadLimitError(
+        "OUTPUT_LIMIT_EXCEEDED",
+        observedBytes,
+        options.maxOutputBytes,
+        boundedPrefix,
+      );
+    }
     const newlyCompleted = scanner.push(text);
     await options.onChunk(scanner.getRaw());
     if (newlyCompleted.length > 0) {
@@ -134,12 +172,14 @@ export async function generateGenesisDeck(
             schema: CreatorWorldDeckSchema,
           });
       } catch (repairError) {
+        if (repairError instanceof PayloadLimitError) throw repairError;
         lastError = repairError;
         continue;
       }
       try {
         return validateParsedDeck(repaired, mode, options.materialSnapshot ?? null);
       } catch (repairError) {
+        if (repairError instanceof PayloadLimitError) throw repairError;
         lastError = repairError;
         invalidOutput = JSON.stringify(repaired);
         validationError = describeValidationError(repairError);

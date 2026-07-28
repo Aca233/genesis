@@ -305,6 +305,75 @@ describe("complete transport attempts", () => {
     expect(JSON.stringify(row)).not.toContain("<html>");
     expect(JSON.stringify(row)).not.toContain("openresty");
   });
+
+  it("输入超过硬上限时不发起 Provider 请求", async () => {
+    await expect(complete("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      messages: [{ role: "user", content: "界".repeat(200) }],
+    }, { maxInputBytes: 100, maxAttempts: 1, allowFallback: false }))
+      .rejects.toMatchObject({ code: "INPUT_LIMIT_EXCEEDED" });
+
+    expect(mocks.stream).not.toHaveBeenCalled();
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(mocks.llmCallCreate).not.toHaveBeenCalled();
+  });
+
+  it("流式输出超过硬上限时中止且不交付越界块", async () => {
+    mocks.stream.mockImplementationOnce(async function* () {
+      yield { type: "text", text: "星".repeat(40) };
+      yield { type: "done" };
+    });
+
+    await expect(complete("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      messages: [{ role: "user", content: "create" }],
+    }, { maxOutputBytes: 60, maxAttempts: 1, allowFallback: false }))
+      .rejects.toMatchObject({ code: "OUTPUT_LIMIT_EXCEEDED", observedBytes: 120, limitBytes: 60 });
+
+    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.llmCallCreate.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      ok: false,
+      transportOutcome: "truncated",
+      stableErrorCode: "OUTPUT_LIMIT_EXCEEDED",
+      error: "模型输出超过安全上限（已读取 120 字节，上限 60 字节）",
+    }));
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(mocks.stream.mock.calls[0][3].signal.aborted).toBe(true);
+  });
+
+  it("输出上限跨续写轮累计而不是每轮重置", async () => {
+    const usage = (truncated: boolean) => ({
+      type: "usage",
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheWriteTokens: null },
+      cacheRequested: false,
+      cacheFallback: false,
+      truncated,
+    });
+    mocks.stream
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: '{"x":"星星星' };
+        yield usage(true);
+        yield { type: "done" };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: '月月月"}' };
+        yield usage(false);
+        yield { type: "done" };
+      });
+
+    await expect(complete("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      failOnTruncation: true,
+      messages: [{ role: "user", content: "create" }],
+    }, { maxOutputBytes: 24, maxAttempts: 1, allowFallback: false }))
+      .rejects.toMatchObject({ code: "OUTPUT_LIMIT_EXCEEDED", limitBytes: 24 });
+
+    expect(mocks.stream).toHaveBeenCalledTimes(2);
+    expect(mocks.complete).not.toHaveBeenCalled();
+  });
 });
 
 describe("输出上限续写接力", () => {

@@ -10,7 +10,7 @@ import { PlayBackground } from "@/components/play/PlayBackground";
 import { GenesisModeBackground } from "@/components/genesis/GenesisModeBackground";
 import { OperationIcon } from "@/components/icons/OperationIcon";
 import type { MaterialSelectionItem } from "@/lib/materials/types";
-import { buildGenesisTaskPayload, defaultGenesisMode } from "@/lib/genesis/create-request";
+import { buildGenesisTaskPayload, createGenesisIdempotencyKey, defaultGenesisMode } from "@/lib/genesis/create-request";
 import { WORLD_MODES, WORLD_MODE_PRESENTATION, type WorldMode } from "@/lib/world-mode";
 
 /** 续玩入口所需的世界摘要（GET /api/worlds 已按 updatedAt desc 排序） */
@@ -110,6 +110,7 @@ export default function Home() {
   const [decree, setDecree] = useState("");
   const [lorebook, setLorebook] = useState<{ name: string; data: unknown } | null>(null);
   const [creating, setCreating] = useState(false);
+  const createIdempotency = useRef<{ body: string; key: string } | null>(null);
   const [materialSelections, setMaterialSelections] = useState<MaterialSelectionItem[]>([]);
   const [materialPickerOpen, setMaterialPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -163,18 +164,26 @@ export default function Home() {
     setCreating(true);
     setError(null);
     try {
+      const body = JSON.stringify(buildGenesisTaskPayload({
+        mode: worldMode,
+        decree: text,
+        lorebook,
+        materialSelections,
+      }));
+      if (createIdempotency.current?.body !== body) {
+        createIdempotency.current = { body, key: createGenesisIdempotencyKey() };
+      }
       const res = await fetch("/api/genesis/tasks", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildGenesisTaskPayload({
-          mode: worldMode,
-          decree: text,
-          lorebook,
-          materialSelections,
-        })),
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": createIdempotency.current.key,
+        },
+        body,
       });
       const json: { taskId?: string; error?: string } = await res.json();
       if (!res.ok || !json.taskId) {
+        if (res.status < 500) createIdempotency.current = null;
         setError(json.error ?? "创世失败，虚空未曾回应。请稍后再试。");
         setCreating(false);
         return;

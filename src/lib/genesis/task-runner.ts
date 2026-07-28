@@ -25,6 +25,13 @@ import type { GenesisStageId, GenesisTaskStatus } from "./stages";
 import type { GenesisTopLevelKey } from "./json-progress";
 import { buildWorldIconTheme } from "@/lib/icons/theme";
 import { WorldModeSchema, type WorldMode } from "@/lib/world-mode";
+import {
+  GENESIS_MODEL_INPUT_MAX_BYTES,
+  GENESIS_MODEL_OUTPUT_MAX_BYTES,
+  GENESIS_RAW_MAX_BYTES,
+  GENESIS_RAW_TTL_MS,
+  takeUtf8Prefix,
+} from "./limits";
 
 const LEASE_MS = 60 * 1000;
 /** 瞬时网络故障允许的最大总尝试数（attempt 在租约认领时自增）。 */
@@ -96,6 +103,8 @@ type GenesisRepairRequest = {
   transportMaxAttempts: number;
   allowTransportFallback: boolean;
   cache: { namespace: string };
+  maxInputBytes: number;
+  maxOutputBytes: number;
 };
 
 export function buildGenesisRequest(input: GenesisRequestInput) {
@@ -138,6 +147,8 @@ export function buildGenesisRepairRequest(input: GenesisRepairRequestInput) {
     transportMaxAttempts: 1,
     allowTransportFallback: false,
     cache: { namespace: `genesis:v1:${input.mode}` },
+    maxInputBytes: GENESIS_MODEL_INPUT_MAX_BYTES,
+    maxOutputBytes: GENESIS_MODEL_OUTPUT_MAX_BYTES,
   };
   return input.mode === "pantheon"
     ? { ...shared, schema: PantheonWorldDeckSchema }
@@ -241,9 +252,17 @@ export function ensureGenesisTaskRunning(taskId: string): void {
   });
 }
 
-function safeError(error: unknown): string {
+export function safeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/(?:sk-|AIza|key-)[A-Za-z0-9_\-.]{8,}/g, "[已隐藏密钥]").slice(0, 1000);
+  return message
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/(?:sk-|AIza|key-)[A-Za-z0-9_\-.]{8,}/g, "[已隐藏密钥]")
+    .replace(/(api[_-]?key|authorization|bearer)\s*[:=]\s*[^\s,;]+/gi, "$1=[已隐藏]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 1000);
 }
 
 async function runGenesisTask(taskId: string): Promise<void> {
@@ -294,6 +313,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
       decree: task.decree,
       lorebookExcerpts: excerpts,
       materialSnapshot,
+      maxOutputBytes: GENESIS_MODEL_OUTPUT_MAX_BYTES,
       streamCompletion: async function* () {
         for await (const chunk of stream("narrative", {
           task: "genesis",
@@ -305,6 +325,9 @@ async function runGenesisTask(taskId: string): Promise<void> {
             { role: "system", content: genesisRequest.system, cacheScope: "global" },
             { role: "user", content: genesisRequest.user, cacheScope: "dynamic" },
           ],
+        }, {
+          maxInputBytes: GENESIS_MODEL_INPUT_MAX_BYTES,
+          maxOutputBytes: GENESIS_MODEL_OUTPUT_MAX_BYTES,
         })) {
           if (chunk.type === "text") yield chunk.text;
         }
@@ -329,23 +352,25 @@ async function runGenesisTask(taskId: string): Promise<void> {
           }));
       },
       onChunk: async (rawOutput) => {
-        latestRaw = rawOutput;
+        latestRaw = takeUtf8Prefix(rawOutput, GENESIS_RAW_MAX_BYTES);
         const now = Date.now();
         if (now - lastCheckpoint < CHECKPOINT_MS) return;
         lastCheckpoint = now;
         await updateOwnedTask({
           rawOutput: latestRaw,
+          rawExpiresAt: new Date(now + GENESIS_RAW_TTL_MS),
           leaseExpiresAt: new Date(now + LEASE_MS),
         });
       },
       onProgress: async (completedKeys, rawOutput) => {
-        latestRaw = rawOutput;
+        latestRaw = takeUtf8Prefix(rawOutput, GENESIS_RAW_MAX_BYTES);
         persistedKeys = mergeCompletedKeys(persistedKeys, completedKeys);
         persistedStage = furthestStage(persistedStage, deriveStreamingStage(persistedKeys, mode));
         await updateOwnedTask({
           completedKeys: persistedKeys,
           stage: persistedStage,
           rawOutput: latestRaw,
+          rawExpiresAt: new Date(Date.now() + GENESIS_RAW_TTL_MS),
           leaseExpiresAt: new Date(Date.now() + LEASE_MS),
         });
         lastCheckpoint = Date.now();
@@ -356,6 +381,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
           stage: persistedStage,
           ...(stage === "repair" ? { status: "repairing" } : {}),
           rawOutput: latestRaw,
+          rawExpiresAt: latestRaw ? new Date(Date.now() + GENESIS_RAW_TTL_MS) : null,
           leaseExpiresAt: new Date(Date.now() + LEASE_MS),
         });
       },
@@ -374,6 +400,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
       stage: persistedStage,
       status: "running",
       rawOutput: latestRaw,
+      rawExpiresAt: latestRaw ? new Date(Date.now() + GENESIS_RAW_TTL_MS) : null,
       ...(auditReport === null
         ? {}
         : { auditReport: auditReport as unknown as Prisma.InputJsonValue }),
@@ -391,6 +418,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
             status: "queued",
             error: null,
             rawOutput: latestRaw,
+            rawExpiresAt: latestRaw ? new Date(Date.now() + GENESIS_RAW_TTL_MS) : null,
             leaseToken: null,
             leaseExpiresAt: null,
           }
@@ -398,6 +426,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
             status: "failed",
             error: safeError(error),
             rawOutput: latestRaw,
+            rawExpiresAt: latestRaw ? new Date(Date.now() + GENESIS_RAW_TTL_MS) : null,
             leaseToken: null,
             leaseExpiresAt: null,
           },
@@ -480,6 +509,7 @@ export async function persistWorld(
         stage: "completed",
         completedKeys: Object.keys(deck),
         rawOutput: "",
+        rawExpiresAt: null,
         error: null,
         worldId: world.id,
         leaseToken: null,

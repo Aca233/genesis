@@ -16,5 +16,8 @@ describe("LlmCall prompt cache schema", () => {
     expect(schema).toMatch(/^\s*transportOutcome\s+String\?/m);
     expect(schema).toMatch(/^\s*terminalEvidence\s+String\?/m);
     expect(schema).toMatch(/^\s*stableErrorCode\s+String\?/m);
+    expect(schema).toMatch(/^\s*idempotencyKey\s+String\?/m);
+    expect(schema).toMatch(/^\s*requestHash\s+String\?/m);
+    expect(schema).toMatch(/^\s*rawExpiresAt\s+DateTime\?/m);
   });
 });

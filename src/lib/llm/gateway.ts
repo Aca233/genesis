@@ -4,6 +4,7 @@ import { decryptSecret } from "@/lib/crypto";
 import { adapters } from "./adapters";
 import { buildPromptCachePlan, normalizedEndpointKey } from "./cache";
 import { cacheCapabilitySnapshot } from "./cache-capabilities";
+import { PayloadLimitError, takeUtf8Prefix, utf8Bytes } from "@/lib/genesis/limits";
 import {
   classifyTransportFailure,
   classifyTransportSuccess,
@@ -28,7 +29,27 @@ export type CompleteOptions = {
   maxAttempts?: number;
   /** Whether a failed streaming request may issue one additional non-streaming request. */
   allowFallback?: boolean;
+  maxInputBytes?: number;
+  maxOutputBytes?: number;
 };
+
+type StreamOptions = {
+  signal?: AbortSignal;
+  maxInputBytes?: number;
+  maxOutputBytes?: number;
+};
+
+function completionInputBytes(req: CompletionRequest): number {
+  return req.messages.reduce((total, message) => total + utf8Bytes(message.content), 0);
+}
+
+function assertInputLimit(req: CompletionRequest, limitBytes?: number): void {
+  if (limitBytes === undefined) return;
+  const observedBytes = completionInputBytes(req);
+  if (observedBytes > limitBytes) {
+    throw new PayloadLimitError("INPUT_LIMIT_EXCEEDED", observedBytes, limitBytes);
+  }
+}
 
 class SlotNotConfiguredError extends Error {
   constructor(slot: SlotName) {
@@ -222,16 +243,35 @@ async function collectStream(
   apiKey: string,
   logPhysicalCall: (entry: RunLogEntry) => Promise<void>,
   cachePlanned: boolean,
+  maxOutputBytes?: number,
+  outputOffsetBytes = 0,
 ): Promise<CollectedStream> {
   const startedAt = Date.now();
+  const controller = new AbortController();
   let text = "";
   let usage: NormalizedUsage | undefined;
   let cacheRequested = false;
   let cacheFallback = false;
   let truncated = false;
   try {
-    for await (const chunk of adapter.stream(slot, req, apiKey)) {
-      if (chunk.type === "text") text += chunk.text;
+    for await (const chunk of adapter.stream(slot, req, apiKey, { signal: controller.signal })) {
+      if (chunk.type === "text") {
+        const nextBytes = outputOffsetBytes + utf8Bytes(text) + utf8Bytes(chunk.text);
+        if (maxOutputBytes !== undefined && nextBytes > maxOutputBytes) {
+          const boundedPrefix = text + takeUtf8Prefix(
+            chunk.text,
+            maxOutputBytes - outputOffsetBytes - utf8Bytes(text),
+          );
+          controller.abort();
+          throw new PayloadLimitError(
+            "OUTPUT_LIMIT_EXCEEDED",
+            nextBytes,
+            maxOutputBytes,
+            boundedPrefix,
+          );
+        }
+        text += chunk.text;
+      }
       if (chunk.type === "usage") {
         usage = chunk.usage;
         cacheRequested = chunk.cacheRequested;
@@ -278,10 +318,21 @@ async function collectCompletion(
   apiKey: string,
   logPhysicalCall: (entry: RunLogEntry) => Promise<void>,
   cachePlanned: boolean,
+  maxOutputBytes?: number,
+  outputOffsetBytes = 0,
 ): Promise<CompletedCall> {
   const startedAt = Date.now();
   try {
     const result = await adapter.complete(slot, req, apiKey);
+    const observedBytes = outputOffsetBytes + utf8Bytes(result.text);
+    if (maxOutputBytes !== undefined && observedBytes > maxOutputBytes) {
+      throw new PayloadLimitError(
+        "OUTPUT_LIMIT_EXCEEDED",
+        observedBytes,
+        maxOutputBytes,
+        takeUtf8Prefix(result.text, maxOutputBytes - outputOffsetBytes),
+      );
+    }
     const transport = classifyTransportSuccess("complete", result.truncated ?? false);
     await logPhysicalCall({
       startedAt,
@@ -399,6 +450,7 @@ export async function complete(
   req: CompletionRequest,
   options?: CompleteOptions,
 ): Promise<string> {
+  assertInputLimit(req, options?.maxInputBytes);
   const { slot, apiKey, slotName: used } = await resolveSlot(slotName, req.userId);
   const adapter = adapters[slot.provider];
   const plan = buildPromptCachePlan(slot, req);
@@ -414,7 +466,9 @@ export async function complete(
 
   /** 需要完整输出时,对截断结果做续写接力;超过轮数上限才判失败。 */
   const stitchStreamed = async (): Promise<string> => {
-    let result = await collectStream(adapter, slot, req, apiKey, logRound, plan.enabled);
+    let result = await collectStream(
+      adapter, slot, req, apiKey, logRound, plan.enabled, options?.maxOutputBytes,
+    );
     if (!req.failOnTruncation) return result.text;
     let text = result.text;
     for (let round = 0; needsContinuation(req, result.truncated, text); round += 1) {
@@ -426,6 +480,8 @@ export async function complete(
         apiKey,
         logRound,
         plan.enabled,
+        options?.maxOutputBytes,
+        utf8Bytes(text),
       );
       text += trimOverlap(text, result.text);
     }
@@ -433,7 +489,9 @@ export async function complete(
   };
 
   const stitchCompleted = async (): Promise<string> => {
-    let result = await collectCompletion(adapter, slot, req, apiKey, logRound, plan.enabled);
+    let result = await collectCompletion(
+      adapter, slot, req, apiKey, logRound, plan.enabled, options?.maxOutputBytes,
+    );
     if (!req.failOnTruncation) return result.text;
     let text = result.text;
     for (let round = 0; needsContinuation(req, result.truncated, text); round += 1) {
@@ -445,6 +503,8 @@ export async function complete(
         apiKey,
         logRound,
         plan.enabled,
+        options?.maxOutputBytes,
+        utf8Bytes(text),
       );
       text += trimOverlap(text, result.text);
     }
@@ -464,6 +524,8 @@ export async function complete(
     }
   }
 
+  if (lastError instanceof PayloadLimitError) throw lastError;
+
   if (allowFallback) {
     try {
       return await stitchCompleted();
@@ -480,8 +542,9 @@ export async function complete(
 export async function* stream(
   slotName: SlotName,
   req: CompletionRequest,
-  options?: { signal?: AbortSignal },
+  options?: StreamOptions,
 ): AsyncGenerator<StreamChunk> {
+  assertInputLimit(req, options?.maxInputBytes);
   const { slot, apiKey, slotName: used } = await resolveSlot(slotName, req.userId);
   const adapter = adapters[slot.provider];
   const plan = buildPromptCachePlan(slot, req);
@@ -500,6 +563,10 @@ export async function* stream(
     let truncated = false;
     const runRound = async function* (roundReq: CompletionRequest, overlapBase: string) {
       const startedAt = Date.now();
+      const controller = new AbortController();
+      const signal = options?.signal
+        ? AbortSignal.any([options.signal, controller.signal])
+        : controller.signal;
       let usage: NormalizedUsage | undefined;
       let cacheRequested = false;
       let cacheFallback = false;
@@ -508,7 +575,7 @@ export async function* stream(
       // 接缝缓冲:续写轮开头可能与已产出结尾重叠,先攒足 400 字符做去重
       let seamBuffer: string | null = overlapBase ? "" : null;
       try {
-        for await (const chunk of adapter.stream(slot, roundReq, apiKey, options)) {
+        for await (const chunk of adapter.stream(slot, roundReq, apiKey, { signal })) {
           if (chunk.type === "usage") {
             usage = chunk.usage;
             cacheRequested = chunk.cacheRequested;
@@ -516,6 +583,26 @@ export async function* stream(
             truncated = chunk.truncated ?? false;
           } else if (chunk.type === "text") {
             if (chunk.text) receivedText = true;
+            const observedBytes = utf8Bytes(accumulated) + utf8Bytes(seamBuffer ?? "")
+              + utf8Bytes(chunk.text);
+            if (options?.maxOutputBytes !== undefined && observedBytes > options.maxOutputBytes) {
+              const room = options.maxOutputBytes
+                - utf8Bytes(accumulated)
+                - utf8Bytes(seamBuffer ?? "");
+              const boundedChunk = takeUtf8Prefix(chunk.text, room);
+              if (seamBuffer !== null) seamBuffer += boundedChunk;
+              else if (boundedChunk) {
+                accumulated += boundedChunk;
+                yield { type: "text", text: boundedChunk } as StreamChunk;
+              }
+              controller.abort();
+              throw new PayloadLimitError(
+                "OUTPUT_LIMIT_EXCEEDED",
+                observedBytes,
+                options.maxOutputBytes,
+                accumulated + (seamBuffer ?? ""),
+              );
+            }
             if (seamBuffer !== null) {
               seamBuffer += chunk.text;
               if (seamBuffer.length >= 400) {

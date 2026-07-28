@@ -14,6 +14,14 @@ function request(body: unknown) {
   });
 }
 
+function idempotentRequest(body: unknown, key: string) {
+  return new Request("http://localhost/api/genesis/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("GenesisTask PostgreSQL lifecycle", () => {
   beforeEach(async () => {
     await prisma.genesisTask.deleteMany({ where: { decree: { startsWith: "[integration]" } } });
@@ -52,5 +60,19 @@ describe("GenesisTask PostgreSQL lifecycle", () => {
 
     const stored = await prisma.genesisTask.findUniqueOrThrow({ where: { id: taskId } });
     expect(stored.mode).toBe("pantheon");
+  });
+
+  it("同一用户与幂等键在 PostgreSQL 中只创建一个任务", async () => {
+    const key = `integration-${crypto.randomUUID()}`;
+    const body = { decree: "[integration] 创建幂等星海" };
+    const first = await POST(idempotentRequest(body, key));
+    const second = await POST(idempotentRequest(body, key));
+    const firstJson = await first.json() as { taskId: string };
+    const secondJson = await second.json() as { taskId: string };
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(202);
+    expect(secondJson.taskId).toBe(firstJson.taskId);
+    await expect(prisma.genesisTask.count({ where: { idempotencyKey: key } })).resolves.toBe(1);
   });
 });
