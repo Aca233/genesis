@@ -1,0 +1,208 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "10.28.2"
+  PROD_HOST: "43.250.173.182"
+  PROD_USER: "deploy"
+  PROD_PORT: "22"
+  RELEASES_DIR: "/srv/genesis/releases"
+
+jobs:
+  deploy:
+    name: Build, migrate, and activate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+
+    steps:
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm exec prisma generate
+
+      - name: Build icon subset
+        run: pnpm build:icons
+
+      - name: Build standalone application
+        env:
+          DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build
+          BETTER_AUTH_SECRET: 0000000000000000000000000000000000000000000000000000000000000000
+          BETTER_AUTH_URL: https://chuangshi.kdns.fr
+          SECRET_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+        run: pnpm build
+
+      - name: Assemble release artifact
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_id="$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::12}"
+          remote_release="${RELEASES_DIR}/${release_id}"
+          output_dir="${RUNNER_TEMP}/genesis-release"
+
+          mkdir -p "${output_dir}/.next"
+          cp -a .next/standalone/. "${output_dir}/"
+          cp -a .next/static "${output_dir}/.next/static"
+          cp -a public "${output_dir}/public"
+          find "${output_dir}" -maxdepth 2 -type f \( -name '.env' -o -name '.env.*' \) -delete
+          printf '%s\n' "${GITHUB_SHA}" > "${output_dir}/RELEASE_COMMIT"
+          printf '%s\n' "${release_id}" > "${output_dir}/RELEASE_ID"
+          cp .next/BUILD_ID "${output_dir}/NEXT_BUILD_ID"
+
+          echo "release_id=${release_id}" >> "${GITHUB_OUTPUT}"
+          echo "remote_release=${remote_release}" >> "${GITHUB_OUTPUT}"
+          echo "output_dir=${output_dir}" >> "${GITHUB_OUTPUT}"
+          echo "next_build_id=$(cat .next/BUILD_ID)" >> "${GITHUB_OUTPUT}"
+
+      - name: Configure pinned SSH host key
+        shell: bash
+        env:
+          PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${PROD_SSH_KEY}"
+          install -d -m 0700 "${HOME}/.ssh"
+          printf '%s\n' "${PROD_SSH_KEY}" > "${HOME}/.ssh/id_ed25519"
+          chmod 0600 "${HOME}/.ssh/id_ed25519"
+          printf '%s\n' '43.250.173.182 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDSPIxOQZIqm4UgncNyB/s4a9K7A/Ir1ED+64NfDS9Dv' > "${HOME}/.ssh/known_hosts"
+          chmod 0644 "${HOME}/.ssh/known_hosts"
+
+      - name: Inspect production migration state
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -p "${PROD_PORT}" "${PROD_USER}@${PROD_HOST}" '
+            set -euo pipefail
+            printf "current_release=%s\n" "$(readlink -f /srv/genesis/current || true)"
+            if [ -f /srv/genesis/current/RELEASE_COMMIT ]; then
+              printf "current_commit=%s\n" "$(cat /srv/genesis/current/RELEASE_COMMIT)"
+            fi
+            env_file=/etc/genesis/genesis.env
+            test -r "$env_file"
+            database_url="$(sed -n "s/^DATABASE_URL=//p" "$env_file" | tail -n 1)"
+            test -n "$database_url"
+            case "$database_url" in
+              postgresql://*localhost*|postgresql://*127.0.0.1*) ;;
+              *) echo "DATABASE_URL must target a loopback PostgreSQL host" >&2; exit 1 ;;
+            esac
+            psql "${database_url%%\?*}" -Atc "select migration_name from \"_prisma_migrations\" where finished_at is not null order by finished_at" > /tmp/genesis-applied-migrations.txt
+            cat /tmp/genesis-applied-migrations.txt
+            rm -f /tmp/genesis-applied-migrations.txt
+          '
+
+      - name: Open database tunnel
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -f -N \
+            -p "${PROD_PORT}" \
+            -o ExitOnForwardFailure=yes \
+            -L 15432:127.0.0.1:5432 \
+            "${PROD_USER}@${PROD_HOST}"
+
+      - name: Apply production database migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          database_url="$(ssh -p "${PROD_PORT}" "${PROD_USER}@${PROD_HOST}" 'sed -n "s/^DATABASE_URL=//p" /etc/genesis/genesis.env | tail -n 1')"
+          test -n "${database_url}"
+          tunnel_url="$(printf '%s' "${database_url}" | sed -E 's#(@)(localhost|127\.0\.0\.1)(:5432)?/#@127.0.0.1:15432/#')"
+          if [ "${tunnel_url}" = "${database_url}" ]; then
+            echo "Unable to map production DATABASE_URL to the SSH tunnel" >&2
+            exit 1
+          fi
+          echo "::add-mask::${database_url}"
+          echo "::add-mask::${tunnel_url}"
+          DATABASE_URL="${tunnel_url}" pnpm exec prisma migrate deploy
+
+      - name: Upload release
+        shell: bash
+        env:
+          OUTPUT_DIR: ${{ steps.release.outputs.output_dir }}
+          REMOTE_RELEASE: ${{ steps.release.outputs.remote_release }}
+        run: |
+          set -euo pipefail
+          ssh -p "${PROD_PORT}" "${PROD_USER}@${PROD_HOST}" "mkdir -p '${REMOTE_RELEASE}'"
+          rsync -az --delete \
+            -e "ssh -p ${PROD_PORT}" \
+            "${OUTPUT_DIR}/" \
+            "${PROD_USER}@${PROD_HOST}:${REMOTE_RELEASE}/"
+
+      - name: Activate release atomically
+        id: activate
+        shell: bash
+        env:
+          REMOTE_RELEASE: ${{ steps.release.outputs.remote_release }}
+        run: |
+          set -euo pipefail
+          ssh -p "${PROD_PORT}" "${PROD_USER}@${PROD_HOST}" \
+            "sudo /srv/genesis/bin/activate-release.sh '${REMOTE_RELEASE}'"
+          current_release="$(ssh -p "${PROD_PORT}" "${PROD_USER}@${PROD_HOST}" 'readlink -f /srv/genesis/current')"
+          service_state="$(ssh -p "${PROD_PORT}" "${PROD_USER}@${PROD_HOST}" 'systemctl is-active genesis')"
+          current_commit="$(ssh -p "${PROD_PORT}" "${PROD_USER}@${PROD_HOST}" 'cat /srv/genesis/current/RELEASE_COMMIT')"
+          next_build_id="$(ssh -p "${PROD_PORT}" "${PROD_USER}@${PROD_HOST}" 'cat /srv/genesis/current/NEXT_BUILD_ID')"
+          test "${current_release}" = "${REMOTE_RELEASE}"
+          test "${service_state}" = active
+          test "${current_commit}" = "${GITHUB_SHA}"
+          echo "current_release=${current_release}" >> "${GITHUB_OUTPUT}"
+          echo "next_build_id=${next_build_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify public endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --retry 6 --retry-delay 5 --retry-all-errors \
+            --max-time 20 \
+            https://chuangshi.kdns.fr/api/auth/get-session >/dev/null
+          curl --fail --silent --show-error \
+            --retry 6 --retry-delay 5 --retry-all-errors \
+            --max-time 20 \
+            https://chuangshi.kdns.fr/login >/dev/null
+
+      - name: Publish deployment summary
+        if: success()
+        shell: bash
+        env:
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+          CURRENT_RELEASE: ${{ steps.activate.outputs.current_release }}
+          NEXT_BUILD_ID: ${{ steps.activate.outputs.next_build_id }}
+        run: |
+          {
+            echo '## Production deployment'
+            echo
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Release: \`${RELEASE_ID}\`"
+            echo "- Current path: \`${CURRENT_RELEASE}\`"
+            echo "- Next build ID: \`${NEXT_BUILD_ID}\`"
+            echo '- Service: `active`'
+            echo '- Public login and session health checks: passed'
+          } >> "${GITHUB_STEP_SUMMARY}"
