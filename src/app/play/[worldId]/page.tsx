@@ -1,10 +1,9 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Scale } from "@/lib/cards/schemas";
 import type {
-  AbilityView,
   DrawerTab,
   MessageMeta,
   MessageRow,
@@ -624,24 +623,6 @@ export default function PlayPage({
   const isLatest = lastNarrator && lastNarrator.index === messages.at(-1)?.index;
   const suggestions = isLatest ? (lastMeta.suggestions ?? []) : [];
 
-  // 神权提示条：玩家神的神赋能力（仅万神殿模式；封印/失落/废弃不列）
-  const powerHints = useMemo(() => {
-    if (state?.world.mode !== "pantheon") return [];
-    const player = state.gods.find((g) => g.isPlayer);
-    return (player?.abilities ?? [])
-      .filter((a): a is Extract<AbilityView, { effect: string }> =>
-        a.kind === "divine"
-        && "effect" in a
-        && !["sealed", "lost", "deprecated"].includes(a.state))
-      .slice(0, 6)
-      .map((a) => ({
-        id: a.id,
-        name: a.name,
-        effect: a.effect,
-        cost: "cost" in a ? a.cost : undefined,
-      }));
-  }, [state]);
-
   // 陨灭终章派生量：玩家神 / 已成史 / 主题卡陨灭措辞
   const playerGod = state?.gods.find((g) => g.isPlayer) ?? null;
   const concluded = state?.world.status === "concluded";
@@ -774,11 +755,9 @@ export default function PlayPage({
             />
           ) : (
             <InputDeck
-              mode={state.world.mode}
               scale={scale}
               onScaleChange={setScale}
               suggestions={suggestions}
-              powerHints={powerHints}
               busyKind={settling
                 ? "settling"
                 : rewriteBusy
