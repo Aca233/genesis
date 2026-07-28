@@ -3,6 +3,7 @@ import "./globals.css";
 import { ThemeScript } from "@/components/theme/ThemeScript";
 import { MotionProvider } from "@/components/theme/MotionProvider";
 import { UnauthorizedRedirect } from "@/components/auth/UnauthorizedRedirect";
+import { GameVersion } from "@/components/layout/GameVersion";
 
 export const metadata: Metadata = {
   title: "创世",
@@ -22,6 +23,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <UnauthorizedRedirect />
         <MotionProvider>{children}</MotionProvider>
+        <GameVersion />
       </body>
     </html>
   );
