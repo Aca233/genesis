@@ -26,7 +26,7 @@ export async function loadAdminDashboard(db: AdminDb = prisma) {
 
   const [
     users, userRows7d, activeSessions, activeUserRows, bannedUsers, adminUsers, recentUsers,
-    worlds, worldRows7d, staleWorlds, worldStatuses, worldModes, recentWorlds,
+    worlds, worldRows7d, archivedWorlds, staleWorlds, worldStatuses, worldModes, recentWorlds,
     timelines, chapters, messages, gods, entities, abilities, chronicles, materials,
     genesisStatuses, genesis24h, genesisStalled, narrativeStatuses, narrative24h, narrativeStalled, rewriteStatuses, rewrite24h, rewriteStalled,
     genesisFailures, narrativeFailures, rewriteFailures, llm, llmRows, recentAudits, database, systemHealth,
@@ -40,6 +40,7 @@ export async function loadAdminDashboard(db: AdminDb = prisma) {
     db.user.findMany({ orderBy: { createdAt: "desc" }, take: 5, select: { id: true, name: true, email: true, role: true, banned: true, createdAt: true, _count: { select: { worlds: true, sessions: true } } } }),
     db.world.count(),
     db.world.findMany({ where: { createdAt: { gte: since7d } }, orderBy: { createdAt: "asc" }, take: 10_000, select: { createdAt: true } }),
+    db.world.count({ where: { archivedAt: { not: null } } }).catch(() => null),
     db.world.count({ where: { updatedAt: { lt: staleSince } } }),
     db.world.groupBy({ by: ["status"], _count: { _all: true } }),
     db.world.groupBy({ by: ["mode"], _count: { _all: true } }),
@@ -109,7 +110,7 @@ export async function loadAdminDashboard(db: AdminDb = prisma) {
   return {
     generatedAt: now, status, issues,
     users: { total: users, new24h: countNew24h(userRows7d), new7d: userRows7d.length, activeSessions, activeUsers: activeUserRows.length, admins: adminUsers, banned: bannedUsers, trend: buildDailyTrend(userRows7d, now), recent: recentUsers },
-    worlds: { total: worlds, new24h: countNew24h(worldRows7d), new7d: worldRows7d.length, draft: statusCount(worldStatuses, "draft"), playing: statusCount(worldStatuses, "playing"), concluded: statusCount(worldStatuses, "concluded"), archived: null as number | null, stale: staleWorlds, modes: worldModes.map((row) => ({ mode: row.mode, count: row._count._all })).sort((a, b) => b.count - a.count), trend: buildDailyTrend(worldRows7d, now), recent: recentWorlds },
+    worlds: { total: worlds, new24h: countNew24h(worldRows7d), new7d: worldRows7d.length, draft: statusCount(worldStatuses, "draft"), playing: statusCount(worldStatuses, "playing"), concluded: statusCount(worldStatuses, "concluded"), archived: archivedWorlds, stale: staleWorlds, modes: worldModes.map((row) => ({ mode: row.mode, count: row._count._all })).sort((a, b) => b.count - a.count), trend: buildDailyTrend(worldRows7d, now), recent: recentWorlds },
     content: { timelines, chapters, messages, gods, entities, abilities, chronicles, materials },
     tasks: { queued: pipelines.reduce((total, item) => total + item.queued, 0), running: pipelines.reduce((total, item) => total + item.running, 0), failed: failedTasks, stalled: stalledTasks, pipelines },
     llm: { calls, failures: llmFailed, successRate, averageDurationMs: Math.round(llm._avg.durationMs ?? 0), percentile95Ms, slowestDurationMs: durations.at(-1) ?? 0, inputTokens: llm._sum.inputTokens ?? 0, outputTokens: llm._sum.outputTokens ?? 0, cacheReadTokens: llm._sum.cacheReadTokens ?? 0, cacheWriteTokens: llm._sum.cacheWriteTokens ?? 0, dynamicTokens: llm._sum.dynamicTokens ?? 0, toolResultTokens: llm._sum.toolResultTokens ?? 0, cacheFallbacks: llmRows.filter((row) => row.cacheFallback).length, models: summarize(Array.from(modelMap.values())), tasks: summarize(Array.from(taskMap.values())), recentFailures: llmRows.filter((row) => !row.ok).slice(0, 5).map((row) => ({ ...row, error: redactAdminError(row.error ?? "未知错误") })) },
