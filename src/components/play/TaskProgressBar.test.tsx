@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { TaskProgressBar } from "./TaskProgressBar";
 import type { TaskProgressView } from "./task-progress-state";
@@ -30,5 +31,12 @@ describe("TaskProgressBar", () => {
     expect(retryable).toContain("从此处重试");
     expect(refreshOnly).toContain("刷新世界");
     expect(retryable).toContain("写入正文与状态");
+  });
+
+  it("作为轻量页边批注展示，不渲染成抢眼卡片", () => {
+    const source = readFileSync(new URL("./TaskProgressBar.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain("task-progress-strip");
+    expect(source).not.toContain("rounded-lg border border-gilt/30 bg-paper-raised/95");
   });
 });

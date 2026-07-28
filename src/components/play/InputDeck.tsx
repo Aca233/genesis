@@ -188,29 +188,19 @@ export function InputDeck({
         </div>
       )}
 
-      {/* 书案：与书页分离的深墨案面（玺印墨底），上缘鎏金发丝线 */}
-      <div
-        className="relative rounded-xl border border-gilt/30 p-3 shadow-tome"
-        style={{
-          background:
-            "radial-gradient(68% 82% at 50% 0%, color-mix(in srgb, var(--gilt-bright) 13%, transparent), transparent 62%), linear-gradient(172deg, var(--seal-ground-hi), var(--seal-ground-lo))",
-        }}
-      >
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-gilt-bright/70 to-transparent"
-        />
+      {/* 与设置页同源的典籍面板：双层细框、角花与纸面纹理 */}
+      <div className="tome-plate tome-plate--corners p-3 sm:p-4">
         <div className="flex items-start gap-3">
           {/* 时之仪表盘 */}
           <div className="flex shrink-0 flex-col items-center">
             <ScaleDial scale={scale} disabled={busy} onChange={onScaleChange} />
-            <span className="mt-0.5 select-none pl-[0.3em] text-[10px] tracking-[0.3em] text-gilt-bright/60">
+            <span className="mt-0.5 select-none pl-[0.3em] text-[10px] tracking-[0.3em] text-ink-faint">
               时之仪
             </span>
           </div>
 
-          {/* 与主菜单世界模式同源的纸面卡片：默认细墨边，落笔时暖金浅染 */}
-          <div className="play-input-card min-w-0 flex-1 overflow-hidden rounded-lg border border-line bg-paper-raised px-4 py-3 shadow-[0_2px_12px_var(--shadow-warm)]">
+          {/* 设置页同款凹纸字段；由字段本身承担焦点，不再嵌套卡片 */}
+          <div className="min-w-0 flex-1 rounded-lg border border-line bg-paper-sunken px-4 py-3 shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--ink)_10%,transparent)] transition-[border-color,box-shadow] focus-within:border-gilt/70 focus-within:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--ink)_10%,transparent),0_0_0.6rem_var(--gilt-glow)]">
             <textarea
               ref={taRef}
               value={text}
@@ -229,7 +219,7 @@ export function InputDeck({
                   ? "世界演化中，稍候…"
                   : current.placeholder}
               rows={2}
-              className="play-input-textarea w-full resize-none bg-transparent leading-relaxed text-ink placeholder:text-ink-faint/70 disabled:opacity-60"
+              className="play-input-textarea w-full resize-none bg-transparent leading-relaxed text-ink outline-none placeholder:text-ink-faint/70 disabled:opacity-60"
             />
           </div>
         </div>
@@ -250,7 +240,7 @@ export function InputDeck({
               maxLength={1000}
               aria-label="幕后指示"
               placeholder="幕后指示，如：让使者带来坏消息"
-              className="w-full rounded-md border border-gilt/25 bg-paper-sunken/90 px-2.5 py-1 text-xs text-ink shadow-[inset_0_1px_2px_rgba(0,0,0,0.14)] outline-none transition-[border-color] placeholder:text-ink-faint/70 focus:border-gilt/60 disabled:opacity-60"
+              className="w-full rounded-md border border-line bg-paper-sunken px-2.5 py-1 text-xs text-ink shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--ink)_10%,transparent)] outline-none transition-[border-color,box-shadow] placeholder:text-ink-faint/70 focus:border-gilt/70 focus:shadow-[0_0_0.5rem_var(--gilt-glow)] disabled:opacity-60"
             />
           </div>
         )}
@@ -260,7 +250,7 @@ export function InputDeck({
             <button
               onClick={continueWithDirective}
               disabled={busy || !canContinue}
-              className="shrink-0 rounded-md border border-gilt-bright/25 px-2.5 py-0.5 tracking-[0.1em] text-gilt-bright/80 transition hover:border-gilt-bright/60 hover:text-gilt-bright disabled:opacity-40"
+              className="shrink-0 rounded-md border border-gilt/25 px-2.5 py-0.5 tracking-[0.1em] text-gilt-strong transition hover:border-gilt/60 hover:text-gilt disabled:opacity-40"
               title="不输入新内容，让史官顺势接着写"
             >
               续写
@@ -270,10 +260,10 @@ export function InputDeck({
               disabled={busy || !canContinue}
               aria-expanded={directiveOpen}
               aria-label="幕后指示（续写导演提示）"
-              className={`shrink-0 rounded-md border px-1.5 py-0.5 text-xs transition hover:border-gilt-bright/60 hover:text-gilt-bright disabled:opacity-40 ${
+              className={`shrink-0 rounded-md border px-1.5 py-0.5 text-xs transition hover:border-gilt/60 hover:text-gilt disabled:opacity-40 ${
                 directiveOpen || directive.trim()
-                  ? "border-gilt-bright/50 text-gilt-bright"
-                  : "border-gilt-bright/20 text-gilt-bright/50"
+                  ? "border-gilt/50 text-gilt"
+                  : "border-gilt/20 text-gilt/60"
               }`}
               title="幕后指示：续写时递给史官的一句导演提示"
             >
@@ -282,7 +272,7 @@ export function InputDeck({
             {/* 烛光切换（游戏内） */}
             <button
               onClick={() => setMode(candle ? "day" : "candle")}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-gilt-bright/20 px-2 py-0.5 text-xs text-gilt-bright/60 transition hover:border-gilt-bright/55 hover:text-gilt-bright"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-gilt/20 px-2 py-0.5 text-xs text-gilt/70 transition hover:border-gilt/55 hover:text-gilt"
               title={candle ? "切回日卷（亮色）" : "燃烛夜读（暗色）"}
             >
               {candle
@@ -302,7 +292,7 @@ export function InputDeck({
           ) : busy ? (
             <button
               disabled
-              className="shrink-0 rounded-md border border-gilt-bright/20 px-6 py-1.5 text-sm text-gilt-bright/50"
+              className="shrink-0 rounded-md border border-gilt/20 px-6 py-1.5 text-sm text-gilt/50"
             >
               演化中…
             </button>
