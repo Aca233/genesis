@@ -224,6 +224,7 @@ const REMOVABLE_REFERENCE_ISSUE_TYPES = new Set<GenesisSemanticIssue["type"]>([
   "anchor_state_leak",
   "ontology_mismatch",
   "causal_disconnect",
+  "continuity_mix",
   "unsupported_canon_claim",
 ]);
 
@@ -239,7 +240,8 @@ function canonicalizeReferenceLeafIssuePath(
   const index = segments.at(-2);
   const collection = segments.at(-3);
   const isRemovableReference = (collection === "keyCharacterRefs" && field === "ref")
-    || (collection === "factionMemberships" && field === "factionRef");
+    || (collection === "factionMemberships" && field === "factionRef")
+    || (collection === "relationsAtAnchor" && (field === "sourceRef" || field === "targetRef"));
   if (!isRemovableReference || index === undefined || !/^\d+$/.test(index)) return issue;
 
   const entrySegments = segments.slice(0, -1);
@@ -247,7 +249,7 @@ function canonicalizeReferenceLeafIssuePath(
   if (entry === MISSING_PATH) return issue;
   return {
     ...issue,
-    path: issue.path.replace(/\.(?:ref|factionRef)$/, ""),
+    path: issue.path.replace(/\.(?:ref|factionRef|sourceRef|targetRef)$/, ""),
   };
 }
 
@@ -277,7 +279,11 @@ function requiredReferenceRemovalPaths(
     if (
       index === undefined
       || !/^\d+$/.test(index)
-      || (collection !== "keyCharacterRefs" && collection !== "factionMemberships")
+      || (
+        collection !== "keyCharacterRefs"
+        && collection !== "factionMemberships"
+        && collection !== "relationsAtAnchor"
+      )
     ) return [];
     const parent = readPath(deck, segments.slice(0, -1));
     return Array.isArray(parent) && Number(index) < parent.length ? [issue.path] : [];

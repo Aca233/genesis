@@ -394,8 +394,17 @@ describe("enforceGenesisQuality", () => {
   it.each([
     ["factions[1].keyCharacterRefs[0].ref", "unsupported_canon_claim"],
     ["majorCharacters[3].factionMemberships[0].factionRef", "causal_disconnect"],
+    ["relationsAtAnchor[0].targetRef", "continuity_mix"],
   ] as const)("引用叶子问题 %s 强制删除整个关系项", async (path, type) => {
     const original = completeDeck();
+    if (path.startsWith("relationsAtAnchor")) {
+      original.relationsAtAnchor = [{
+        sourceRef: original.majorCharacters[0]!.ref,
+        targetRef: original.majorCharacters[1]!.ref,
+        status: "ally",
+        publicDescription: "锚点时仍保持盟友关系",
+      }];
+    }
     const report: GenesisSemanticAuditResult = {
       verdict: "errors",
       issues: [{
@@ -424,12 +433,14 @@ describe("enforceGenesisQuality", () => {
       validate: vi.fn().mockImplementation((deck) => deck),
     });
 
-    const expectedPath = path.replace(/\.(?:ref|factionRef)$/, "");
+    const expectedPath = path.replace(/\.(?:ref|factionRef|sourceRef|targetRef)$/, "");
     expect(repair.mock.calls[0]![1].user).toContain(JSON.stringify(expectedPath));
     if (path.startsWith("factions")) {
       expect(result.deck.factions[1]!.keyCharacterRefs).toEqual([]);
-    } else {
+    } else if (path.startsWith("majorCharacters")) {
       expect(result.deck.majorCharacters[3]!.factionMemberships).toEqual([]);
+    } else {
+      expect(result.deck.relationsAtAnchor).toEqual(original.relationsAtAnchor?.slice(1));
     }
   });
 

@@ -105,13 +105,25 @@ export type GenesisV2StageOutputs = {
 };
 
 const MIN_CHARACTER_ABILITIES = 2;
+const MAX_RELATIONS_PER_ACTIVE_CHARACTER = 4;
 
 export function sanitizeGenesisV2CharactersTemporalOutput(
   rawOutput: GenesisV2StageOutputs["characters"],
 ): GenesisV2StageOutputs["characters"] {
   const output = GenesisV2CharactersOutputSchema.parse(rawOutput);
+  const activeCharacterRefs = new Set(output.majorCharacters.flatMap((character) =>
+    (character.statusAtAnchor ?? "active") === "active" ? [character.ref] : [],
+  ));
+  const relationCounts = new Map<string, number>();
+  const relationsAtAnchor = output.relationsAtAnchor?.filter((relation) => {
+    if (!activeCharacterRefs.has(relation.sourceRef)) return true;
+    const count = relationCounts.get(relation.sourceRef) ?? 0;
+    relationCounts.set(relation.sourceRef, count + 1);
+    return count < MAX_RELATIONS_PER_ACTIVE_CHARACTER;
+  });
   return {
     ...output,
+    ...(relationsAtAnchor === undefined ? {} : { relationsAtAnchor }),
     majorCharacters: output.majorCharacters.map((character) => {
       if ((character.statusAtAnchor ?? "active") !== "active") return character;
 

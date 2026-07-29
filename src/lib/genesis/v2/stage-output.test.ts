@@ -145,4 +145,23 @@ describe("Genesis V2 stage output contracts", () => {
     expect(() => getGenesisV2StageOutputSchema("characters", "pantheon").parse(output))
       .toThrow(/至少有 2 个 timing=at_anchor/);
   });
+
+  it("keeps at most four anchor relations per active character", () => {
+    const characters = splitDeck(completeDeck()).characters;
+    const sourceRef = characters.majorCharacters[0]!.ref;
+    const targetRefs = characters.majorCharacters.slice(1).map(({ ref }) => ref);
+    const output = {
+      ...characters,
+      relationsAtAnchor: Array.from({ length: 5 }, (_, index) => ({
+        sourceRef,
+        targetRef: targetRefs[index % targetRefs.length]!,
+        status: "ally" as const,
+        publicDescription: "测试关系",
+      })),
+    };
+
+    const sanitized = sanitizeGenesisV2CharactersTemporalOutput(output);
+
+    expect(sanitized.relationsAtAnchor).toHaveLength(4);
+  });
 });
