@@ -317,7 +317,14 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
     const materialSnapshot = job.task.materialSelection
       ? GenesisMaterialSnapshotSchema.parse(job.task.materialSelection)
       : null;
-    const checkedDeck = assembled ? validateGenesisDeck(assembled, mode, materialSnapshot) : null;
+    let checkedDeck: ReturnType<typeof validateGenesisDeck> | null = null;
+    if (assembled) {
+      try {
+        checkedDeck = validateGenesisDeck(assembled, mode, materialSnapshot);
+      } catch (error) {
+        throw new GenesisV2RecoverableStageError(`Genesis V2 世界硬门失败：${safeError(error)}`);
+      }
+    }
     const quality = checkedDeck ? await enforceGenesisQuality({
       deck: checkedDeck,
       mode,
@@ -520,6 +527,7 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
         || isTransientLlmError(error)
         || isRetryablePersistenceError(error))
       && job.attempt < MAX_JOB_ATTEMPTS;
+    const retryFeedback = retry ? safeError(error) : null;
     const terminalError = retry || waitingForProvider ? null : safeError(error);
     await prisma.$transaction(async (tx) => {
       const activeTask = await tx.genesisTask.findFirst({
@@ -536,7 +544,7 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
         where: { id: job.id, leaseToken: job.leaseToken, leaseEpoch: job.leaseEpoch },
         data: {
           status: waitingForProvider ? "waiting_for_provider" : retry ? "queued" : "failed",
-          error: terminalError,
+          error: retryFeedback ?? terminalError,
           leaseToken: null,
           leaseExpiresAt: null,
           completedAt: retry || waitingForProvider ? null : new Date(),

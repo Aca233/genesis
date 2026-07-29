@@ -337,7 +337,7 @@ describe("Genesis V2 primary runner", () => {
     expect(mocks.artifactUpdateMany).not.toHaveBeenCalled();
     expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: "job-blueprint", leaseToken: "lease-1" }),
-      data: expect.objectContaining({ status: "queued", error: null }),
+      data: expect.objectContaining({ status: "queued", error: expect.stringContaining("缺少 slot 引用") }),
     }));
     expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: "running" }),
@@ -356,10 +356,45 @@ describe("Genesis V2 primary runner", () => {
 
     expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: "job-blueprint", leaseToken: "lease-1" }),
-      data: expect.objectContaining({ status: "queued", error: null }),
+      data: expect.objectContaining({
+        status: "queued",
+        error: expect.stringContaining("temporalAnchor.source 缺少对象"),
+      }),
     }));
     expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: "running" }),
+    }));
+    expect(mocks.wakeScheduler).toHaveBeenCalledOnce();
+  });
+
+  it("世界硬门失败只重排人物节点，并把精确问题带入下一次生成", async () => {
+    const deck = completeDeck();
+    const outputs = splitDeck(deck);
+    configureJob("characters");
+    mocks.acceptedCount.mockResolvedValue(3);
+    mocks.completeStructured.mockResolvedValue(outputs.characters);
+    mocks.artifactFindMany.mockResolvedValue([
+      { stageKey: "pantheon_domain", outputHash: "p", content: outputs.pantheon_domain },
+      { stageKey: "civilizations", outputHash: "c", content: outputs.civilizations },
+      { stageKey: "eras", outputHash: "e", content: outputs.eras },
+    ]);
+    mocks.artifactFindFirst.mockResolvedValue({ content: outputs.blueprint, outputHash: "b" });
+    mocks.validateDeck.mockImplementation(() => {
+      throw new Error("时间一致性校验失败：[T4 FUTURE_ABILITY_HELD] 锚点人物持有 future 能力");
+    });
+
+    await runGenesisV2PrimaryJob("job-characters");
+
+    expect(mocks.enforceQuality).not.toHaveBeenCalled();
+    expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: "job-characters", leaseToken: "lease-1" }),
+      data: expect.objectContaining({
+        status: "queued",
+        error: expect.stringContaining("FUTURE_ABILITY_HELD"),
+      }),
+    }));
+    expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "running", error: null }),
     }));
     expect(mocks.wakeScheduler).toHaveBeenCalledOnce();
   });
