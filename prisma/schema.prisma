@@ -90,6 +90,7 @@ model World {
   user                    User             @relation(fields: [userId], references: [id], onDelete: Restrict)
   name                    String
   genesisInput            String           @map("genesis_input") // 原初神谕
+  genesisIntent           Json?            @map("genesis_intent")
   mode                    String           @default("pantheon")
   status                  String           @default("draft") // draft | playing | concluded
   draftDeck               Json?            @map("draft_deck") // 创世草稿卡组（开局落地后清空）
@@ -149,6 +150,7 @@ model GenesisTask {
   shadowBudgetSettledIn   Int               @default(0) @map("shadow_budget_settled_input_tokens")
   shadowBudgetSettledOut  Int               @default(0) @map("shadow_budget_settled_output_tokens")
   decree                  String
+  intentContract          Json?             @map("intent_contract")
   lorebook                Json?
   lorebookName            String?           @map("lorebook_name")
   materialSelection       Json?             @map("material_selection")
