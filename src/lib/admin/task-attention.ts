@@ -1,5 +1,6 @@
 export type AdminTaskKind = "genesis" | "narrative" | "rewrite";
 export type AdminTaskAction = "retry" | "recover" | "cancel";
+export type AdminTaskCapabilitySnapshot = Pick<AdminTaskSnapshot, "kind" | "status" | "leaseExpiresAt">;
 export type AdminTaskSnapshot = {
   kind: AdminTaskKind;
   id: string;
@@ -27,12 +28,29 @@ const ACTIVE = {
   rewrite: ["planning", "applying", "narrating"],
 } as const;
 
-export function allowedAdminTaskActions(task: AdminTaskSnapshot, now: Date): AdminTaskAction[] {
-  const stale = task.leaseExpiresAt !== null && task.leaseExpiresAt < now && (ACTIVE[task.kind] as readonly string[]).includes(task.status);
+const RECOVERABLE = {
+  genesis: ["running", "repairing"],
+  narrative: [],
+  rewrite: ["planning", "applying", "narrating"],
+} as const;
+
+export function allowedAdminTaskActions(task: AdminTaskCapabilitySnapshot, now: Date): AdminTaskAction[] {
+  const active = (ACTIVE[task.kind] as readonly string[]).includes(task.status);
+  const recoverable = (RECOVERABLE[task.kind] as readonly string[]).includes(task.status);
+  const stale = task.leaseExpiresAt !== null && task.leaseExpiresAt < now;
+  const liveLease = task.leaseExpiresAt !== null && task.leaseExpiresAt > now;
+
   if (task.kind === "narrative") return task.status === "pending" ? ["cancel"] : [];
-  if (task.status === "failed") return ["retry"];
-  if (stale) return ["recover", "cancel"];
-  return (ACTIVE[task.kind] as readonly string[]).includes(task.status) ? ["cancel"] : [];
+  if (task.status === "failed") {
+    if (task.kind === "rewrite" && liveLease) return [];
+    return ["retry"];
+  }
+  if (recoverable && stale) return ["recover", "cancel"];
+  return active ? ["cancel"] : [];
+}
+
+export function canAdminTaskAction(task: AdminTaskCapabilitySnapshot, action: AdminTaskAction, now: Date) {
+  return allowedAdminTaskActions(task, now).includes(action);
 }
 
 export function taskSelectionKey(task: Pick<AdminTaskSnapshot, "kind" | "id">) {
@@ -52,7 +70,10 @@ export function deriveTaskAttention(task: AdminTaskSnapshot, now: Date): AdminAt
   const repeated = task.kind !== "rewrite" && task.status === "failed" && (task.attempt ?? 0) >= 3;
   const staleForMs = stale && task.leaseExpiresAt ? now.getTime() - task.leaseExpiresAt.getTime() : 0;
   const reason = repeated ? "repeated_failure" : stale ? "stale" : "failed";
-  const recommendation = task.kind === "narrative" ? (stale ? "cancel" : "inspect") : stale ? "recover" : "rerun";
+  const actions = allowedAdminTaskActions(task, now);
+  const recommendation = actions.includes("recover")
+    ? "recover"
+    : actions.includes("retry") ? "rerun" : actions.includes("cancel") ? "cancel" : "inspect";
   return {
     ...task,
     reason,

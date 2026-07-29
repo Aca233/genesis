@@ -28,6 +28,7 @@ export default async function AdminWorldsPage({ searchParams }: { searchParams: 
     </AdminFilter>
     {data.items.length ? <div className="space-y-3">{data.items.map((world) => {
       const targetLabel = `${world.name} · ${world.id}`;
+      const currentState = `${world.status} · ${world.archivedAt ? "已归档" : "活跃"}`;
       return <article key={world.id} className="rounded-xl border border-gilt/20 bg-paper/45 p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -42,9 +43,9 @@ export default async function AdminWorldsPage({ searchParams }: { searchParams: 
           </div>
           <div className="flex flex-wrap gap-2">
             {world.archivedAt
-              ? <AdminActionButton label="恢复" targetLabel={targetLabel} impact={worldActionImpact.restore} payload={{ targetType: "world", worldId: world.id, action: "restore" }} />
-              : <AdminActionButton label="归档" targetLabel={targetLabel} impact={worldActionImpact.archive} payload={{ targetType: "world", worldId: world.id, action: "archive" }} />}
-            <AdminActionButton label="永久删除" targetLabel={targetLabel} impact={worldActionImpact.delete} danger confirmationLabel={world.name} payload={{ targetType: "world", worldId: world.id, action: "delete" }} />
+              ? <AdminActionButton label="恢复" targetLabel={targetLabel} currentState={currentState} impact={worldActionImpact.restore} payload={{ targetType: "world", worldId: world.id, action: "restore" }} />
+              : <AdminActionButton label="归档" targetLabel={targetLabel} currentState={currentState} impact={worldActionImpact.archive} payload={{ targetType: "world", worldId: world.id, action: "archive" }} />}
+            <AdminActionButton label="永久删除" targetLabel={targetLabel} currentState={currentState} impact={worldActionImpact.delete} danger confirmationLabel={world.name} payload={{ targetType: "world", worldId: world.id, action: "delete" }} />
           </div>
         </div>
       </article>;

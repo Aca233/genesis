@@ -31,6 +31,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
     </AdminFilter>
     {data.items.length ? <div className="space-y-3">{data.items.map((user) => {
       const targetLabel = `${user.name} · ${user.email}`;
+      const currentState = `${user.role === "admin" ? "管理员" : "普通用户"} · ${user.banned ? "已封禁" : "正常"}`;
       return <article key={user.id} className="rounded-xl border border-gilt/20 bg-paper/45 p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -45,14 +46,14 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
             {user.banReason && <p className="mt-2 text-xs text-cinnabar">原因：{user.banReason}</p>}
           </div>
           <div className="flex max-w-xl flex-wrap gap-2">
-            <AdminActionButton label="撤销会话" targetLabel={targetLabel} impact={userActionImpact["revoke-sessions"]} payload={{ targetType: "user", targetUserId: user.id, action: "revoke-sessions" }} />
+            <AdminActionButton label="撤销会话" targetLabel={targetLabel} currentState={currentState} impact={userActionImpact["revoke-sessions"]} payload={{ targetType: "user", targetUserId: user.id, action: "revoke-sessions" }} />
             {user.banned
-              ? <AdminActionButton label="解封" targetLabel={targetLabel} impact={userActionImpact.unban} payload={{ targetType: "user", targetUserId: user.id, action: "unban" }} />
-              : <AdminActionButton label="封禁" targetLabel={targetLabel} impact={userActionImpact.ban} danger payload={{ targetType: "user", targetUserId: user.id, action: "ban" }} />}
+              ? <AdminActionButton label="解封" targetLabel={targetLabel} currentState={currentState} impact={userActionImpact.unban} payload={{ targetType: "user", targetUserId: user.id, action: "unban" }} />
+              : <AdminActionButton label="封禁" targetLabel={targetLabel} currentState={currentState} impact={userActionImpact.ban} danger payload={{ targetType: "user", targetUserId: user.id, action: "ban" }} />}
             {user.role === "admin"
-              ? <AdminActionButton label="取消管理员" targetLabel={targetLabel} impact={userActionImpact.demote} danger payload={{ targetType: "user", targetUserId: user.id, action: "demote" }} />
-              : <AdminActionButton label="设为管理员" targetLabel={targetLabel} impact={userActionImpact.promote} payload={{ targetType: "user", targetUserId: user.id, action: "promote" }} />}
-            <AdminActionButton label="永久删除" targetLabel={targetLabel} impact={userActionImpact.delete} danger confirmationLabel={user.email} payload={{ targetType: "user", targetUserId: user.id, action: "delete" }} />
+              ? <AdminActionButton label="取消管理员" targetLabel={targetLabel} currentState={currentState} impact={userActionImpact.demote} danger payload={{ targetType: "user", targetUserId: user.id, action: "demote" }} />
+              : <AdminActionButton label="设为管理员" targetLabel={targetLabel} currentState={currentState} impact={userActionImpact.promote} payload={{ targetType: "user", targetUserId: user.id, action: "promote" }} />}
+            <AdminActionButton label="永久删除" targetLabel={targetLabel} currentState={currentState} impact={userActionImpact.delete} danger confirmationLabel={user.email} payload={{ targetType: "user", targetUserId: user.id, action: "delete" }} />
           </div>
         </div>
       </article>;

@@ -3,10 +3,10 @@ import { AdminActionButton } from "@/components/admin/AdminActionButton";
 import { AdminFilter, inputClass, PageNav } from "@/components/admin/AdminList";
 import { AdminSection, EmptyState } from "@/components/admin/AdminShell";
 import { taskActionCopy } from "@/lib/admin/action-form";
+import { allowedAdminTaskActions, deriveTaskAttention } from "@/lib/admin/task-attention";
 import { listAdminTasks } from "@/lib/admin/data";
 import { parseAdminPage } from "@/lib/admin/security";
 
-const activeStatuses = ["queued", "pending", "running", "repairing", "planning", "applying", "narrating"];
 const taskFlag = (query: URLSearchParams, name: string) => query.get(name) === "yes" ? "yes" : "no";
 const labelClass = "grid gap-1 text-xs text-ink-soft";
 
@@ -22,6 +22,7 @@ export default async function AdminTasksPage({ searchParams }: { searchParams: P
   const stale = taskFlag(query, "stale");
   const repeated = taskFlag(query, "repeated");
   const hasFilters = Boolean(search || kind !== "all" || status !== "all" || attention === "yes" || stale === "yes" || repeated === "yes");
+  const now = new Date();
   const data = await listAdminTasks({ ...page, search, kind, status, attention, stale, repeated });
 
   return <AdminSection title="任务仪轨" note="任务输入与原始输出不会进入后台">
@@ -38,9 +39,11 @@ export default async function AdminTasksPage({ searchParams }: { searchParams: P
       <label className={labelClass}><span>连续失败</span><select name="repeated" defaultValue={repeated} className={inputClass}><option value="no">不限</option><option value="yes">仅连续失败</option></select></label>
     </AdminFilter>
     {data.items.length ? <div className="space-y-3">{data.items.map((task) => {
-      const isStale = task.leaseExpiresAt !== null && task.leaseExpiresAt < new Date();
+      const isStale = deriveTaskAttention(task, now)?.reason === "stale";
+      const allowedActions = allowedAdminTaskActions(task, now);
       const title = task.kind === "genesis" ? "创世任务" : task.kind === "narrative" ? "叙事生成" : "现实改写";
       const targetLabel = `${title} · ${task.world?.name ?? task.id}`;
+      const currentState = `${task.status} · ${task.stage ?? "阶段未知"}`;
       return <article key={`${task.kind}:${task.id}`} className="rounded-xl border border-gilt/20 bg-paper/45 p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:justify-between">
           <div>
@@ -55,25 +58,15 @@ export default async function AdminTasksPage({ searchParams }: { searchParams: P
             <p className="mt-2 text-xs text-ink-faint">阶段 {task.stage} · 更新 {task.updatedAt.toLocaleString("zh-CN")}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {task.kind !== "narrative" && task.status === "failed" && <AdminActionButton
-              label={taskActionCopy.retry.label}
+            {allowedActions.map((action) => <AdminActionButton
+              key={action}
+              label={taskActionCopy[action].label}
               targetLabel={targetLabel}
-              impact={taskActionCopy.retry.impact}
-              payload={{ targetType: "task", kind: task.kind, taskId: task.id, action: "retry" }}
-            />}
-            {task.kind !== "narrative" && isStale && <AdminActionButton
-              label={taskActionCopy.recover.label}
-              targetLabel={targetLabel}
-              impact={taskActionCopy.recover.impact}
-              payload={{ targetType: "task", kind: task.kind, taskId: task.id, action: "recover" }}
-            />}
-            {activeStatuses.includes(task.status) && <AdminActionButton
-              label={taskActionCopy.cancel.label}
-              targetLabel={targetLabel}
-              impact={taskActionCopy.cancel.impact}
-              danger
-              payload={{ targetType: "task", kind: task.kind, taskId: task.id, action: "cancel" }}
-            />}
+              currentState={currentState}
+              impact={taskActionCopy[action].impact}
+              danger={action === "cancel"}
+              payload={{ targetType: "task", kind: task.kind, taskId: task.id, action }}
+            />)}
           </div>
         </div>
       </article>;

@@ -9,6 +9,8 @@ export type AdminActionPayload = Record<string, string | undefined>;
 export type AdminActionPanelProps = {
   label: string;
   targetLabel: string;
+  currentState: string;
+  currentStateLabel?: string;
   impact: string;
   payload: AdminActionPayload;
   danger?: boolean;
@@ -26,6 +28,8 @@ const REFRESH_DELAY_MS = 250;
 export function AdminActionPanel({
   label,
   targetLabel,
+  currentState,
+  currentStateLabel = "当前状态",
   impact,
   payload,
   danger = false,
@@ -234,6 +238,7 @@ export function AdminActionPanel({
 
       <dl className="admin-action-dialog__summary">
         <div><dt>操作目标</dt><dd>{targetLabel}</dd></div>
+        <div><dt>{currentStateLabel}</dt><dd>{currentState}</dd></div>
         <div><dt>操作影响</dt><dd id={impactId}>{impact}</dd></div>
       </dl>
 

@@ -80,6 +80,7 @@ import { AdminActionPanel, type AdminActionPanelProps } from "./AdminActionPanel
 const defaultProps: AdminActionPanelProps = {
   label: "永久删除",
   targetLabel: "样本用户 · sample@example.com",
+  currentState: "普通用户 · 已封禁",
   impact: "永久删除账号及其关联元数据，此操作不可撤销。",
   confirmationLabel: "sample@example.com",
   danger: true,
@@ -89,6 +90,7 @@ const defaultProps: AdminActionPanelProps = {
 const taskProps: AdminActionPanelProps = {
   label: "重新执行",
   targetLabel: "创世任务 · 样本世界",
+  currentState: "failed · pantheon",
   impact: "保留失败记录，从允许恢复的位置重新开始。",
   payload: { targetType: "task", kind: "genesis", taskId: "task-1", action: "retry" },
 };
@@ -204,6 +206,17 @@ describe("AdminActionPanel", () => {
     expect(css).toContain(".admin-action-panel__trigger:focus-visible");
     expect(css).toContain("max-inline-size: min(42rem, calc(100vw - 2rem))");
     expect(css).toContain("@media (max-width: 640px)");
+  });
+
+
+
+  it("shows the required current state in the action summary, including permanent actions", () => {
+    const root = renderPanel();
+    const stateValue = findElement(root, (element) => element.type === "dd" && element.props.children === "普通用户 · 已封禁");
+    const stateLabel = findElement(root, (element) => element.type === "dt" && element.props.children === "当前状态");
+
+    expect(stateValue.props.children).toBe("普通用户 · 已封禁");
+    expect(stateLabel.props.children).toBe("当前状态");
   });
 
   it("renders one native dialog with a real method=dialog cancel form and native Escape behavior", () => {

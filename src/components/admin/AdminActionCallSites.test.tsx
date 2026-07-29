@@ -9,11 +9,13 @@ const data = vi.hoisted(() => ({
 
 vi.mock("@/lib/admin/data", () => data);
 vi.mock("@/components/admin/AdminActionButton", () => ({
-  AdminActionButton: (props: { label: string; targetLabel: string; impact: string; confirmationLabel?: string; payload: Record<string, string> }) => <button
+  AdminActionButton: (props: { label: string; targetLabel: string; currentState: string; impact: string; confirmationLabel?: string; payload: Record<string, string> }) => <button
     type="button"
     data-label={props.label}
     data-target={props.targetLabel}
     data-impact={props.impact}
+    data-state={props.currentState}
+    data-task-id={props.payload.taskId}
     data-confirmation={props.confirmationLabel}
     data-action={props.payload.action}
     data-kind={props.payload.kind}
@@ -51,12 +53,15 @@ describe("admin action call sites", () => {
 
   it("uses approved task copy, concrete target/impact copy, and hides narrative retry/recover", async () => {
     data.listAdminTasks.mockResolvedValue({
-      total: 4,
+      total: 7,
       items: [
         task("genesis", "genesis-1", "failed"),
         task("narrative", "narrative-failed", "failed"),
         task("narrative", "narrative-pending", "pending", new Date("2026-07-28T00:00:00.000Z")),
-        task("rewrite", "rewrite-stale", "running", new Date("2026-07-28T00:00:00.000Z")),
+        task("rewrite", "rewrite-stale", "planning", new Date("2026-07-28T00:00:00.000Z")),
+        task("genesis", "genesis-queued-stale", "queued", new Date("2026-07-28T00:00:00.000Z")),
+        task("rewrite", "rewrite-failed-lease", "failed", new Date("2026-07-28T00:00:00.000Z")),
+        task("rewrite", "rewrite-completed-lease", "completed", new Date("2026-07-28T00:00:00.000Z")),
       ],
     });
 
@@ -69,6 +74,14 @@ describe("admin action call sites", () => {
     expect(markup).toContain("data-impact=\"保留失败记录，从允许恢复的位置重新开始。\"");
     expect(markup).toContain("data-impact=\"清除过期租约并重新进入可执行状态。\"");
     expect(markup).toContain("data-impact=\"停止后续执行并保留当前故障证据。\"");
+    expect(markup).toContain("data-state=\"failed · stage\"");
+    const queuedStaleButtons = markup.match(/<button[^>]*data-task-id="genesis-queued-stale"[^>]*>/g) ?? [];
+    expect(queuedStaleButtons).toHaveLength(1);
+    expect(queuedStaleButtons[0]).toContain('data-action="cancel"');
+    const failedLeaseButtons = markup.match(/<button[^>]*data-task-id="rewrite-failed-lease"[^>]*>/g) ?? [];
+    expect(failedLeaseButtons).toHaveLength(1);
+    expect(failedLeaseButtons[0]).toContain('data-action="retry"');
+    expect(markup).not.toMatch(/<button[^>]*data-task-id="rewrite-completed-lease"/);
     const narrativeButtons = markup.match(/<button[^>]*data-kind="narrative"[^>]*>/g) ?? [];
     expect(narrativeButtons.some((button) => /data-action="(?:retry|recover)"/.test(button))).toBe(false);
   });
@@ -88,6 +101,7 @@ describe("admin action call sites", () => {
     expect(buttons).toHaveLength(4);
     expect(markup.match(/data-target="样本用户 · sample@example.com"/g)).toHaveLength(4);
     expect(markup.match(/data-impact="[^"]+"/g)).toHaveLength(4);
+    expect(markup.match(/data-state="普通用户 · 正常"/g)).toHaveLength(4);
     expect(markup).toContain("data-confirmation=\"sample@example.com\"");
   });
 
@@ -107,6 +121,7 @@ describe("admin action call sites", () => {
     expect(buttons).toHaveLength(2);
     expect(markup.match(/data-target="样本世界 · world-1"/g)).toHaveLength(2);
     expect(markup.match(/data-impact="[^"]+"/g)).toHaveLength(2);
+    expect(markup.match(/data-state="playing · 活跃"/g)).toHaveLength(2);
     expect(markup).toContain("data-confirmation=\"样本世界\"");
   });
 });

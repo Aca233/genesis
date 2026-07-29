@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { AdminAttentionTask, AdminTaskKind } from "@/lib/admin/task-attention";
+import type { AdminAttentionTask, AdminTaskKind, AdminTaskSnapshot } from "@/lib/admin/task-attention";
 import { taskSelectionKey } from "@/lib/admin/task-attention";
 
 type WorkbenchView = "attention" | "failed" | "stale" | "repeated";
@@ -11,7 +11,7 @@ type WorkbenchCounts = {
   failed: number;
   stale: number;
   repeated: number;
-  recoveredToday: number;
+  recoveredToday: { state: "ready"; value: number } | { state: "unavailable" };
 };
 
 const taskLabels: Record<AdminTaskKind, string> = {
@@ -42,13 +42,6 @@ export function workbenchHref(current: WorkbenchLocation, changes: WorkbenchChan
   return `/admin?${params.toString()}`;
 }
 
-function taskMatchesView(task: AdminAttentionTask, view: WorkbenchView) {
-  if (view === "failed") return task.status === "failed";
-  if (view === "stale") return task.reason === "stale";
-  if (view === "repeated") return task.reason === "repeated_failure";
-  return true;
-}
-
 function formatElapsed(value: Date, now: Date) {
   const minutes = Math.max(0, Math.floor((now.getTime() - value.getTime()) / 60_000));
   return minutes < 1 ? "刚刚" : `${minutes} 分钟前`;
@@ -57,13 +50,17 @@ function formatElapsed(value: Date, now: Date) {
 export function AdminAttentionQueue({
   counts,
   items,
+  total,
+  hasMore,
   selected,
   filters: current,
   now,
 }: {
   counts: WorkbenchCounts;
   items: AdminAttentionTask[];
-  selected: AdminAttentionTask | null;
+  total: number;
+  hasMore: boolean;
+  selected: Pick<AdminTaskSnapshot, "kind" | "id"> | null;
   filters: WorkbenchLocation;
   now: Date;
 }) {
@@ -74,21 +71,20 @@ export function AdminAttentionQueue({
         <h2 id="admin-workbench-queue-title">待处置任务</h2>
         <p>仅展示任务、用户与世界元数据，不展示用户正文。</p>
       </div>
-      <span className="admin-workbench-recovered">今日已恢复 <strong>{counts.recoveredToday}</strong></span>
+      <span className="admin-workbench-recovered">今日已恢复 {counts.recoveredToday.state === "ready"
+        ? <strong>{counts.recoveredToday.value}</strong>
+        : <strong>数据暂不可用</strong>}</span>
     </div>
 
     <nav className="admin-workbench-filters" aria-label="任务状态筛选">
-      {filters.map((filter) => {
-        const retainedTask = selected && taskMatchesView(selected, filter.view) ? taskSelectionKey(selected) : null;
-        return <Link
+      {filters.map((filter) => <Link
           key={filter.view}
-          href={workbenchHref(current, { view: filter.view, task: retainedTask })}
+          href={workbenchHref(current, { view: filter.view, task: null })}
           aria-current={current.view === filter.view ? "page" : undefined}
           className={current.view === filter.view ? "is-active" : undefined}
         >
           <span>{filter.label}</span><strong>{counts[filter.count]}</strong>
-        </Link>;
-      })}
+        </Link>)}
     </nav>
 
     <form action="/admin" method="get" className="admin-workbench-search" role="search">
@@ -101,6 +97,11 @@ export function AdminAttentionQueue({
         {current.q && <Link href={workbenchHref(current, { q: "", task: selected ? taskSelectionKey(selected) : null })}>清除</Link>}
       </div>
     </form>
+
+    <div className="admin-workbench-queue__coverage">
+      <span>{hasMore ? `当前展示前 ${items.length} 条 / 共 ${total} 条` : `当前展示 ${items.length} 条 / 共 ${total} 条`}</span>
+      {hasMore && <Link href="/admin/tasks?attention=yes">查看完整集合</Link>}
+    </div>
 
     {items.length ? <div className="admin-workbench-list">
       {items.map((task) => {
@@ -126,6 +127,8 @@ export function AdminAttentionQueue({
           <span className="admin-workbench-row__affordance">查看详情 <span aria-hidden="true">→</span></span>
         </Link>;
       })}
-    </div> : <p className="admin-workbench-empty">当前筛选条件下没有需要处理的任务。</p>}
+    </div> : current.view === "attention" && !current.q
+      ? <p className="admin-workbench-empty">当前没有需要处理的任务</p>
+      : <p className="admin-workbench-empty">没有符合当前条件的任务。<Link href="/admin">清除筛选</Link></p>}
   </section>;
 }

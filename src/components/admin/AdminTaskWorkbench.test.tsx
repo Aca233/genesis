@@ -4,11 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { AdminAttentionTask } from "@/lib/admin/task-attention";
 
 vi.mock("./AdminActionButton", () => ({
-  AdminActionButton: (props: { label: string; targetLabel: string; impact: string; payload: Record<string, string> }) => <button
+  AdminActionButton: (props: { label: string; targetLabel: string; currentState: string; impact: string; payload: Record<string, string> }) => <button
     type="button"
     data-action={props.payload.action}
     data-impact={props.impact}
     data-target={props.targetLabel}
+    data-state={props.currentState}
   >{props.label}</button>,
 }));
 import { AdminAttentionQueue, workbenchHref } from "./AdminAttentionQueue";
@@ -59,7 +60,9 @@ describe("AdminAttentionQueue", () => {
       stage: null,
     });
     const markup = renderToStaticMarkup(<AdminAttentionQueue
-      counts={{ attention: 2, failed: 2, stale: 0, repeated: 1, recoveredToday: 4 }}
+      counts={{ attention: 2, failed: 2, stale: 0, repeated: 1, recoveredToday: { state: "ready", value: 4 } }}
+      total={2}
+      hasMore={false}
       items={[selected, narrative]}
       selected={selected}
       filters={{ view: "attention", q: "薄暮", task: "genesis:genesis-001" }}
@@ -78,11 +81,60 @@ describe("AdminAttentionQueue", () => {
     expect(markup).toContain("dateTime=\"2026-07-29T03:42:00.000Z\"");
     expect(markup).toContain("aria-current=\"true\"");
     expect(markup).toContain("任务 genesis-001");
-    expect(markup).toContain("href=\"/admin?view=failed&amp;q=%E8%96%84%E6%9A%AE&amp;task=genesis%3Agenesis-001\"");
+    expect(markup).toContain("href=\"/admin?view=failed&amp;q=%E8%96%84%E6%9A%AE\"");
+    expect(markup).not.toContain("href=\"/admin?view=failed&amp;q=%E8%96%84%E6%9A%AE&amp;task=");
     expect(markup).toContain("href=\"/admin?view=stale&amp;q=%E8%96%84%E6%9A%AE\"");
     expect(markup).toContain("href=\"/admin?view=attention&amp;q=%E8%96%84%E6%9A%AE&amp;task=narrative%3Anarrative-002\"");
     expect(markup).toContain("type=\"hidden\" name=\"task\" value=\"genesis:genesis-001\"");
   });
+
+
+  it("shows partial recovery availability, overflow disclosure, and a real full-collection link", () => {
+    const markup = renderToStaticMarkup(<AdminAttentionQueue
+      counts={{ attention: 63, failed: 60, stale: 3, repeated: 8, recoveredToday: { state: "unavailable" } }}
+      items={[attentionTask()]}
+      total={63}
+      hasMore
+      selected={null}
+      filters={{ view: "attention", q: "", task: null }}
+      now={now}
+    />);
+
+    expect(markup).toContain("今日已恢复");
+    expect(markup).toContain("数据暂不可用");
+    expect(markup).not.toContain("今日已恢复 <strong>0</strong>");
+    expect(markup).toContain("当前展示前 1 条 / 共 63 条");
+    expect(markup).toContain('href="/admin/tasks?attention=yes"');
+    expect(markup).toContain("查看完整集合");
+  });
+
+  it("distinguishes the default attention empty state from filtered no-results", () => {
+    const defaultEmpty = renderToStaticMarkup(<AdminAttentionQueue
+      counts={{ attention: 0, failed: 0, stale: 0, repeated: 0, recoveredToday: { state: "ready", value: 0 } }}
+      items={[]}
+      total={0}
+      hasMore={false}
+      selected={null}
+      filters={{ view: "attention", q: "", task: null }}
+      now={now}
+    />);
+    expect(defaultEmpty).toContain("当前没有需要处理的任务");
+    expect(defaultEmpty).not.toContain("清除筛选");
+
+    const filteredEmpty = renderToStaticMarkup(<AdminAttentionQueue
+      counts={{ attention: 4, failed: 2, stale: 2, repeated: 0, recoveredToday: { state: "ready", value: 0 } }}
+      items={[]}
+      total={0}
+      hasMore={false}
+      selected={null}
+      filters={{ view: "stale", q: "雾港", task: null }}
+      now={now}
+    />);
+    expect(filteredEmpty).toContain("没有符合当前条件的任务");
+    expect(filteredEmpty).toContain('href="/admin"');
+    expect(filteredEmpty).toContain("清除筛选");
+  });
+
 });
 
 describe("AdminTaskDetail", () => {
@@ -114,6 +166,7 @@ describe("AdminTaskDetail", () => {
 
     expect(markup).toContain(">重新执行</button>");
     expect(markup).toContain("data-impact=\"保留失败记录，从允许恢复的位置重新开始。\"");
+    expect(markup).toContain("data-state=\"failed · deck_generation\"");
     expect(markup).not.toContain(">重试</button>");
   });
 

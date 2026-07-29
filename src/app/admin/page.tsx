@@ -53,6 +53,8 @@ export default async function AdminPage({ searchParams }: { searchParams: AdminP
       <AdminAttentionQueue
         counts={result.counts}
         items={result.items}
+        total={result.total}
+        hasMore={result.hasMore}
         selected={result.selected}
         filters={{ view, q: search, task: selected }}
         now={result.generatedAt}

@@ -5,9 +5,9 @@ const now = new Date("2026-07-29T07:00:00.000Z");
 
 function taskDb() {
   return {
-    genesisTask: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
-    generationRequest: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
-    realityRewrite: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+    genesisTask: { findMany: vi.fn().mockResolvedValue([]), findUnique: vi.fn().mockResolvedValue(null), count: vi.fn().mockResolvedValue(0) },
+    generationRequest: { findMany: vi.fn().mockResolvedValue([]), findUnique: vi.fn().mockResolvedValue(null), count: vi.fn().mockResolvedValue(0) },
+    realityRewrite: { findMany: vi.fn().mockResolvedValue([]), findUnique: vi.fn().mockResolvedValue(null), count: vi.fn().mockResolvedValue(0) },
     adminAuditLog: { count: vi.fn().mockResolvedValue(0) },
   };
 }
@@ -91,13 +91,20 @@ describe("admin task workbench", () => {
     const db = taskDb();
     db.adminAuditLog.count.mockResolvedValueOnce(2);
     db.genesisTask.findMany.mockResolvedValueOnce(genesisRows);
+    db.genesisTask.findUnique.mockResolvedValueOnce(genesisRows[0]);
     db.generationRequest.findMany.mockResolvedValueOnce(narrativeRows);
+    db.genesisTask.count
+      .mockResolvedValueOnce(2).mockResolvedValueOnce(2).mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    db.generationRequest.count
+      .mockResolvedValueOnce(1).mockResolvedValueOnce(1).mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1).mockResolvedValueOnce(0);
 
     const all = await loadAdminTaskWorkbench({ view: "attention", search: "", selected: "genesis:genesis-repeated" }, db as never, now);
 
     expect(all).toEqual(expect.objectContaining({
       state: "ready", generatedAt: now,
-      counts: { attention: 3, failed: 2, stale: 1, repeated: 1, recoveredToday: 2 },
+      counts: { attention: 3, failed: 2, stale: 1, repeated: 1, recoveredToday: { state: "ready", value: 2 } },
       selected: expect.objectContaining({ id: "genesis-repeated" }),
     }));
     if (all.state !== "ready") throw new Error("expected ready workbench");
@@ -113,11 +120,92 @@ describe("admin task workbench", () => {
     ] }));
 
     const searchDb = taskDb();
-    searchDb.genesisTask.findMany.mockResolvedValueOnce(genesisRows);
+    searchDb.genesisTask.findMany.mockResolvedValueOnce([genesisRows[0]]);
     const searched = await loadAdminTaskWorkbench({ view: "repeated", search: "雾港", selected: "genesis:missing" }, searchDb as never, now);
     expect(searched).toEqual(expect.objectContaining({
       state: "ready", items: [expect.objectContaining({ id: "genesis-repeated" })], selected: null,
     }));
+  });
+
+
+
+  it("keeps the core queue ready when only recovered-today counting fails", async () => {
+    const db = taskDb();
+    db.adminAuditLog.count.mockRejectedValueOnce(new Error("audit offline"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await loadAdminTaskWorkbench({ view: "attention", search: "", selected: null }, db as never, now);
+
+    expect(result).toEqual(expect.objectContaining({
+      state: "ready",
+      counts: expect.objectContaining({ recoveredToday: { state: "unavailable" } }),
+      items: [],
+    }));
+    expect(error).toHaveBeenCalledWith("[admin.workbench] recovered count failed", expect.any(Error));
+    error.mockRestore();
+  });
+
+  it("uses database filters and independent counts, exposes overflow, and resolves a truncated terminal deep link", async () => {
+    const db = taskDb();
+    const queueRow = {
+      id: "genesis-visible", status: "failed", stage: "pantheon", attempt: 1, leaseExpiresAt: null,
+      createdAt: new Date("2026-07-29T06:00:00.000Z"), updatedAt: new Date("2026-07-29T06:30:00.000Z"),
+      error: "safe failure", user: { id: "user-1", name: "值守样本", email: "sample@example.com" }, world: null,
+    };
+    const selectedRow = {
+      ...queueRow,
+      id: "genesis-truncated",
+      status: "completed",
+      stage: "complete",
+      updatedAt: new Date("2026-07-29T06:59:00.000Z"),
+      error: null,
+    };
+    db.genesisTask.findMany.mockResolvedValueOnce([queueRow]);
+    db.genesisTask.findUnique.mockResolvedValueOnce(selectedRow);
+    db.genesisTask.count.mockResolvedValue(51);
+    db.adminAuditLog.count.mockResolvedValueOnce(7);
+
+    const result = await loadAdminTaskWorkbench({
+      view: "attention",
+      search: "值守",
+      selected: "genesis:genesis-truncated",
+    }, db as never, now);
+
+    expect(result).toEqual(expect.objectContaining({
+      state: "ready",
+      total: 51,
+      hasMore: true,
+      counts: expect.objectContaining({ attention: 51, recoveredToday: { state: "ready", value: 7 } }),
+      items: [expect.objectContaining({ id: "genesis-visible" })],
+      selected: expect.objectContaining({ id: "genesis-truncated", status: "completed", stage: "complete" }),
+    }));
+    expect(db.genesisTask.findUnique).toHaveBeenCalledWith({
+      where: { id: "genesis-truncated" },
+      select: expect.objectContaining({ id: true, status: true, stage: true, leaseExpiresAt: true }),
+    });
+    const selectedQuery = JSON.stringify(db.genesisTask.findUnique.mock.calls[0]);
+    expect(selectedQuery).not.toMatch(/genesisInput|content|rawOutput|decree|directive|password|accessToken|refreshToken/);
+    const listQuery = JSON.stringify(db.genesisTask.findMany.mock.calls[0]);
+    expect(listQuery).toContain("值守");
+    expect(listQuery).toContain("failed");
+    expect(db.genesisTask.count).toHaveBeenCalledWith(expect.objectContaining({ where: expect.any(Object) }));
+  });
+
+  it("keeps an independently selected task only while metadata search still matches", async () => {
+    const selectedRow = {
+      id: "genesis-selected", status: "completed", stage: "complete", attempt: 1, leaseExpiresAt: null,
+      createdAt: new Date("2026-07-29T06:00:00.000Z"), updatedAt: new Date("2026-07-29T06:30:00.000Z"),
+      error: null, user: { id: "user-1", name: "林舟", email: "lin@example.com" }, world: { id: "world-1", name: "雾港纪元" },
+    };
+    const matchingDb = taskDb();
+    matchingDb.genesisTask.findUnique.mockResolvedValueOnce(selectedRow);
+    const matching = await loadAdminTaskWorkbench({ view: "failed", search: "雾港", selected: "genesis:genesis-selected" }, matchingDb as never, now);
+    expect(matching).toEqual(expect.objectContaining({ state: "ready", selected: expect.objectContaining({ id: "genesis-selected" }) }));
+
+    const mismatchDb = taskDb();
+    mismatchDb.genesisTask.findUnique.mockResolvedValueOnce(selectedRow);
+    const mismatch = await loadAdminTaskWorkbench({ view: "failed", search: "不匹配", selected: "genesis:genesis-selected" }, mismatchDb as never, now);
+    expect(mismatch).toEqual(expect.objectContaining({ state: "ready", selected: null }));
   });
 
   it("loads an attention count without converting query failures to zero", async () => {

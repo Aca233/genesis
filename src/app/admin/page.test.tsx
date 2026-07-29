@@ -57,7 +57,9 @@ const selectedTask: AdminAttentionTask = {
 const readyResult = {
   state: "ready" as const,
   generatedAt: new Date("2026-07-29T04:00:00.000Z"),
-  counts: { attention: 0, failed: 0, stale: 0, repeated: 0, recoveredToday: 2 },
+  counts: { attention: 0, failed: 0, stale: 0, repeated: 0, recoveredToday: { state: "ready" as const, value: 2 } },
+  total: 0,
+  hasMore: false,
   items: [],
   selected: null,
 };
@@ -104,6 +106,38 @@ describe("AdminPage task workbench", () => {
     expect(dependencies.redirect).not.toHaveBeenCalled();
     expect(markup).toContain("任务工作台");
     expect(markup).toContain("value=\"genesis:genesis-001\"");
+  });
+
+
+
+  it("keeps a terminal selected task URL and renders its latest state after refresh", async () => {
+    const terminalTask = {
+      kind: "rewrite" as const,
+      id: "rewrite-001",
+      status: "completed",
+      stage: "narrating",
+      attempt: null,
+      leaseExpiresAt: null,
+      createdAt: new Date("2026-07-29T03:00:00.000Z"),
+      updatedAt: new Date("2026-07-29T03:59:00.000Z"),
+      error: null,
+      user: { id: "user-001", name: "值守样本", email: "sample@example.com" },
+      world: { id: "world-001", name: "薄暮之海" },
+    };
+    dependencies.loadAdminTaskWorkbench.mockResolvedValue({
+      ...readyResult,
+      selected: terminalTask,
+    });
+
+    const page = await AdminPage({
+      searchParams: Promise.resolve({ view: "attention", task: "rewrite:rewrite-001" }),
+    });
+    const markup = renderToStaticMarkup(page);
+
+    expect(dependencies.redirect).not.toHaveBeenCalled();
+    expect(markup).toContain("completed");
+    expect(markup).toContain("narrating");
+    expect(markup).toContain('href="/admin/audit?targetId=rewrite-001"');
   });
 
   it("canonicalizes task out of the URL when a new q no longer matches the selected task", async () => {

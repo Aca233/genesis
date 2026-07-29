@@ -35,3 +35,38 @@ describe("deriveTaskAttention", () => {
     expect(allowedAdminTaskActions(narrative, now)).toEqual([]);
   });
 });
+
+describe("allowedAdminTaskActions capability matrix", () => {
+  function snapshot(kind: "genesis" | "narrative" | "rewrite", status: string, leaseExpiresAt: Date | null = null) {
+    return { ...base, kind, status, leaseExpiresAt };
+  }
+
+  it.each([
+    ["genesis queued", snapshot("genesis", "queued"), ["cancel"]],
+    ["genesis stale queued", snapshot("genesis", "queued", new Date("2026-07-29T06:00:00.000Z")), ["cancel"]],
+    ["genesis running", snapshot("genesis", "running"), ["cancel"]],
+    ["genesis stale running", snapshot("genesis", "running", new Date("2026-07-29T06:00:00.000Z")), ["recover", "cancel"]],
+    ["genesis stale repairing", snapshot("genesis", "repairing", new Date("2026-07-29T06:00:00.000Z")), ["recover", "cancel"]],
+    ["genesis failed", snapshot("genesis", "failed"), ["retry"]],
+    ["genesis failed with an expired residual lease", snapshot("genesis", "failed", new Date("2026-07-29T06:00:00.000Z")), ["retry"]],
+    ["genesis cancelled", snapshot("genesis", "cancelled"), []],
+    ["genesis completed", snapshot("genesis", "completed"), []],
+    ["narrative pending", snapshot("narrative", "pending"), ["cancel"]],
+    ["narrative stale pending", snapshot("narrative", "pending", new Date("2026-07-29T06:00:00.000Z")), ["cancel"]],
+    ["narrative failed", snapshot("narrative", "failed"), []],
+    ["narrative cancelled", snapshot("narrative", "cancelled"), []],
+    ["narrative completed", snapshot("narrative", "completed"), []],
+    ["rewrite planning", snapshot("rewrite", "planning"), ["cancel"]],
+    ["rewrite stale planning", snapshot("rewrite", "planning", new Date("2026-07-29T06:00:00.000Z")), ["recover", "cancel"]],
+    ["rewrite applying", snapshot("rewrite", "applying"), ["cancel"]],
+    ["rewrite stale applying", snapshot("rewrite", "applying", new Date("2026-07-29T06:00:00.000Z")), ["recover", "cancel"]],
+    ["rewrite narrating", snapshot("rewrite", "narrating"), ["cancel"]],
+    ["rewrite stale narrating", snapshot("rewrite", "narrating", new Date("2026-07-29T06:00:00.000Z")), ["recover", "cancel"]],
+    ["rewrite failed", snapshot("rewrite", "failed"), ["retry"]],
+    ["rewrite failed with an expired residual lease", snapshot("rewrite", "failed", new Date("2026-07-29T06:00:00.000Z")), ["retry"]],
+    ["rewrite cancelled with an expired residual lease", snapshot("rewrite", "cancelled", new Date("2026-07-29T06:00:00.000Z")), []],
+    ["rewrite completed with an expired residual lease", snapshot("rewrite", "completed", new Date("2026-07-29T06:00:00.000Z")), []],
+  ] as const)("allows only %s actions", (_label, task, expected) => {
+    expect(allowedAdminTaskActions(task, now)).toEqual(expected);
+  });
+});

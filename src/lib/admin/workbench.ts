@@ -4,8 +4,8 @@ import { prisma } from "@/lib/db";
 import { redactAdminError } from "./security";
 import {
   deriveTaskAttention,
-  taskSelectionKey,
   type AdminAttentionTask,
+  type AdminTaskKind,
   type AdminTaskSnapshot,
 } from "./task-attention";
 
@@ -17,6 +17,10 @@ export type AdminWorkbenchFilters = {
   selected: string | null;
 };
 
+export type AdminRecoveredToday =
+  | { state: "ready"; value: number }
+  | { state: "unavailable" };
+
 export type AdminWorkbenchResult =
   | {
       state: "ready";
@@ -26,10 +30,12 @@ export type AdminWorkbenchResult =
         failed: number;
         stale: number;
         repeated: number;
-        recoveredToday: number;
+        recoveredToday: AdminRecoveredToday;
       };
       items: AdminAttentionTask[];
-      selected: AdminAttentionTask | null;
+      total: number;
+      hasMore: boolean;
+      selected: AdminTaskSnapshot | null;
     }
   | { state: "unavailable"; message: "任务数据暂不可用" };
 
@@ -81,9 +87,7 @@ type GenesisAttentionRow = Prisma.GenesisTaskGetPayload<{ select: typeof genesis
 type NarrativeAttentionRow = Prisma.GenerationRequestGetPayload<{ select: typeof narrativeAttentionSelect }>;
 type RewriteAttentionRow = Prisma.RealityRewriteGetPayload<{ select: typeof rewriteAttentionSelect }>;
 
-function mapGenesis(
-  row: GenesisAttentionRow,
-): AdminTaskSnapshot {
+function mapGenesis(row: GenesisAttentionRow): AdminTaskSnapshot {
   return {
     kind: "genesis",
     id: row.id,
@@ -99,9 +103,7 @@ function mapGenesis(
   };
 }
 
-function mapNarrative(
-  row: NarrativeAttentionRow,
-): AdminTaskSnapshot {
+function mapNarrative(row: NarrativeAttentionRow): AdminTaskSnapshot {
   const world = row.chapter.timeline.world;
   return {
     kind: "narrative",
@@ -118,9 +120,7 @@ function mapNarrative(
   };
 }
 
-function mapRewrite(
-  row: RewriteAttentionRow,
-): AdminTaskSnapshot {
+function mapRewrite(row: RewriteAttentionRow): AdminTaskSnapshot {
   return {
     kind: "rewrite",
     id: row.id,
@@ -142,54 +142,138 @@ function startOfLocalDay(now: Date) {
   return value;
 }
 
-function genesisAttentionWhere(now: Date) {
-  return {
-    OR: [
-      { status: "failed" },
-      { status: { in: ["queued", "running", "repairing"] }, leaseExpiresAt: { lt: now } },
-    ],
-  };
+function genesisAttentionWhere(now: Date): Prisma.GenesisTaskWhereInput {
+  return { OR: [
+    { status: "failed" },
+    { status: { in: ["queued", "running", "repairing"] }, leaseExpiresAt: { lt: now } },
+  ] };
 }
 
-function narrativeAttentionWhere(now: Date) {
-  return {
-    OR: [
-      { status: "failed" },
-      { status: "pending", leaseExpiresAt: { lt: now } },
-    ],
-  };
+function narrativeAttentionWhere(now: Date): Prisma.GenerationRequestWhereInput {
+  return { OR: [
+    { status: "failed" },
+    { status: "pending", leaseExpiresAt: { lt: now } },
+  ] };
 }
 
-function rewriteAttentionWhere(now: Date) {
-  return {
-    OR: [
-      { status: "failed" },
-      { status: { in: ["planning", "applying", "narrating"] }, leaseExpiresAt: { lt: now } },
-    ],
-  };
+function rewriteAttentionWhere(now: Date): Prisma.RealityRewriteWhereInput {
+  return { OR: [
+    { status: "failed" },
+    { status: { in: ["planning", "applying", "narrating"] }, leaseExpiresAt: { lt: now } },
+  ] };
 }
 
-function attentionQueries(db: AdminDb, now: Date) {
-  return [
-    db.genesisTask.findMany({
-      where: genesisAttentionWhere(now),
-      select: genesisAttentionSelect,
-      orderBy: { updatedAt: "desc" },
-      take: 50,
-    }),
-    db.generationRequest.findMany({
-      where: narrativeAttentionWhere(now),
-      select: narrativeAttentionSelect,
-      orderBy: { updatedAt: "desc" },
-      take: 50,
-    }),
-    db.realityRewrite.findMany({
-      where: rewriteAttentionWhere(now),
-      select: rewriteAttentionSelect,
-      orderBy: { updatedAt: "desc" },
-      take: 50,
-    }),
+function genesisStaleWhere(now: Date): Prisma.GenesisTaskWhereInput {
+  return { status: { in: ["queued", "running", "repairing"] }, leaseExpiresAt: { lt: now } };
+}
+
+function narrativeStaleWhere(now: Date): Prisma.GenerationRequestWhereInput {
+  return { status: "pending", leaseExpiresAt: { lt: now } };
+}
+
+function rewriteStaleWhere(now: Date): Prisma.RealityRewriteWhereInput {
+  return { status: { in: ["planning", "applying", "narrating"] }, leaseExpiresAt: { lt: now } };
+}
+
+function combineWhere<T>(...conditions: Array<T | undefined>): T {
+  const active = conditions.filter((condition): condition is T => condition !== undefined);
+  if (active.length === 1) return active[0];
+  return { AND: active } as T;
+}
+
+function normalizedSearch(rawSearch: string) {
+  const search = rawSearch.trim();
+  return search.length >= 2 ? search : "";
+}
+
+function genesisSearchWhere(search: string): Prisma.GenesisTaskWhereInput | undefined {
+  if (!search) return undefined;
+  const contains = { contains: search, mode: "insensitive" as const };
+  return { OR: [
+    { id: contains }, { status: contains }, { stage: contains }, { userId: contains }, { worldId: contains },
+    { user: { name: contains } }, { user: { email: contains } }, { world: { name: contains } },
+  ] };
+}
+
+function narrativeSearchWhere(search: string): Prisma.GenerationRequestWhereInput | undefined {
+  if (!search) return undefined;
+  const contains = { contains: search, mode: "insensitive" as const };
+  return { OR: [
+    { id: contains }, { status: contains }, { stage: contains },
+    { chapter: { timeline: { worldId: contains } } },
+    { chapter: { timeline: { world: { name: contains } } } },
+    { chapter: { timeline: { world: { userId: contains } } } },
+    { chapter: { timeline: { world: { user: { name: contains } } } } },
+    { chapter: { timeline: { world: { user: { email: contains } } } } },
+  ] };
+}
+
+function rewriteSearchWhere(search: string): Prisma.RealityRewriteWhereInput | undefined {
+  if (!search) return undefined;
+  const contains = { contains: search, mode: "insensitive" as const };
+  return { OR: [
+    { id: contains }, { status: contains }, { scope: contains }, { worldId: contains },
+    { world: { name: contains } }, { world: { userId: contains } },
+    { world: { user: { name: contains } } }, { world: { user: { email: contains } } },
+  ] };
+}
+
+function viewWheres(view: AdminWorkbenchFilters["view"], now: Date) {
+  if (view === "failed") return [
+    { status: "failed" } satisfies Prisma.GenesisTaskWhereInput,
+    { status: "failed" } satisfies Prisma.GenerationRequestWhereInput,
+    { status: "failed" } satisfies Prisma.RealityRewriteWhereInput,
   ] as const;
+  if (view === "stale") return [genesisStaleWhere(now), narrativeStaleWhere(now), rewriteStaleWhere(now)] as const;
+  if (view === "repeated") return [
+    { status: "failed", attempt: { gte: 3 } } satisfies Prisma.GenesisTaskWhereInput,
+    { status: "failed", attempt: { gte: 3 } } satisfies Prisma.GenerationRequestWhereInput,
+    { id: { in: [] } } satisfies Prisma.RealityRewriteWhereInput,
+  ] as const;
+  return [genesisAttentionWhere(now), narrativeAttentionWhere(now), rewriteAttentionWhere(now)] as const;
+}
+
+function listWheres(filters: AdminWorkbenchFilters, now: Date) {
+  const search = normalizedSearch(filters.search);
+  const [genesisView, narrativeView, rewriteView] = viewWheres(filters.view, now);
+  return [
+    combineWhere<Prisma.GenesisTaskWhereInput>(genesisView, genesisSearchWhere(search)),
+    combineWhere<Prisma.GenerationRequestWhereInput>(narrativeView, narrativeSearchWhere(search)),
+    combineWhere<Prisma.RealityRewriteWhereInput>(rewriteView, rewriteSearchWhere(search)),
+  ] as const;
+}
+
+function matchesSearch(task: AdminTaskSnapshot, rawSearch: string) {
+  const search = normalizedSearch(rawSearch).toLocaleLowerCase();
+  if (!search) return true;
+  return [
+    task.id, task.kind, task.status, task.stage, task.user.id, task.user.name, task.user.email,
+    task.world?.id, task.world?.name,
+  ].some((value) => value?.toLocaleLowerCase().includes(search));
+}
+
+function parseSelectionKey(selected: string | null): { kind: AdminTaskKind; id: string } | null {
+  if (!selected) return null;
+  const separator = selected.indexOf(":");
+  if (separator <= 0 || separator === selected.length - 1) return null;
+  const kind = selected.slice(0, separator);
+  if (kind !== "genesis" && kind !== "narrative" && kind !== "rewrite") return null;
+  return { kind, id: selected.slice(separator + 1) };
+}
+
+async function loadSelectedTask(db: AdminDb, selected: string | null): Promise<AdminTaskSnapshot | null> {
+  const key = parseSelectionKey(selected);
+  if (!key) return null;
+  if (key.kind === "genesis") {
+    const row = await db.genesisTask.findUnique({ where: { id: key.id }, select: genesisAttentionSelect });
+    return row ? mapGenesis(row) : null;
+  }
+  if (key.kind === "narrative") {
+    const row = await db.generationRequest.findUnique({ where: { id: key.id }, select: narrativeAttentionSelect });
+    return row ? mapNarrative(row) : null;
+  }
+  const row = await db.realityRewrite.findUnique({ where: { id: key.id }, select: rewriteAttentionSelect });
+  return row ? mapRewrite(row) : null;
 }
 
 function normalizeAttention(
@@ -204,37 +288,11 @@ function normalizeAttention(
     ...rewrites.map(mapRewrite),
   ]
     .map((task) => deriveTaskAttention(task, now))
-    .filter((task): task is AdminAttentionTask => task !== null);
-}
-
-function matchesView(task: AdminAttentionTask, view: AdminWorkbenchFilters["view"]) {
-  if (view === "failed") return task.status === "failed";
-  if (view === "stale") return task.reason === "stale";
-  if (view === "repeated") return task.reason === "repeated_failure";
-  return true;
-}
-
-function matchesSearch(task: AdminAttentionTask, rawSearch: string) {
-  const search = rawSearch.trim().toLocaleLowerCase();
-  if (search.length < 2) return true;
-  return [
-    task.id,
-    task.kind,
-    task.status,
-    task.stage,
-    task.user.id,
-    task.user.name,
-    task.user.email,
-    task.world?.id,
-    task.world?.name,
-  ].some((value) => value?.toLocaleLowerCase().includes(search));
-}
-
-function sortAttention(items: AdminAttentionTask[]) {
-  return items.sort((left, right) => {
-    if (left.severity !== right.severity) return left.severity === "high" ? -1 : 1;
-    return right.updatedAt.getTime() - left.updatedAt.getTime();
-  });
+    .filter((task): task is AdminAttentionTask => task !== null)
+    .sort((left, right) => {
+      if (left.severity !== right.severity) return left.severity === "high" ? -1 : 1;
+      return right.updatedAt.getTime() - left.updatedAt.getTime();
+    });
 }
 
 export async function loadAdminTaskWorkbench(
@@ -242,32 +300,66 @@ export async function loadAdminTaskWorkbench(
   db: AdminDb = prisma,
   now = new Date(),
 ): Promise<AdminWorkbenchResult> {
+  const recoveredTodayPromise = db.adminAuditLog.count({
+    where: {
+      success: true,
+      action: { in: ["retry-task", "recover-task"] },
+      createdAt: { gte: startOfLocalDay(now) },
+    },
+  }).then((value): AdminRecoveredToday => ({ state: "ready", value }))
+    .catch((error): AdminRecoveredToday => {
+      console.error("[admin.workbench] recovered count failed", error);
+      return { state: "unavailable" };
+    });
+
   try {
-    const [genesis, narratives, rewrites, recoveredToday] = await Promise.all([
-      ...attentionQueries(db, now),
-      db.adminAuditLog.count({
-        where: {
-          success: true,
-          action: { in: ["retry-task", "recover-task"] },
-          createdAt: { gte: startOfLocalDay(now) },
-        },
-      }),
+    const [genesisWhere, narrativeWhere, rewriteWhere] = listWheres(filters, now);
+    const [
+      genesis, narratives, rewrites,
+      genesisTotal, narrativeTotal, rewriteTotal,
+      genesisAttention, narrativeAttention, rewriteAttention,
+      genesisFailed, narrativeFailed, rewriteFailed,
+      genesisStale, narrativeStale, rewriteStale,
+      genesisRepeated, narrativeRepeated,
+      selectedTask, recoveredToday,
+    ] = await Promise.all([
+      db.genesisTask.findMany({ where: genesisWhere, select: genesisAttentionSelect, orderBy: { updatedAt: "desc" }, take: 50 }),
+      db.generationRequest.findMany({ where: narrativeWhere, select: narrativeAttentionSelect, orderBy: { updatedAt: "desc" }, take: 50 }),
+      db.realityRewrite.findMany({ where: rewriteWhere, select: rewriteAttentionSelect, orderBy: { updatedAt: "desc" }, take: 50 }),
+      db.genesisTask.count({ where: genesisWhere }),
+      db.generationRequest.count({ where: narrativeWhere }),
+      db.realityRewrite.count({ where: rewriteWhere }),
+      db.genesisTask.count({ where: genesisAttentionWhere(now) }),
+      db.generationRequest.count({ where: narrativeAttentionWhere(now) }),
+      db.realityRewrite.count({ where: rewriteAttentionWhere(now) }),
+      db.genesisTask.count({ where: { status: "failed" } }),
+      db.generationRequest.count({ where: { status: "failed" } }),
+      db.realityRewrite.count({ where: { status: "failed" } }),
+      db.genesisTask.count({ where: genesisStaleWhere(now) }),
+      db.generationRequest.count({ where: narrativeStaleWhere(now) }),
+      db.realityRewrite.count({ where: rewriteStaleWhere(now) }),
+      db.genesisTask.count({ where: { status: "failed", attempt: { gte: 3 } } }),
+      db.generationRequest.count({ where: { status: "failed", attempt: { gte: 3 } } }),
+      loadSelectedTask(db, filters.selected),
+      recoveredTodayPromise,
     ]);
-    const attention = normalizeAttention(genesis, narratives, rewrites, now);
-    const items = sortAttention(attention.filter((task) => matchesView(task, filters.view) && matchesSearch(task, filters.search)));
+    const items = normalizeAttention(genesis, narratives, rewrites, now);
+    const total = genesisTotal + narrativeTotal + rewriteTotal;
 
     return {
       state: "ready",
       generatedAt: now,
       counts: {
-        attention: attention.length,
-        failed: attention.filter((task) => task.status === "failed").length,
-        stale: attention.filter((task) => task.reason === "stale").length,
-        repeated: attention.filter((task) => task.reason === "repeated_failure").length,
+        attention: genesisAttention + narrativeAttention + rewriteAttention,
+        failed: genesisFailed + narrativeFailed + rewriteFailed,
+        stale: genesisStale + narrativeStale + rewriteStale,
+        repeated: genesisRepeated + narrativeRepeated,
         recoveredToday,
       },
       items,
-      selected: items.find((task) => taskSelectionKey(task) === filters.selected) ?? null,
+      total,
+      hasMore: total > items.length,
+      selected: selectedTask && matchesSearch(selectedTask, filters.search) ? selectedTask : null,
     };
   } catch (error) {
     console.error("[admin.workbench] task query failed", error);
