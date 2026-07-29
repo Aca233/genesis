@@ -342,6 +342,12 @@ describe("Genesis V2 primary runner", () => {
     expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: "running" }),
     }));
+    expect(mocks.outboxCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventType: "v2_stage_requeued",
+        payloadProjection: expect.objectContaining({ error: expect.stringContaining("缺少 slot 引用") }),
+      }),
+    });
     expect(mocks.wakeScheduler).toHaveBeenCalledOnce();
   });
 

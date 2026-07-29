@@ -79,6 +79,30 @@ function qualityInput() {
 }
 
 describe("enforceGenesisQuality", () => {
+  it("兼容模型把补丁值直接作为 JSON 值或 value 字段返回", () => {
+    expect(GenesisSemanticRepairResultSchema.parse({
+      operations: [
+        { path: "majorCharacters.0.situation", action: "replace", valueJson: { state: "失落" } },
+        { path: "majorCharacters.0.name", action: "replace", value: "南宫婉" },
+        { path: "majorCharacters.0.futureAbility", action: "remove" },
+      ],
+    })).toEqual({
+      operations: [
+        {
+          path: "majorCharacters.0.situation",
+          action: "replace",
+          valueJson: JSON.stringify({ state: "失落" }),
+        },
+        {
+          path: "majorCharacters.0.name",
+          action: "replace",
+          valueJson: JSON.stringify("南宫婉"),
+        },
+        { path: "majorCharacters.0.futureAbility", action: "remove", valueJson: null },
+      ],
+    });
+  });
+
   it("warning-only 输出原样通过且不 repair", async () => {
     const input = qualityInput();
     const audit = vi.fn().mockResolvedValue(warningReport);

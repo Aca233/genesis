@@ -579,7 +579,7 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
             status: waitingForProvider ? "waiting_for_provider" : retry ? activeTask.status : "failed",
             stage: activeTask.stage,
             nodeKey: job.nodeKey,
-            ...(terminalError ? { error: terminalError } : {}),
+            ...(retryFeedback ? { error: retryFeedback } : terminalError ? { error: terminalError } : {}),
           },
         },
       });
