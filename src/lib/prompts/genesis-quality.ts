@@ -9,6 +9,7 @@ export type SemanticRepairPromptInput = {
   intent: GenesisIntentContract;
   invalidDeck: WorldDeck;
   issues: GenesisSemanticIssue[];
+  issueValues?: Array<{ path: string; value: unknown }>;
   requiredRemovePaths?: string[];
   lockedPaths?: string[];
   lorebookExcerpts?: string;
@@ -26,6 +27,7 @@ export function semanticRepairPrompt(input: SemanticRepairPromptInput): string {
     `Creator decree:\n${input.decree}`,
     `FROZEN GENESIS INTENT CONTRACT:\n${JSON.stringify(input.intent)}`,
     `Blocking semantic issues:\n${JSON.stringify(input.issues)}`,
+    `Current JSON values at the exact issue paths (edit these values directly):\n${JSON.stringify(input.issueValues ?? [])}`,
     `Required remove paths (must use action="remove"):\n${JSON.stringify(input.requiredRemovePaths ?? [])}`,
     `Invalid world deck JSON (read-only context):\n${JSON.stringify(input.invalidDeck)}`,
     `Locked paths (must remain byte-for-byte equivalent as JSON values):\n${JSON.stringify(input.lockedPaths ?? [])}`,
