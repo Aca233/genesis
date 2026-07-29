@@ -4,7 +4,11 @@ import { CreatorWorldDeckSchema, PantheonWorldDeckSchema } from "@/lib/cards/sch
 import { extractDeckMaterials } from "@/lib/materials/extract-deck";
 import type { GenesisMaterialSnapshot } from "@/lib/materials/types";
 import type { WorldMode } from "@/lib/world-mode";
-import { generateGenesisDeck, type GenesisGenerationOptions } from "./generate";
+import {
+  generateGenesisDeck,
+  type GenesisGenerationOptions,
+  validateGenesisDeck,
+} from "./generate";
 
 async function* chunksOf(text: string, size = 17) {
   for (let index = 0; index < text.length; index += size) {
@@ -65,6 +69,16 @@ function ipTemporalAnchorCard() {
 describe("generateGenesisDeck", () => {
   it("要求调用方显式冻结生成模式", () => {
     expectTypeOf<GenesisGenerationOptions>().toMatchObjectType<{ mode: WorldMode }>();
+  });
+
+  it("导出的 deterministic validator 执行模式与引用校验", () => {
+    const deck = completeCreatorDeck();
+    expect(validateGenesisDeck(deck, "creator", null)).toEqual(deck);
+    expect(() => validateGenesisDeck(deck, "pantheon", null)).toThrow(/模式不匹配/);
+
+    const invalidReferences = completeCreatorDeck();
+    invalidReferences.factions[0]!.keyCharacterRefs[0]!.ref = "missing-character";
+    expect(() => validateGenesisDeck(invalidReferences, "creator", null)).toThrow();
   });
 
   it("输出超过字节上限时保留有界前缀并且不进入校验或修补", async () => {

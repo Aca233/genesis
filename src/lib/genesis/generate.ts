@@ -57,7 +57,7 @@ function assertExpectedMode(deck: WorldDeck, expectedMode: WorldMode): void {
   }
 }
 
-function validateParsedDeck(
+export function validateGenesisDeck(
   rawDeck: unknown,
   expectedMode: WorldMode,
   materialSnapshot: GenesisMaterialSnapshot | null,
@@ -87,7 +87,7 @@ function parseAndValidate(
   expectedMode: WorldMode,
   materialSnapshot: GenesisMaterialSnapshot | null,
 ): WorldDeck {
-  return validateParsedDeck(extractJson(raw), expectedMode, materialSnapshot);
+  return validateGenesisDeck(extractJson(raw), expectedMode, materialSnapshot);
 }
 
 function describeValidationError(error: unknown): string {
@@ -177,7 +177,7 @@ export async function generateGenesisDeck(
         continue;
       }
       try {
-        return validateParsedDeck(repaired, mode, options.materialSnapshot ?? null);
+        return validateGenesisDeck(repaired, mode, options.materialSnapshot ?? null);
       } catch (repairError) {
         if (repairError instanceof PayloadLimitError) throw repairError;
         lastError = repairError;
