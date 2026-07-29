@@ -54,9 +54,9 @@ describe("POST /api/genesis/tasks/[id]/retry", () => {
       data: expect.objectContaining({
         status: "queued",
         aggregateVersion: 5,
-        budgetMaxCalls: { increment: 6 },
-        budgetMaxInput: { increment: 250_000 },
-        budgetMaxOutput: { increment: 48_000 },
+        budgetMaxCalls: { increment: 12 },
+        budgetMaxInput: { increment: 500_000 },
+        budgetMaxOutput: { increment: 96_000 },
       }),
     }));
     expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({

@@ -4,9 +4,9 @@ import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
 import { withAuth } from "@/lib/auth/route";
 
 const V2_RETRY_BUDGET_ALLOWANCE = {
-  calls: 6,
-  inputTokens: 250_000,
-  outputTokens: 48_000,
+  calls: 12,
+  inputTokens: 500_000,
+  outputTokens: 96_000,
 } as const;
 
 export const POST = withAuth(async (

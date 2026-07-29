@@ -144,7 +144,7 @@ describe("enforceGenesisQuality", () => {
         userId: input.userId,
         owner,
         schema: GenesisSemanticRepairResultSchema,
-        maxAttempts: 1,
+        maxAttempts: 2,
         transportMaxAttempts: 1,
         allowTransportFallback: false,
         failOnTruncation: false,

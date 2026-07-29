@@ -221,7 +221,7 @@ export async function enforceGenesisQuality(
       }),
       temperature: 0.1,
       maxTokens: 8000,
-      maxAttempts: 1,
+      maxAttempts: 2,
       transportMaxAttempts: 1,
       allowTransportFallback: false,
       failOnTruncation: false,
