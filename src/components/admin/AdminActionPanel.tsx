@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { validateAdminActionForm, type AdminActionFormErrors } from "@/lib/admin/action-form";
 
@@ -20,6 +20,9 @@ type AdminActionResponse = {
   fields?: Record<string, string[] | undefined>;
 };
 
+const SUCCESS_STATUS = "操作已完成";
+const REFRESH_DELAY_MS = 250;
+
 export function AdminActionPanel({
   label,
   targetLabel,
@@ -31,7 +34,13 @@ export function AdminActionPanel({
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
+  const confirmationRef = useRef<HTMLInputElement>(null);
   const submittingRef = useRef(false);
+  const failureFocusRef = useRef<"reason" | "confirmation" | null>(null);
+  const refreshScheduledRef = useRef(false);
+  const refreshFrameRef = useRef<number | null>(null);
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const id = useId();
   const [reason, setReason] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -45,11 +54,38 @@ export function AdminActionPanel({
   const confirmationHelpId = `${id}-confirmation-help`;
   const confirmationErrorId = `${id}-confirmation-error`;
 
+  useEffect(() => {
+    if (busy || !failureFocusRef.current) return;
+    const target = failureFocusRef.current === "confirmation" ? confirmationRef.current : reasonRef.current;
+    failureFocusRef.current = null;
+    target?.focus();
+  }, [busy, errors]);
+
+  useEffect(() => {
+    if (status !== SUCCESS_STATUS || refreshScheduledRef.current) return;
+    refreshScheduledRef.current = true;
+    refreshFrameRef.current = requestAnimationFrame(() => {
+      refreshFrameRef.current = null;
+      refreshTimeoutRef.current = setTimeout(() => {
+        refreshTimeoutRef.current = null;
+        router.refresh();
+      }, REFRESH_DELAY_MS);
+    });
+  }, [router, status]);
+
+  useEffect(() => () => {
+    if (refreshFrameRef.current !== null) cancelAnimationFrame(refreshFrameRef.current);
+    if (refreshTimeoutRef.current !== null) clearTimeout(refreshTimeoutRef.current);
+    refreshFrameRef.current = null;
+    refreshTimeoutRef.current = null;
+  }, []);
+
   function restoreTriggerFocus() {
     triggerRef.current?.focus();
   }
 
   function openDialog() {
+    if (refreshFrameRef.current === null && refreshTimeoutRef.current === null) refreshScheduledRef.current = false;
     setReason("");
     setConfirmation("");
     setErrors({});
@@ -76,12 +112,17 @@ export function AdminActionPanel({
     if (errors.confirmation || errors.form) setErrors((current) => ({ ...current, confirmation: undefined, form: undefined }));
   }
 
+  function showErrors(nextErrors: AdminActionFormErrors) {
+    failureFocusRef.current = nextErrors.reason || !nextErrors.confirmation ? "reason" : "confirmation";
+    setErrors(nextErrors);
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submittingRef.current) return;
     const nextErrors = validateAdminActionForm(reason, confirmationLabel, confirmation);
     if (Object.keys(nextErrors).length > 0) {
-      setErrors(nextErrors);
+      showErrors(nextErrors);
       return;
     }
 
@@ -101,7 +142,7 @@ export function AdminActionPanel({
       });
       const body = await response.json() as AdminActionResponse;
       if (!response.ok) {
-        setErrors({
+        showErrors({
           form: body.error ?? "操作失败，请稍后重试",
           reason: body.fields?.reason?.[0],
           confirmation: body.fields?.confirmation?.[0],
@@ -111,11 +152,10 @@ export function AdminActionPanel({
 
       setReason("");
       setConfirmation("");
-      setStatus("操作已完成");
+      setStatus(SUCCESS_STATUS);
       closeDialog();
-      router.refresh();
     } catch {
-      setErrors({ form: "操作失败，请稍后重试" });
+      showErrors({ form: "操作失败，请稍后重试" });
     } finally {
       submittingRef.current = false;
       setBusy(false);
@@ -165,6 +205,7 @@ export function AdminActionPanel({
         <div className="admin-action-dialog__field">
           <label htmlFor={`${id}-reason`}>操作原因</label>
           <textarea
+            ref={reasonRef}
             id={`${id}-reason`}
             name="reason"
             value={reason}
@@ -190,6 +231,7 @@ export function AdminActionPanel({
             请输入 <strong>{confirmationLabel}</strong> 以确认此操作。
           </p>
           <input
+            ref={confirmationRef}
             id={`${id}-confirmation`}
             name="confirmation"
             value={confirmation}

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { ReactElement, ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const router = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -11,18 +11,34 @@ const router = vi.hoisted(() => ({
 const hooks = vi.hoisted(() => {
   const state: unknown[] = [];
   const refs: Array<{ current: unknown }> = [];
+  const effects: Array<{ dependencies?: readonly unknown[]; cleanup?: () => void }> = [];
+  const pendingEffects: Array<() => void> = [];
   let stateIndex = 0;
   let refIndex = 0;
+  let effectIndex = 0;
   return {
     beginRender() {
       stateIndex = 0;
       refIndex = 0;
+      effectIndex = 0;
+      pendingEffects.length = 0;
+    },
+    flushEffects() {
+      pendingEffects.splice(0).forEach((run) => run());
+    },
+    unmount() {
+      effects.forEach((effect) => effect.cleanup?.());
+      effects.length = 0;
     },
     reset() {
+      effects.forEach((effect) => effect.cleanup?.());
       state.length = 0;
       refs.length = 0;
+      effects.length = 0;
+      pendingEffects.length = 0;
       stateIndex = 0;
       refIndex = 0;
+      effectIndex = 0;
     },
     useState<T>(initial: T | (() => T)) {
       const index = stateIndex++;
@@ -38,13 +54,25 @@ const hooks = vi.hoisted(() => {
       refs[index] ??= { current: initial };
       return refs[index] as { current: T };
     },
+    useEffect(effect: () => void | (() => void), dependencies?: readonly unknown[]) {
+      const index = effectIndex++;
+      const previous = effects[index];
+      const changed = !previous || !dependencies || !previous.dependencies
+        || dependencies.length !== previous.dependencies.length
+        || dependencies.some((dependency, dependencyIndex) => !Object.is(dependency, previous.dependencies?.[dependencyIndex]));
+      if (!changed) return;
+      pendingEffects.push(() => {
+        previous?.cleanup?.();
+        effects[index] = { dependencies, cleanup: effect() || undefined };
+      });
+    },
   };
 });
 
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
-  return { ...actual, useId: hooks.useId, useRef: hooks.useRef, useState: hooks.useState };
+  return { ...actual, useEffect: hooks.useEffect, useId: hooks.useId, useRef: hooks.useRef, useState: hooks.useState };
 });
 
 import { AdminActionPanel, type AdminActionPanelProps } from "./AdminActionPanel";
@@ -83,7 +111,9 @@ function findElement(root: ReactNode, predicate: (element: ReactElement<Record<s
 
 function renderPanel(props: AdminActionPanelProps = defaultProps) {
   hooks.beginRender();
-  return AdminActionPanel(props);
+  const root = AdminActionPanel(props);
+  hooks.flushEffects();
+  return root;
 }
 
 function change(element: ReactElement<Record<string, unknown>>, value: string) {
@@ -98,11 +128,14 @@ function submit(root: ReactNode) {
 function bindNativeElements(root: ReactNode) {
   const triggerButton = findElement(root, (element) => element.type === "button" && element.props["aria-haspopup"] === "dialog");
   const dialogElement = findElement(root, (element) => element.type === "dialog");
+  const reasonElement = findElement(root, (element) => element.type === "textarea" && element.props.name === "reason");
   const dialog = { showModal: vi.fn(), close: vi.fn() };
   const trigger = { focus: vi.fn() };
+  const reason = { focus: vi.fn() };
   (triggerButton.props.ref as { current: unknown }).current = trigger;
   (dialogElement.props.ref as { current: unknown }).current = dialog;
-  return { triggerButton, dialogElement, dialog, trigger };
+  if (reasonElement.props.ref) (reasonElement.props.ref as { current: unknown }).current = reason;
+  return { triggerButton, dialogElement, dialog, trigger, reason };
 }
 
 function enterPermanentAction(root: ReactNode, reason = "保留这个原因") {
@@ -116,12 +149,38 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function installRefreshScheduler() {
+  let frame: FrameRequestCallback | undefined;
+  const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+    frame = callback;
+    return 1;
+  });
+  const cancelAnimationFrame = vi.fn(() => { frame = undefined; });
+  vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+  vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+  return {
+    requestAnimationFrame,
+    cancelAnimationFrame,
+    flushFrame() {
+      const callback = frame;
+      frame = undefined;
+      callback?.(0);
+    },
+  };
+}
+
 describe("AdminActionPanel", () => {
   beforeEach(() => {
     hooks.reset();
     router.refresh.mockReset();
     router.push.mockReset();
     router.replace.mockReset();
+    vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
+    hooks.unmount();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -172,7 +231,7 @@ describe("AdminActionPanel", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     let root = renderPanel();
-    const { dialog } = bindNativeElements(root);
+    const { dialog, reason } = bindNativeElements(root);
     enterPermanentAction(root, "a");
 
     root = renderPanel();
@@ -183,6 +242,7 @@ describe("AdminActionPanel", () => {
     expect(findElement(root, (element) => element.type === "textarea").props.value).toBe("a");
     expect(findElement(root, (element) => element.type === "input" && element.props.name === "confirmation").props.value).toBe("sample@example.com");
     expect(JSON.stringify(root)).toContain("操作原因至少需要 2 个字");
+    expect(reason.focus).toHaveBeenCalledOnce();
     expect(dialog.close).not.toHaveBeenCalled();
     expect(router.refresh).not.toHaveBeenCalled();
   });
@@ -197,7 +257,7 @@ describe("AdminActionPanel", () => {
       }),
     }));
     let root = renderPanel();
-    const { dialog } = bindNativeElements(root);
+    const { dialog, reason } = bindNativeElements(root);
     enterPermanentAction(root);
 
     root = renderPanel();
@@ -209,6 +269,7 @@ describe("AdminActionPanel", () => {
     expect(JSON.stringify(root)).toContain("管理操作参数无效");
     expect(JSON.stringify(root)).toContain("操作原因至少需要 2 个字");
     expect(JSON.stringify(root)).toContain("确认文字不匹配");
+    expect(reason.focus).toHaveBeenCalledOnce();
     expect(dialog.close).not.toHaveBeenCalled();
     expect(router.refresh).not.toHaveBeenCalled();
   });
@@ -220,7 +281,7 @@ describe("AdminActionPanel", () => {
       json: vi.fn().mockResolvedValue({ error: "任务状态已经变化，请核对后重试" }),
     }));
     let root = renderPanel();
-    const { dialog } = bindNativeElements(root);
+    const { dialog, reason } = bindNativeElements(root);
     enterPermanentAction(root, "核对状态冲突");
 
     root = renderPanel();
@@ -230,6 +291,7 @@ describe("AdminActionPanel", () => {
     expect(findElement(root, (element) => element.type === "textarea").props.value).toBe("核对状态冲突");
     expect(findElement(root, (element) => element.type === "input" && element.props.name === "confirmation").props.value).toBe("sample@example.com");
     expect(JSON.stringify(root)).toContain("任务状态已经变化，请核对后重试");
+    expect(reason.focus).toHaveBeenCalledOnce();
     expect(dialog.close).not.toHaveBeenCalled();
     expect(router.refresh).not.toHaveBeenCalled();
     expect(router.push).not.toHaveBeenCalled();
@@ -237,6 +299,8 @@ describe("AdminActionPanel", () => {
   });
 
   it("prevents a concurrent double submit while exposing the busy state", async () => {
+    vi.useFakeTimers();
+    const scheduler = installRefreshScheduler();
     const pendingResponse = deferred<{ ok: boolean; status: number; json: () => Promise<{ ok: boolean }> }>();
     const fetchMock = vi.fn().mockReturnValue(pendingResponse.promise);
     vi.stubGlobal("fetch", fetchMock);
@@ -257,11 +321,17 @@ describe("AdminActionPanel", () => {
 
     pendingResponse.resolve({ ok: true, status: 200, json: async () => ({ ok: true }) });
     await Promise.all([first, second]);
+    root = renderPanel(taskProps);
     expect(dialog.close).toHaveBeenCalledOnce();
+    expect(router.refresh).not.toHaveBeenCalled();
+    scheduler.flushFrame();
+    vi.runOnlyPendingTimers();
     expect(router.refresh).toHaveBeenCalledOnce();
   });
 
   it("closes, announces completion, restores focus, and refreshes without navigation on success", async () => {
+    vi.useFakeTimers();
+    const scheduler = installRefreshScheduler();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: vi.fn().mockResolvedValue({ ok: true }) }));
     let root = renderPanel(taskProps);
     const { dialog, trigger } = bindNativeElements(root);
@@ -269,14 +339,41 @@ describe("AdminActionPanel", () => {
 
     root = renderPanel(taskProps);
     await submit(root);
+    expect(router.refresh).not.toHaveBeenCalled();
     root = renderPanel(taskProps);
 
     expect(dialog.close).toHaveBeenCalledOnce();
     expect(trigger.focus).toHaveBeenCalledOnce();
-    expect(router.refresh).toHaveBeenCalledOnce();
+    expect(router.refresh).not.toHaveBeenCalled();
     expect(router.push).not.toHaveBeenCalled();
     expect(router.replace).not.toHaveBeenCalled();
     const status = findElement(root, (element) => element.props.role === "status");
     expect(JSON.stringify(status)).toContain("操作已完成");
+    expect(scheduler.requestAnimationFrame).toHaveBeenCalledOnce();
+
+    scheduler.flushFrame();
+    expect(router.refresh).not.toHaveBeenCalled();
+    vi.runOnlyPendingTimers();
+    vi.runOnlyPendingTimers();
+    expect(router.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("cancels a queued success refresh when the panel unmounts", async () => {
+    vi.useFakeTimers();
+    const scheduler = installRefreshScheduler();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: vi.fn().mockResolvedValue({ ok: true }) }));
+    let root = renderPanel(taskProps);
+    bindNativeElements(root);
+    change(findElement(root, (element) => element.type === "textarea"), "重新排队");
+
+    root = renderPanel(taskProps);
+    await submit(root);
+    renderPanel(taskProps);
+    hooks.unmount();
+
+    expect(scheduler.cancelAnimationFrame).toHaveBeenCalledOnce();
+    scheduler.flushFrame();
+    vi.runOnlyPendingTimers();
+    expect(router.refresh).not.toHaveBeenCalled();
   });
 });
