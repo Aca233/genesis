@@ -7,10 +7,18 @@ const dependencies = vi.hoisted(() => ({
   loadAdminDashboard: vi.fn(),
   loadAdminAnalysis: vi.fn(),
   redirect: vi.fn(),
+  refresh: vi.fn(),
+  push: vi.fn(),
+  replace: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
   redirect: dependencies.redirect,
+  useRouter: () => ({
+    refresh: dependencies.refresh,
+    push: dependencies.push,
+    replace: dependencies.replace,
+  }),
 }));
 vi.mock("@/lib/admin/workbench", () => ({
   loadAdminTaskWorkbench: dependencies.loadAdminTaskWorkbench,
@@ -60,6 +68,9 @@ describe("AdminPage task workbench", () => {
     dependencies.loadAdminDashboard.mockReset();
     dependencies.loadAdminAnalysis.mockReset();
     dependencies.redirect.mockReset();
+    dependencies.refresh.mockReset();
+    dependencies.push.mockReset();
+    dependencies.replace.mockReset();
     dependencies.redirect.mockImplementation((href: string) => {
       throw new Error(`NEXT_REDIRECT:${href}`);
     });

@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { AdminActionButton } from "./AdminActionButton";
+import { taskActionCopy } from "@/lib/admin/action-form";
 import { allowedAdminTaskActions, type AdminAttentionTask, type AdminTaskAction } from "@/lib/admin/task-attention";
 
 const actionLabels: Record<AdminTaskAction, string> = {
@@ -47,6 +49,8 @@ export function AdminTaskDetail({ task, now }: { task: AdminAttentionTask | null
   const auditHref = `/admin/audit?targetId=${encodeURIComponent(task.id)}`;
   const worldHref = task.world ? `/admin/worlds?search=${encodeURIComponent(task.world.id)}` : null;
   const narrativeFailure = task.kind === "narrative" && task.status === "failed";
+  const taskTitle = task.kind === "genesis" ? "创世任务" : task.kind === "narrative" ? "叙事生成" : "现实改写";
+  const targetLabel = `${taskTitle} · ${task.world?.name ?? task.id}`;
 
   return <aside className="admin-workbench-detail admin-panel" aria-labelledby="admin-task-detail-title">
     <div className="admin-workbench-detail__head">
@@ -87,6 +91,17 @@ export function AdminTaskDetail({ task, now }: { task: AdminAttentionTask | null
         <div><dt>状态</dt><dd><code>{task.status}</code></dd></div>
       </dl>
     </section>
+
+    {allowedActions.length > 0 && <div className="admin-workbench-actions" aria-label="允许的管理操作">
+      {allowedActions.map((action) => <AdminActionButton
+        key={action}
+        label={taskActionCopy[action].label}
+        targetLabel={targetLabel}
+        impact={taskActionCopy[action].impact}
+        danger={action === "cancel"}
+        payload={{ targetType: "task", kind: task.kind, taskId: task.id, action }}
+      />)}
+    </div>}
 
     <nav className="admin-workbench-context-links" aria-label="任务上下文链接">
       <Link href={llmHref}>查看失败模型调用</Link>

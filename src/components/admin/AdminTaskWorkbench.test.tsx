@@ -1,7 +1,16 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AdminAttentionTask } from "@/lib/admin/task-attention";
+
+vi.mock("./AdminActionButton", () => ({
+  AdminActionButton: (props: { label: string; targetLabel: string; impact: string; payload: Record<string, string> }) => <button
+    type="button"
+    data-action={props.payload.action}
+    data-impact={props.impact}
+    data-target={props.targetLabel}
+  >{props.label}</button>,
+}));
 import { AdminAttentionQueue, workbenchHref } from "./AdminAttentionQueue";
 import { AdminTaskDetail } from "./AdminTaskDetail";
 
@@ -97,9 +106,18 @@ describe("AdminTaskDetail", () => {
     expect(markup).toContain("href=\"/admin/worlds?search=world%20001\"");
     expect(markup).not.toContain("<button");
     expect(markup).not.toContain("重新执行</");
+    expect(markup).not.toContain("恢复任务</");
   });
 
-  it("uses allowed action rules to explain recovery without rendering executable controls", () => {
+  it("renders approved reexecution copy for failed non-narrative tasks", () => {
+    const markup = renderToStaticMarkup(<AdminTaskDetail task={attentionTask({ attempt: 1, reason: "failed", recommendation: "rerun" })} now={now} />);
+
+    expect(markup).toContain(">重新执行</button>");
+    expect(markup).toContain("data-impact=\"保留失败记录，从允许恢复的位置重新开始。\"");
+    expect(markup).not.toContain(">重试</button>");
+  });
+
+  it("uses allowed action rules to render recovery controls with target and impact copy", () => {
     const task = attentionTask({
       status: "running",
       attempt: 1,
@@ -111,7 +129,10 @@ describe("AdminTaskDetail", () => {
 
     expect(markup).toContain("建议恢复任务");
     expect(markup).toContain("当前规则允许：恢复任务、取消任务");
-    expect(markup).not.toContain("<button");
+    expect(markup).toContain(">恢复任务</button>");
+    expect(markup).toContain(">取消任务</button>");
+    expect(markup).toContain("data-target=\"创世任务 · 薄暮之海\"");
+    expect(markup).toContain("data-impact=\"清除过期租约并重新进入可执行状态。\"");
   });
 });
 

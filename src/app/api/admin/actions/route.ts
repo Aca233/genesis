@@ -20,7 +20,10 @@ export const POST = withAdmin(async (admin, request) => {
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "请求格式无效" }, { status: 400 }); }
   const parsed = ActionSchema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: "管理操作参数无效" }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({
+    error: "管理操作参数无效",
+    fields: parsed.error.flatten().fieldErrors,
+  }, { status: 400 });
   const ctx = { actorUserId: admin.id, requestIp: requestIp(request) };
   try {
     const result = parsed.data.targetType === "user" ? await mutateAdminUser(ctx, parsed.data) : parsed.data.targetType === "world" ? await mutateAdminWorld(ctx, parsed.data) : await mutateAdminTask(ctx, parsed.data);
