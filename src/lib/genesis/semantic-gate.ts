@@ -434,12 +434,13 @@ export async function enforceGenesisQuality(
         ...repairRequest,
         schema: GenesisSemanticRepairResultSchema,
       });
+      const parsedRepair = enforceRequiredRemovals(
+        GenesisSemanticRepairResultSchema.parse(repairedRaw),
+        requiredRemovePaths,
+      );
       const boundedRepair = applySemanticRepairs(
         currentDeck,
-        enforceRequiredRemovals(
-          GenesisSemanticRepairResultSchema.parse(repairedRaw),
-          requiredRemovePaths,
-        ),
+        parsedRepair,
         repairIssues.map(({ path }) => path),
       );
       const restored = input.currentDeck === undefined
@@ -455,7 +456,13 @@ export async function enforceGenesisQuality(
         break;
       } catch (error) {
         repairFeedback = error instanceof Error ? error.message : String(error);
-        if (patchAttempt === 2) throw new GenesisSemanticRepairValidationError(repairFeedback);
+        if (patchAttempt === 2) {
+          const diagnostics = JSON.stringify({
+            issuePaths: repairIssues.map(({ path, type }) => ({ path, type })),
+            operations: parsedRepair.operations.map(({ path, action }) => ({ path, action })),
+          });
+          throw new GenesisSemanticRepairValidationError(`${repairFeedback}; patchDiagnostics=${diagnostics}`);
+        }
       }
     }
     if (!repairedDeck) throw new Error("语义补丁未生成可校验世界");

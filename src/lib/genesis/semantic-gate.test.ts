@@ -11,7 +11,6 @@ import {
   enforceGenesisQuality,
   GenesisSemanticGateError,
   GenesisSemanticRepairResultSchema,
-  GenesisSemanticRepairValidationError,
 } from "./semantic-gate";
 
 const intent: GenesisIntentContract = {
@@ -360,7 +359,10 @@ describe("enforceGenesisQuality", () => {
     });
 
     await expect(enforceGenesisQuality(input, { audit, repair, validate }))
-      .rejects.toBeInstanceOf(GenesisSemanticRepairValidationError);
+      .rejects.toMatchObject({
+        name: "GenesisSemanticRepairValidationError",
+        message: expect.stringContaining('patchDiagnostics={"issuePaths":[{"path":"majorCharacters.0.situation","type":"premise_drift"}],"operations":[]'),
+      });
     expect(repair).toHaveBeenCalledTimes(2);
   });
 
