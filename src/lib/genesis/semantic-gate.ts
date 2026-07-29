@@ -56,7 +56,7 @@ type SemanticRepairRequest = {
   maxOutputBytes: number;
 };
 
-const MAX_SEMANTIC_REPAIR_ROUNDS = 8;
+const MAX_SEMANTIC_REPAIR_ROUNDS = 16;
 
 const JsonTextSchema = z.string().refine((value) => {
   try {
