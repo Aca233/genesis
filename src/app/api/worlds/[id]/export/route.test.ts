@@ -1,4 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { GenesisIntentContract } from "@/lib/genesis/intent";
+
+const crossoverIntent: GenesisIntentContract = {
+  sourceBasis: "multi_ip",
+  sourceIps: ["无职转生", "钢铁侠"],
+  explicitPremise: ["托尼·斯塔克转生为鲁迪乌斯"],
+  narrativeCenter: {
+    identity: "托尼·斯塔克转生的鲁迪乌斯",
+    role: "唯一叙事中心",
+    startState: "保留成年意识的新生儿",
+  },
+  playerRole: {
+    type: "independent_god",
+    narrativeFunction: "limited_intervener",
+    mustNotReplaceProtagonist: true,
+  },
+  forbiddenExpansions: ["不得把贾维斯设为独立神明"],
+  factsAtAnchor: ["托尼保留成年意识"],
+  futureOnly: ["魔导铠甲"],
+  fusionBoundaries: ["魔法与科技的映射尚未证实"],
+  uncertaintyPolicy: "omit_or_generalize",
+  corePressures: ["成年意识受婴儿身体限制"],
+};
 
 const mocks = vi.hoisted(() => ({
   prisma: {
@@ -23,10 +46,12 @@ describe("version 4 世界存档导出", () => {
       id: "world-1",
       name: "隐秘世界",
       genesisInput: "让世界运行",
+      genesisIntent: crossoverIntent,
       mode: "creator",
       status: "playing",
       activeTimelineId: "timeline-1",
       iconTheme: { version: 1, catalogVersion: 1, primaryFamily: "tabler" },
+      genesisTasks: [{ intentContract: { runtimeOnly: true }, status: "running" }],
       rewrites: [],
       lorebookEntries: [],
       timelines: [{
@@ -144,6 +169,10 @@ describe("version 4 世界存档导出", () => {
     const serialized = JSON.stringify(archive);
 
     expect(archive.version).toBe(4);
+    expect(archive).toMatchObject({
+      version: 4,
+      world: { genesisIntent: crossoverIntent },
+    });
     expect(archive.world.timelines[0].worldEvents).toContainEqual(
       expect.objectContaining({ id: "world-event-1", visibility: "hidden" }),
     );
@@ -173,6 +202,8 @@ describe("version 4 世界存档导出", () => {
     expect(serialized).not.toContain("leaseExpiresAt");
     expect(serialized).not.toContain("safeError");
     expect(serialized).not.toContain("provider raw error");
+    expect(serialized).not.toContain("genesisTasks");
+    expect(serialized).not.toContain("runtimeOnly");
     expect(mocks.prisma.world.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "world-1", userId: "test-user" },
       include: expect.objectContaining({

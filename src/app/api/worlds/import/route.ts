@@ -10,6 +10,7 @@ import {
   AbilityVisibilitySchema,
 } from "@/lib/abilities/types";
 import { validateAbilityOwnership } from "@/lib/abilities/validator";
+import { GenesisIntentContractSchema } from "@/lib/genesis/intent";
 import { WorldModeSchema } from "@/lib/world-mode";
 import {
   ObserverStateSchema,
@@ -418,6 +419,7 @@ const WorldSchema = z
     userId: OptionalIdSchema,
     name: ShortStringSchema.min(1),
     genesisInput: TextSchema,
+    genesisIntent: GenesisIntentContractSchema.nullish(),
     mode: WorldModeSchema.default("pantheon"),
     status: ShortStringSchema.default("draft"),
     draftDeck: BoundedJsonSchema.optional(),
@@ -1591,6 +1593,7 @@ export const POST = withAuth(async (userId, request: Request) => {
           userId,
           name: w.name,
           genesisInput: w.genesisInput,
+          genesisIntent: json(w.genesisIntent),
           mode: w.mode,
           status: w.status,
           draftDeck: json(w.draftDeck),

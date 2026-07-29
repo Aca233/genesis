@@ -2,6 +2,29 @@ import { afterAll, describe, expect, it } from "vitest";
 import { completeCreatorDeck, completeDeck } from "@/lib/abilities/embark.test-fixtures";
 import { PantheonWorldDeckSchema } from "@/lib/cards/schemas";
 import { runClaimedEmbarkTransaction } from "@/lib/embark/mutations";
+import type { GenesisIntentContract } from "@/lib/genesis/intent";
+
+const crossoverIntent: GenesisIntentContract = {
+  sourceBasis: "multi_ip",
+  sourceIps: ["无职转生", "钢铁侠"],
+  explicitPremise: ["托尼·斯塔克转生为鲁迪乌斯"],
+  narrativeCenter: {
+    identity: "托尼·斯塔克转生的鲁迪乌斯",
+    role: "唯一叙事中心",
+    startState: "保留成年意识的新生儿",
+  },
+  playerRole: {
+    type: "independent_god",
+    narrativeFunction: "limited_intervener",
+    mustNotReplaceProtagonist: true,
+  },
+  forbiddenExpansions: ["不得把贾维斯设为独立神明"],
+  factsAtAnchor: ["托尼保留成年意识"],
+  futureOnly: ["魔导铠甲"],
+  fusionBoundaries: ["魔法与科技的映射尚未证实"],
+  uncertaintyPolicy: "omit_or_generalize",
+  corePressures: ["成年意识受婴儿身体限制"],
+};
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 if (testDatabaseUrl === undefined || testDatabaseUrl.trim() === "") {
@@ -24,6 +47,38 @@ function importRequest(payload: unknown) {
 }
 
 describe("存档导出导入 PostgreSQL 往返", () => {
+  it("version 4 导入后深度保留 world-level genesisIntent", async () => {
+    let importedWorldId: string | undefined;
+    try {
+      const response = await importWorld(importRequest({
+        version: 4,
+        exportedAt: new Date().toISOString(),
+        world: {
+          name: `intent-import-${crypto.randomUUID()}`,
+          genesisInput: "无职转生，但是鲁迪是托尼斯塔克转生",
+          genesisIntent: crossoverIntent,
+          mode: "pantheon",
+          status: "draft",
+          lockedPaths: [],
+          activeTimelineId: null,
+          timelines: [],
+          rewrites: [],
+          lorebookEntries: [],
+        },
+      }));
+
+      expect(response.status).toBe(200);
+      importedWorldId = (await response.json()).worldId;
+      const restored = await prisma.world.findUniqueOrThrow({
+        where: { id: importedWorldId },
+        select: { genesisIntent: true },
+      });
+      expect(restored.genesisIntent).toEqual(crossoverIntent);
+    } finally {
+      if (importedWorldId) await prisma.world.delete({ where: { id: importedWorldId } });
+    }
+  });
+
   it("真实 embark v2 往返保留 player 关系、来源与历史，同时普通 API 隐藏私有能力", async () => {
     const deck = PantheonWorldDeckSchema.parse({
       ...completeDeck(),

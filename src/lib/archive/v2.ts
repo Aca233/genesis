@@ -59,8 +59,8 @@ const ICON_ASSIGNMENT_KEYS = [
 ] as const;
 const LOREBOOK_KEYS = ["id", "worldId", "keys", "content", "enabled", "stExtra", "source"] as const;
 const WORLD_KEYS = [
-  "id", "userId", "name", "genesisInput", "mode", "status", "draftDeck", "lockedPaths", "themeCard",
-  "styleCard", "cosmology", "fusionAxiom", "activeTimelineId", "materialArchiveStatus",
+  "id", "userId", "name", "genesisInput", "genesisIntent", "mode", "status", "draftDeck", "lockedPaths",
+  "themeCard", "styleCard", "cosmology", "fusionAxiom", "activeTimelineId", "materialArchiveStatus",
   "materialArchiveError", "iconTheme", "createdAt", "updatedAt",
 ] as const;
 

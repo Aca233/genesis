@@ -1,5 +1,28 @@
 import { afterAll, describe, expect, it } from "vitest";
+import type { GenesisIntentContract } from "@/lib/genesis/intent";
 import { cloneTimelineGraph } from "./clone";
+
+const crossoverIntent: GenesisIntentContract = {
+  sourceBasis: "multi_ip",
+  sourceIps: ["无职转生", "钢铁侠"],
+  explicitPremise: ["托尼·斯塔克转生为鲁迪乌斯"],
+  narrativeCenter: {
+    identity: "托尼·斯塔克转生的鲁迪乌斯",
+    role: "唯一叙事中心",
+    startState: "保留成年意识的新生儿",
+  },
+  playerRole: {
+    type: "independent_god",
+    narrativeFunction: "limited_intervener",
+    mustNotReplaceProtagonist: true,
+  },
+  forbiddenExpansions: ["不得把贾维斯设为独立神明"],
+  factsAtAnchor: ["托尼保留成年意识"],
+  futureOnly: ["魔导铠甲"],
+  fusionBoundaries: ["魔法与科技的映射尚未证实"],
+  uncertaintyPolicy: "omit_or_generalize",
+  corePressures: ["成年意识受婴儿身体限制"],
+};
 
 const { prisma } = await import("@/lib/db");
 
@@ -47,6 +70,7 @@ async function fixture() {
     data: {
       userId: "test-user", name: `clone-graph-${crypto.randomUUID()}`,
       genesisInput: "完整现实克隆测试",
+      genesisIntent: crossoverIntent,
       mode: "creator",
       lockedPaths: [],
       operationKind: "rewrite",
@@ -529,8 +553,12 @@ describe("cloneTimelineGraph", () => {
       }));
 
       const after = await sourceGraph(data.timeline.id);
+      const worldAfterClone = plain(await prisma.world.findUniqueOrThrow({
+        where: { id: data.world.id },
+      }));
       expect(after).toEqual(before);
-      expect(plain(await prisma.world.findUniqueOrThrow({ where: { id: data.world.id } }))).toEqual(leaseBefore);
+      expect(worldAfterClone).toEqual(leaseBefore);
+      expect(worldAfterClone.genesisIntent).toEqual(crossoverIntent);
       expect(plain(await prisma.realityRewrite.findUniqueOrThrow({ where: { id: data.rewrite.id } }))).toEqual(rewriteBefore);
       expect(await prisma.realityRewrite.count({ where: { worldId: data.world.id } })).toBe(1);
 

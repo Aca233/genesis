@@ -1,6 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { completeCreatorDeck } from "@/lib/abilities/embark.test-fixtures";
+import type { GenesisIntentContract } from "@/lib/genesis/intent";
 import { initialObserverState, initialRealityState } from "@/lib/reality/schemas";
+
+const crossoverIntent: GenesisIntentContract = {
+  sourceBasis: "multi_ip",
+  sourceIps: ["无职转生", "钢铁侠"],
+  explicitPremise: ["托尼·斯塔克转生为鲁迪乌斯"],
+  narrativeCenter: {
+    identity: "托尼·斯塔克转生的鲁迪乌斯",
+    role: "唯一叙事中心",
+    startState: "保留成年意识的新生儿",
+  },
+  playerRole: {
+    type: "independent_god",
+    narrativeFunction: "limited_intervener",
+    mustNotReplaceProtagonist: true,
+  },
+  forbiddenExpansions: ["不得把贾维斯设为独立神明"],
+  factsAtAnchor: ["托尼保留成年意识"],
+  futureOnly: ["魔导铠甲"],
+  fusionBoundaries: ["魔法与科技的映射尚未证实"],
+  uncertaintyPolicy: "omit_or_generalize",
+  corePressures: ["成年意识受婴儿身体限制"],
+};
 
 const mocks = vi.hoisted(() => {
   const model = () => ({
@@ -718,6 +741,44 @@ describe("存档导入", () => {
     });
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.prisma.world.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["字段缺失", false],
+    ["显式 null", true],
+  ])("version 4 genesisIntent %s 时仍可导入", async (_label, explicitNull) => {
+    const archive = versionFourArchive();
+    if (explicitNull) Object.assign(archive.world, { genesisIntent: null });
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(200);
+    expect(mocks.prisma.$transaction).toHaveBeenCalledOnce();
+  });
+
+  it("导入有效 genesisIntent 时原样持久化且不参与 ID 重映射", async () => {
+    const archive = versionFourArchive();
+    Object.assign(archive.world, { genesisIntent: crossoverIntent });
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(200);
+    expect(mocks.prisma.world.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ genesisIntent: crossoverIntent }),
+    }));
+  });
+
+  it.each([
+    ["任意 JSON", { arbitrary: true }],
+    ["超限契约", { ...crossoverIntent, sourceIps: Array.from({ length: 7 }, (_, i) => `IP-${i}`) }],
+  ])("拒绝 genesisIntent %s", async (_label, genesisIntent) => {
+    const archive = versionFourArchive();
+    Object.assign(archive.world, { genesisIntent });
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("导入 version 4 时预生成新 ID 并重映射所有能力与关系外键", async () => {
