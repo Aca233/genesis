@@ -516,7 +516,7 @@ export async function enforceGenesisQuality(
         temperature: 0.1,
         maxTokens: 8000,
         maxAttempts: 2,
-        transportMaxAttempts: 1,
+        transportMaxAttempts: 2,
         allowTransportFallback: false,
         failOnTruncation: false,
         cache: { namespace: `genesis-quality:v2:${input.mode}:round-${round}:patch-${patchAttempt}` },

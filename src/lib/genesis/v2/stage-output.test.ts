@@ -125,7 +125,7 @@ describe("Genesis V2 stage output contracts", () => {
     expect(sanitized.majorCharacters[0]!.racialOverrides).toEqual([]);
   });
 
-  it("keeps a future ability when removing it would violate the character ability minimum", () => {
+  it("rejects active characters without two at-anchor abilities before stage assembly", () => {
     const characters = splitDeck(completeDeck()).characters;
     const character = characters.majorCharacters[0]!;
     const output = {
@@ -142,9 +142,7 @@ describe("Genesis V2 stage output contracts", () => {
       ],
     };
 
-    const sanitized = sanitizeGenesisV2CharactersTemporalOutput(output);
-
-    expect(sanitized.majorCharacters[0]!.abilities).toHaveLength(2);
-    expect(sanitized.majorCharacters[0]!.abilities[0]!.timing).toBe("future");
+    expect(() => getGenesisV2StageOutputSchema("characters", "pantheon").parse(output))
+      .toThrow(/至少有 2 个 timing=at_anchor/);
   });
 });

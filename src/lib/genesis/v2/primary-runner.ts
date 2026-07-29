@@ -293,7 +293,7 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
       user: bundle.blocks.dynamicTail,
       schema: getGenesisV2StageOutputSchema(stageId, mode),
       maxAttempts: 2,
-      transportMaxAttempts: 1,
+      transportMaxAttempts: 2,
       allowTransportFallback: false,
       maxTokens: preflight.budgetPlan.stages.find((budget) => budget.stage === stageId)?.maxOutputTokens,
       cache: { namespace: bundle.routingNamespace },

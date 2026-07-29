@@ -79,7 +79,20 @@ export const GenesisV2CharactersOutputSchema = z.object({
   mode: WorldModeLiteralSchema,
   majorCharacters: z.array(MajorCharacterCardSchema).min(4).max(12),
   relationsAtAnchor: z.array(RelationAtAnchorSchema).optional(),
-}).strict();
+}).strict().superRefine((output, ctx) => {
+  output.majorCharacters.forEach((character, index) => {
+    if ((character.statusAtAnchor ?? "active") !== "active") return;
+    const heldAbilityCount = character.abilities.filter(
+      ({ timing }) => (timing ?? "at_anchor") === "at_anchor",
+    ).length;
+    if (heldAbilityCount >= 2) return;
+    ctx.addIssue({
+      code: "custom",
+      path: ["majorCharacters", index, "abilities"],
+      message: "active 人物必须至少有 2 个 timing=at_anchor 的个人技能；future/lost 能力不计入当前持有技能",
+    });
+  });
+});
 
 export type GenesisV2StageOutputs = {
   blueprint: z.infer<typeof GenesisV2BlueprintOutputSchema>;

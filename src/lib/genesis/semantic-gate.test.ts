@@ -181,7 +181,7 @@ describe("enforceGenesisQuality", () => {
         owner,
         schema: GenesisSemanticRepairResultSchema,
         maxAttempts: 2,
-        transportMaxAttempts: 1,
+        transportMaxAttempts: 2,
         allowTransportFallback: false,
         failOnTruncation: false,
       });
