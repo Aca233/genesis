@@ -45,6 +45,7 @@ export interface CompileGenesisV2PromptBundleInput {
   readonly mode: string;
   readonly normalizedDecree: string;
   readonly rawUserIntentHash: string;
+  readonly intentContract?: unknown;
   readonly manifestHash: string;
   readonly structuralManifestSummary: unknown;
   readonly canonBrief: unknown;
@@ -220,6 +221,7 @@ export function compileGenesisV2PromptBundle(
     }),
     worldCommon: compileBlock("world-common", {
       canonBrief: input.canonBrief,
+      intentContract: input.intentContract ?? null,
       manifestHash: input.manifestHash,
       mode: input.mode,
       normalizedDecree: input.normalizedDecree,

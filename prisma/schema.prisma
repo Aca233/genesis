@@ -139,6 +139,8 @@ model GenesisTask {
   budgetSettledOut        Int               @default(0) @map("budget_settled_output_tokens")
   shadowEnabled           Boolean           @default(false) @map("shadow_enabled")
   shadowStatus            String            @default("disabled") @map("shadow_status")
+  preflight               Json?
+  preflightHash           String?           @map("preflight_hash")
   shadowPreflight         Json?             @map("shadow_preflight")
   shadowPreflightHash     String?           @map("shadow_preflight_hash")
   shadowBudgetMaxCalls    Int               @default(5) @map("shadow_budget_max_calls")

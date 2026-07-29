@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   jobUpdateMany: vi.fn().mockResolvedValue({ count: 0 }),
   outboxCreate: vi.fn().mockResolvedValue({}),
   ensure: vi.fn(),
+  primaryEnsure: vi.fn(),
   shadowEnsure: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({ prisma: {
@@ -18,6 +19,7 @@ vi.mock("@/lib/db", () => ({ prisma: {
   })),
 } }));
 vi.mock("./task-runner", () => ({ ensureGenesisTaskRunning: mocks.ensure }));
+vi.mock("./v2/primary-runner", () => ({ ensureGenesisV2PrimaryJobRunning: mocks.primaryEnsure }));
 vi.mock("./v2/shadow-runner", () => ({ ensureGenesisShadowJobRunning: mocks.shadowEnsure }));
 
 import { scanGenesisJobs } from "./scheduler";
@@ -42,6 +44,7 @@ describe("durable genesis scheduler", () => {
   it("legacy 完成后才把低优先级 shadow 节点交给独立 runner", async () => {
     mocks.findMany
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ id: "shadow-blueprint" }]);
 
     await scanGenesisJobs(new Date("2026-07-28T12:00:00.000Z"));
@@ -56,7 +59,24 @@ describe("durable genesis scheduler", () => {
     }));
   });
 
-  it("熔断冷却后把 waiting_for_provider 任务重新排队供单探针恢复", async () => {
+  it("调度冻结为 dag-v2 的主 DAG 节点", async () => {
+    mocks.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "v2-blueprint" }])
+      .mockResolvedValueOnce([]);
+
+    await scanGenesisJobs(new Date("2026-07-28T12:00:00.000Z"));
+
+    expect(mocks.primaryEnsure).toHaveBeenCalledWith("v2-blueprint");
+    expect(mocks.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.objectContaining({
+        engineVersion: "dag-v2",
+        task: expect.objectContaining({ engineVersion: "dag-v2" }),
+      }),
+    }));
+  });
+
+  it("熔断冷却后把 Legacy 或 V2 的 waiting job 重新排队供单探针恢复", async () => {
     mocks.waitingFindMany.mockResolvedValue([{
       id: "task-waiting", aggregateVersion: 4, stage: "laws",
     }]);
@@ -67,6 +87,7 @@ describe("durable genesis scheduler", () => {
       data: { status: "queued", error: null, aggregateVersion: 5 },
     }));
     expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { genesisTaskId: "task-waiting", status: "waiting_for_provider" },
       data: { status: "queued", error: null },
     }));
     expect(mocks.outboxCreate).toHaveBeenCalledWith({ data: expect.objectContaining({

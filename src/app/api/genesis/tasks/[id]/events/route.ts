@@ -49,6 +49,7 @@ export const GET = withAuth(async (
             where: { id, userId },
             select: {
               id: true,
+              engineVersion: true,
               mode: true,
               status: true,
               stage: true,

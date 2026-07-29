@@ -56,4 +56,28 @@ describe("Genesis V2 fixed stage registry", () => {
       expect(Object.isFrozen(contract.allowedTargetKinds)).toBe(true);
     }
   });
+
+  it("assigns current WorldDeck top-level fields to exactly one stage", () => {
+    const owners = new Map<string, string>();
+    for (const contract of GENESIS_V2_STAGE_REGISTRY) {
+      for (const field of contract.ownedFields) {
+        expect(owners.has(field), `${field} is owned twice`).toBe(false);
+        owners.set(field, contract.id);
+      }
+    }
+
+    expect(Object.fromEntries(owners)).toMatchObject({
+      worldName: "blueprint",
+      cosmology: "blueprint",
+      playerGod: "pantheon_domain",
+      majorGods: "pantheon_domain",
+      factions: "civilizations",
+      races: "civilizations",
+      places: "civilizations",
+      epochConflict: "eras",
+      canonEvents: "eras",
+      majorCharacters: "characters",
+      relationsAtAnchor: "characters",
+    });
+  });
 });

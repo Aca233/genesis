@@ -15,6 +15,10 @@ import {
 } from "@/lib/genesis/limits";
 import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
 import { isGenesisV2ShadowEnabled } from "@/lib/genesis/v2/config";
+import {
+  readGenesisV2PrimaryRollout,
+  selectGenesisEngine,
+} from "@/lib/genesis/v2/engine-selection";
 import { runDeterministicPreflight } from "@/lib/genesis/v2/preflight";
 import { GENESIS_V2_STAGE_REGISTRY } from "@/lib/genesis/v2/stage-registry";
 
@@ -85,7 +89,21 @@ export const POST = withAuth(async (userId, request: Request) => {
     lorebookName: taskInput.lorebookName ?? null,
     materialSelection: taskInput.materialSelection,
   }), "utf8").digest("hex");
-  const shadowEnabled = isGenesisV2ShadowEnabled();
+  const engineVersion = selectGenesisEngine({
+    userId,
+    requestHash,
+    rollout: readGenesisV2PrimaryRollout(),
+  });
+  const primaryV2 = engineVersion === "dag-v2";
+  const shadowEnabled = !primaryV2 && isGenesisV2ShadowEnabled();
+  const primaryPreflight = primaryV2
+    ? runDeterministicPreflight({
+        mode: taskInput.mode,
+        decree: taskInput.decree,
+        lorebook: taskInput.lorebook,
+        materialSelection,
+      })
+    : null;
   const shadowPreflight = shadowEnabled
     ? runDeterministicPreflight({
         mode: taskInput.mode,
@@ -96,8 +114,13 @@ export const POST = withAuth(async (userId, request: Request) => {
     : null;
   const taskData = {
     ...taskInput,
+    engineVersion,
     shadowEnabled,
     shadowStatus: shadowEnabled ? "pending_legacy" : "disabled",
+    ...(primaryPreflight ? {
+      preflight: primaryPreflight as unknown as Prisma.InputJsonValue,
+      preflightHash: primaryPreflight.preflightHash,
+    } : {}),
     ...(shadowPreflight ? {
       shadowPreflight: shadowPreflight as unknown as Prisma.InputJsonValue,
     } : {}),
@@ -107,12 +130,22 @@ export const POST = withAuth(async (userId, request: Request) => {
     shadowBudgetMaxOutput: shadowPreflight?.budgetPlan.maxOutputTokens ?? 30_000,
     jobs: {
       create: [
-        {
+        ...(!primaryV2 ? [{
           userId,
           nodeKey: "legacy-world-deck",
           engineVersion: "legacy-v1",
           inputHash: requestHash,
-        },
+        }] : []),
+        ...(primaryV2 ? GENESIS_V2_STAGE_REGISTRY.map((stage) => ({
+          userId,
+          nodeKey: `v2:${stage.id}`,
+          engineVersion: "dag-v2",
+          status: "queued",
+          dependencyKeys: stage.dependencies.map((dependency) => `v2:${dependency}`),
+          inputHash: primaryPreflight!.preflightHash,
+          estimatedTokens: primaryPreflight!.budgetPlan.stages
+            .find((budget) => budget.stage === stage.id)?.maxOutputTokens,
+        })) : []),
         ...(shadowEnabled ? GENESIS_V2_STAGE_REGISTRY.map((stage) => ({
           userId,
           nodeKey: `shadow:${stage.id}`,

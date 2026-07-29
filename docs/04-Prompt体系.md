@@ -35,6 +35,12 @@ Creator 没有 playerGod 或 `stanceToPlayer`。关系输入允许模型使用�
 
 **任务**：一句话 → 完整世界卡组。叙事槽，单次流式调用（`task: "genesis"`，`maxTokens: 16000`，`failOnTruncation` 开启）：顶层 JSON 键进度扫描驱动阶段展示与断点持久化；模型/通道输出上限不足时由网关续写接力补完（最多 12 轮，见 docs/04-AI系统设计 §8），不按卡片拆分多次请求。
 
+以上仍是线上 `legacy-v1` 主路径。Genesis V2 Shadow 不复用“输出完整卡组”的合同，而把同一目标拆成五份严格 Artifact：`blueprint` 只拥有模式、世界名、锚点、宇宙论、融合公理、风格、主题与槽位简报；`pantheon_domain` 只拥有玩家神/诸神；`civilizations` 只拥有种族、势力和地点；`eras` 只拥有时代冲突、首章约束和将临之事；`characters` 只拥有主要人物与锚点关系。每阶段 Prompt Bundle 固定携带 StageContract、StructuralManifest、相关来源义务和 accepted 依赖 hash，动态重试信息只进入尾部，不能改写稳定前缀。
+
+V2 模型输出必须使用预检分配的 canonical ref，不能返回 `World`、`worldId` 或 `draftDeck`，也不能夹带其他阶段字段。最终 `playable_core` 由服务端确定性组装，不再让模型进行第六次“完整世界重写”。当前该合同仅用于 Shadow 验证；Phase 2B 完成前不作为线上用户世界的写入来源。
+
+正式 `dag-v2` 复用 Legacy 已验证的独立意图提取 Prompt，并在蓝图调用前冻结结果；五份阶段 Prompt 都把该意图作为稳定世界上下文。阶段 Schema 失败由 `completeStructured` 只修当前阶段，StructuralManifest/汇合错误由节点重试把精确问题放入动态尾部；完整核心通过后仍调用现有语义审计和局部 Patch 规划器，绝不退回“返回完整修正版 WorldDeck”的旧修复方式。
+
 模板要点（摘要）：
 
 ```

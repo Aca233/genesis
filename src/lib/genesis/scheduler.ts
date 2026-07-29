@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { ensureGenesisTaskRunning } from "./task-runner";
+import { ensureGenesisV2PrimaryJobRunning } from "./v2/primary-runner";
 import { ensureGenesisShadowJobRunning } from "./v2/shadow-runner";
 
 const POLL_INTERVAL_MS = 2_000;
@@ -21,7 +22,7 @@ export async function scanGenesisJobs(now = new Date()): Promise<void> {
       });
       if (updated.count !== 1) continue;
       await tx.genesisJob.updateMany({
-        where: { genesisTaskId: task.id, nodeKey: "legacy-world-deck", status: "waiting_for_provider" },
+        where: { genesisTaskId: task.id, status: "waiting_for_provider" },
         data: { status: "queued", error: null },
       });
       await tx.genesisOutbox.create({
@@ -49,6 +50,24 @@ export async function scanGenesisJobs(now = new Date()): Promise<void> {
     select: { genesisTaskId: true },
   });
   for (const job of jobs) ensureGenesisTaskRunning(job.genesisTaskId);
+  const primaryV2Jobs = await prisma.genesisJob.findMany({
+    where: {
+      engineVersion: "dag-v2",
+      status: { in: ["queued", "running"] },
+      OR: [
+        { status: "queued" },
+        { status: "running", leaseExpiresAt: { lt: now } },
+      ],
+      task: {
+        engineVersion: "dag-v2",
+        status: { in: ["queued", "running", "repairing"] },
+      },
+    },
+    orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+    take: 20,
+    select: { id: true },
+  });
+  for (const job of primaryV2Jobs) ensureGenesisV2PrimaryJobRunning(job.id);
   const shadowJobs = await prisma.genesisJob.findMany({
     where: {
       engineVersion: "dag-v2-shadow",
