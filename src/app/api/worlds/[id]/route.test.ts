@@ -1,5 +1,41 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { completeCreatorDeck, completeDeck } from "@/lib/abilities/embark.test-fixtures";
+import type { GenesisIntentContract } from "@/lib/genesis/intent";
+import type { GenesisQualityReport } from "@/lib/genesis/semantic-audit";
+
+const crossoverIntent: GenesisIntentContract = {
+  sourceBasis: "multi_ip",
+  sourceIps: ["无职转生", "钢铁侠"],
+  explicitPremise: ["鲁迪乌斯由托尼·斯塔克转生"],
+  narrativeCenter: {
+    identity: "托尼·斯塔克转生后的鲁迪乌斯",
+    role: "转生主角",
+    startState: "刚出生，仅保留人格、记忆与工程思维",
+  },
+  playerRole: {
+    type: "independent_god",
+    narrativeFunction: "limited_intervener",
+    mustNotReplaceProtagonist: true,
+  },
+  forbiddenExpansions: ["独立贾维斯神格", "开局已有钢铁装甲"],
+  factsAtAnchor: ["鲁迪乌斯刚出生"],
+  futureOnly: ["建立工坊", "验证魔力能否驱动机械"],
+  fusionBoundaries: ["工程知识只能提出假设，不能直接改写世界物理规律"],
+  uncertaintyPolicy: "omit_or_generalize",
+  corePressures: ["婴儿身体限制", "隐瞒成年意识"],
+};
+
+const warningReport: GenesisQualityReport = {
+  verdict: "warnings",
+  issues: [{
+    severity: "warning",
+    path: "epochConflict.backgroundConflicts.0",
+    type: "causal_disconnect",
+    explanation: "背景税务冲突与核心转生压力的联系较弱。",
+    evidenceRefs: ["epochConflict.backgroundConflicts.0"],
+    repairInstruction: "保留为低影响背景线索。",
+  }],
+};
 
 const mocks = vi.hoisted(() => ({
   findUnique: vi.fn(),
@@ -141,5 +177,62 @@ describe("/api/worlds/[id]", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.world.draftDeck.mode).toBe("pantheon");
+  });
+
+  it("GET 投影解析后的意图与最新质量报告且不泄漏原始任务关系", async () => {
+    mocks.findUnique.mockResolvedValue({
+      id: "world-1",
+      mode: "pantheon",
+      status: "draft",
+      draftDeck: completeDeck(),
+      genesisIntent: crossoverIntent,
+      genesisTasks: [{ auditReport: warningReport }],
+      timelines: [],
+      lockedPaths: [],
+    });
+
+    const response = await GET(new Request("http://localhost"), context);
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      world: {
+        genesisIntent: crossoverIntent,
+        genesisAuditReport: warningReport,
+      },
+    });
+    expect(body.world.genesisTasks).toBeUndefined();
+    expect(mocks.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        genesisTasks: {
+          select: { auditReport: true },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+      }),
+    }));
+  });
+
+  it("GET 将历史无效意图与质量 JSON 归一为 null 而不返回 500", async () => {
+    mocks.findUnique.mockResolvedValue({
+      id: "world-1",
+      mode: "pantheon",
+      status: "draft",
+      draftDeck: completeDeck(),
+      genesisIntent: { sourceBasis: "broken" },
+      genesisTasks: [{ auditReport: { verdict: "warnings", issues: "broken" } }],
+      timelines: [],
+      lockedPaths: [],
+    });
+
+    const response = await GET(new Request("http://localhost"), context);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      world: {
+        genesisIntent: null,
+        genesisAuditReport: null,
+      },
+    });
   });
 });
