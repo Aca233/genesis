@@ -103,6 +103,18 @@ describe("enforceGenesisQuality", () => {
     });
   });
 
+  it("兼容模型直接返回补丁操作数组", () => {
+    expect(GenesisSemanticRepairResultSchema.parse([
+      { path: "majorCharacters.0.situation", action: "replace", valueJson: "失落" },
+    ])).toEqual({
+      operations: [{
+        path: "majorCharacters.0.situation",
+        action: "replace",
+        valueJson: JSON.stringify("失落"),
+      }],
+    });
+  });
+
   it("warning-only 输出原样通过且不 repair", async () => {
     const input = qualityInput();
     const audit = vi.fn().mockResolvedValue(warningReport);

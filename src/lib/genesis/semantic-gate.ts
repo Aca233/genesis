@@ -102,9 +102,13 @@ const RemoveOperationSchema = z.union([
   }).strict(),
 ]).transform(({ path, action }) => ({ path, action, valueJson: null }));
 
-export const GenesisSemanticRepairResultSchema = z.object({
-  operations: z.array(z.union([ReplaceOperationSchema, RemoveOperationSchema])).max(16),
-}).strict();
+const SemanticRepairOperationSchema = z.union([ReplaceOperationSchema, RemoveOperationSchema]);
+const SemanticRepairOperationsSchema = z.array(SemanticRepairOperationSchema).max(16);
+
+export const GenesisSemanticRepairResultSchema = z.union([
+  z.object({ operations: SemanticRepairOperationsSchema }).strict(),
+  SemanticRepairOperationsSchema.transform((operations) => ({ operations })),
+]);
 type GenesisSemanticRepairResult = z.infer<typeof GenesisSemanticRepairResultSchema>;
 
 export type GenesisQualityGateDeps = {
