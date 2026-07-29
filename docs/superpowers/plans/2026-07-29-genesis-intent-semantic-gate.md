@@ -11,9 +11,13 @@
 ## Global Constraints
 
 - Keep `pantheon` as god-roleplay: the player is an independent god and never becomes the reincarnated mortal protagonist.
+- Keep source cardinality deterministic: `original` has zero `sourceIps`, `single_ip` has exactly one, and `multi_ip` has two to six.
 - The decree-designated reincarnated protagonist is the sole narrative center; the player god is an observer, patron, or limited intervener.
 - IP uncertainty policy is exactly `omit_or_generalize`; uncertain canon facts must be omitted or generalized, never asserted as canon.
 - A semantic `error` must not be persisted; one semantic repair and one re-audit are the hard maximum.
+- An `unsupported_canon_claim` is always at least `error`; uncertain canon can never be persisted as a warning-only ambiguity.
+- Every added Genesis LLM call must accept and forward the existing optional completion `owner`, and each approved outer attempt must set `maxAttempts: 1`, `transportMaxAttempts: 1`, and `allowTransportFallback: false` so gateway retries cannot multiply the physical-call budget.
+- `GenesisIntentGenerationError`, `GenesisSemanticAuditError`, and `GenesisSemanticGateError` are terminal domain failures and must transition the task directly to `failed`, before the generic transport `terminal_unknown` branch.
 - Preserve all player-locked paths during reroll and semantic repair.
 - Old worlds remain readable; no background rewrite or destructive backfill.
 - Do not add dependencies.
@@ -188,6 +192,7 @@ export type GenerateGenesisIntentInput = {
   decree: string;
   userId: string;
   lorebookExcerpts?: string;
+  owner?: CompletionRequest["owner"];
 };
 
 export async function generateGenesisIntent(
@@ -196,7 +201,7 @@ export async function generateGenesisIntent(
 ): Promise<GenesisIntentContract>;
 ```
 
-Call the `backstage` slot with `task: "extract"`, `maxTokens: 3000`, and at most two attempts. Parse the result again with `GenesisIntentContractSchema` and call `assertGenesisIntentForMode` before returning. After the second failure, throw `GenesisIntentGenerationError` with a safe Chinese message and the original error as `cause`; this wrapper must not satisfy `isTransientLlmError`, preventing the outer task runner from multiplying the approved retry budget. Do not fall back to a guessed contract.
+Call the `backstage` slot with `task: "extract"`, `maxTokens: 3000`, and at most two outer attempts. Forward `owner`. Each outer attempt must use `maxAttempts: 1`, `transportMaxAttempts: 1`, and `allowTransportFallback: false`; tests must assert the injected completion is called no more than twice. Parse the result again with `GenesisIntentContractSchema` and call `assertGenesisIntentForMode` before returning. After the second failure, throw `GenesisIntentGenerationError` with a safe Chinese message and the original error as `cause`; this wrapper must not satisfy `isTransientLlmError`, preventing the outer task runner from multiplying the approved retry budget. Do not fall back to a guessed contract.
 
 - [ ] **Step 6: Add the additive Prisma migration**
 
@@ -460,7 +465,7 @@ export const GenesisQualityReportSchema = GenesisSemanticAuditResultSchema.exten
 }).strict();
 ```
 
-Export `type GenesisQualityReport = z.infer<typeof GenesisQualityReportSchema>`. Normalize verdict from the final issue list. Force these types to at least `error`: premise drift, narrative-center duplication, ontology mismatch, anchor-state leak, power shortcut, unsupported fusion rule, future identity leak, death conflict, and causality conflict. Preserve model severity for unsupported canon claims, causal disconnect, continuity mix, and information leaks so low-impact ambiguity can remain a warning. Parse legacy reports through a separate legacy schema and supply the non-empty default repair instruction shown in Step 1.
+Export `type GenesisQualityReport = z.infer<typeof GenesisQualityReportSchema>`. Normalize verdict from the final issue list. Force these types to at least `error`: premise drift, narrative-center duplication, ontology mismatch, unsupported canon claim, anchor-state leak, power shortcut, unsupported fusion rule, future identity leak, death conflict, and causality conflict. Preserve model severity only for causal disconnect, continuity mix, and information leaks so low-impact ambiguity can remain a warning. Parse legacy reports through a separate legacy schema and supply the non-empty default repair instruction shown in Step 1.
 
 - [ ] **Step 4: Write failing prompt and retry tests**
 
@@ -492,12 +497,13 @@ export async function auditGenesisSemantics(
     intent: GenesisIntentContract;
     lorebookExcerpts?: string;
     slot?: SlotName;
+    owner?: CompletionRequest["owner"];
   },
   deps: SemanticAuditDeps = { complete: completeStructured },
 ): Promise<GenesisSemanticAuditResult>;
 ```
 
-The system prompt must explicitly compare the deck against the decree, contract, temporal anchor, provenance, and lorebook. Call `completeStructured` with `task: "extract"`, `temperature: 0.1`, `maxTokens: 8000`, and at most two attempts. Do not catch and return `null`; after the second failure throw `GenesisSemanticAuditError` with a safe Chinese message and `cause`. The wrapper must be non-transient so `runGenesisTask` does not retry the whole task and exceed the audit budget.
+The system prompt must explicitly compare the deck against the decree, contract, temporal anchor, provenance, and lorebook. Call `completeStructured` with `task: "extract"`, `temperature: 0.1`, `maxTokens: 8000`, and at most two outer attempts. Forward `owner`; each attempt must use `maxAttempts: 1`, `transportMaxAttempts: 1`, and `allowTransportFallback: false`, and tests must assert at most two injected completion calls. Do not catch and return `null`; after the second failure throw `GenesisSemanticAuditError` with a safe Chinese message and `cause`. The wrapper must be non-transient so `runGenesisTask` does not retry the whole task and exceed the audit budget.
 
 - [ ] **Step 6: Verify Task 3**
 
@@ -633,6 +639,7 @@ export async function enforceGenesisQuality(
     materialConstraints?: string;
     lockedPaths?: string[];
     currentDeck?: WorldDeck;
+    owner?: CompletionRequest["owner"];
     onStage?: (stage: "audit" | "semantic_repair") => Promise<void> | void;
   },
   deps: GenesisQualityGateDeps = defaultGenesisQualityGateDeps,
@@ -786,7 +793,7 @@ it("does not persist a world when residual semantic errors remain", async () => 
 });
 ```
 
-Also verify an exhausted audit call fails the task and is not treated as a semantic pass.
+Also verify an exhausted audit call fails the task and is not treated as a semantic pass. Explicitly test that `GenesisIntentGenerationError`, `GenesisSemanticAuditError`, and `GenesisSemanticGateError` bypass the generic `terminal_unknown -> waiting_for_provider` branch, transition directly to `failed`, and never create a world. Assert the bottom-level completion call count and owner budget attribution for every added LLM phase.
 
 - [ ] **Step 5: Run the quality gate before saving**
 
@@ -802,6 +809,7 @@ const quality = await enforceGenesisQuality({
   lorebookExcerpts: excerpts,
   materialSnapshot,
   materialConstraints: materialText,
+  owner: llmOwner,
   onStage: async (stage) => {
     await updateOwnedTask({
       stage,
@@ -833,8 +841,14 @@ export type GenesisQualityEvent =
       repaired: boolean;
       auditPasses: number;
       durationMs: number;
+      issueCounts: Partial<Record<GenesisSemanticIssueType, number>>;
     }
-  | { kind: "semantic_gate_rejected"; taskId: string; errorCount: number };
+  | {
+      kind: "semantic_gate_rejected";
+      taskId: string;
+      errorCount: number;
+      issueCounts: Partial<Record<GenesisSemanticIssueType, number>>;
+    };
 ```
 
 `recordGenesisQualityEvent` emits one structured `console.info("genesis_quality", event)`. Tests spy on `console.info`, assert the event values, and assert serialized output does not contain the decree or malformed card text. Call it around intent generation and after quality-gate completion/rejection.
@@ -866,7 +880,7 @@ git commit -m "feat(genesis): enforce quality gate before persistence"
 
 **Interfaces:**
 - Consumes: `generateGenesisIntent`, `resolveLorebookExcerpts`, `preserveLockedPaths`, `enforceGenesisQuality`.
-- Returns: `{ deck, updatedAt, auditReport }` from successful rerolls.
+- Returns: `{ deck, updatedAt, auditReport, genesisIntent }` from successful rerolls.
 - Persists: a lazily generated `World.genesisIntent` in the same optimistic transaction as the rerolled deck.
 
 - [ ] **Step 1: Read the local Next.js route-handler guide**
@@ -928,7 +942,7 @@ expect(qualityGate).toHaveBeenCalledWith(expect.objectContaining({
 
 - [ ] **Step 5: Integrate lazy intent and quality gating**
 
-Load the world with `lorebookEntries`. Resolve intent as follows:
+Load the world with `lorebookEntries`. Map Prisma lorebook rows into `ParsedLorebookEntry[]` first, normalizing nullable JSON `stExtra` to a plain record before calling `resolveLorebookExcerpts`. Resolve intent as follows:
 
 ```ts
 const persistedIntent = parseGenesisIntent(world.genesisIntent);
@@ -943,7 +957,7 @@ const intent = persistedIntent ?? await generateGenesisIntent({
 });
 ```
 
-After reference repair and locked-field merging, call `enforceGenesisQuality` with `currentDeck` and `lockedPaths`. In the existing optimistic transaction, persist the gated deck, `genesisIntent: intent`, and update any `GenesisTask` related by `worldId` with the latest `auditReport`. Do not make intent persistence a separate transaction.
+After reference repair and locked-field merging, call `enforceGenesisQuality` with `currentDeck` and `lockedPaths`. In the existing optimistic transaction, persist the gated deck, `genesisIntent: intent`, and update any `GenesisTask` related by `worldId` with the latest `auditReport`. Do not make intent persistence a separate transaction. Return the persisted `genesisIntent` in the successful response so the current page can update immediately without a full reload.
 
 - [ ] **Step 6: Verify Task 6**
 
@@ -1044,7 +1058,7 @@ const [genesisIntent, setGenesisIntent] = useState<GenesisIntentContract | null>
 const [genesisAuditReport, setGenesisAuditReport] = useState<GenesisQualityReport | null>(null);
 ```
 
-Set both after GET, refresh `genesisAuditReport` from a successful reroll response, and render the intent summary above `TemporalCalibrationCard` with warnings directly below it.
+Set both after GET, refresh both `genesisIntent` and `genesisAuditReport` from a successful reroll response, and render the intent summary above `TemporalCalibrationCard` with warnings directly below it.
 
 - [ ] **Step 7: Verify Task 7**
 
@@ -1111,14 +1125,14 @@ expect(worldCreate).toHaveBeenCalledWith(expect.objectContaining({
 }));
 ```
 
-Use `GenesisIntentContractSchema.optional()` in the import schema rather than a generic unbounded JSON slot. Archives without the field must remain valid.
+Use `GenesisIntentContractSchema.nullish()` (or equivalently nullable + optional) in the import schema rather than a generic unbounded JSON slot. Archives with the field absent, explicitly `null`, or containing a valid contract must remain valid; malformed or oversized contracts must be rejected.
 
 - [ ] **Step 4: Persist imported intent without remapping**
 
 Add this field to `WorldSchema`:
 
 ```ts
-genesisIntent: GenesisIntentContractSchema.optional(),
+genesisIntent: GenesisIntentContractSchema.nullish(),
 ```
 
 And to `tx.world.create`:
@@ -1265,7 +1279,7 @@ Expected: full unit suite and production build pass. If the known deploy-securit
 ```powershell
 git diff --check
 git status --short
-git diff --stat 6b91bac..HEAD
+git diff --stat d47588f..HEAD
 ```
 
 Expected: no whitespace errors; only plan-owned source, test, migration, and documentation files are staged or committed. Confirm unrelated pre-existing files remain untouched.
@@ -1277,7 +1291,7 @@ git add -- src/lib/genesis/semantic-gate.regression.test.ts
 git commit -m "test(genesis): lock crossover quality regression"
 ```
 
-Do not include unrelated workspace files or generated icon diffs in this commit.
+If Task 9 makes verification-only corrections to plan-owned files, add those exact paths explicitly before committing. Do not include unrelated workspace files or generated icon diffs in this commit.
 
 ---
 
