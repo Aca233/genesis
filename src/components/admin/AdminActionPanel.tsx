@@ -37,7 +37,10 @@ export function AdminActionPanel({
   const reasonRef = useRef<HTMLTextAreaElement>(null);
   const confirmationRef = useRef<HTMLInputElement>(null);
   const submittingRef = useRef(false);
-  const failureFocusRef = useRef<"reason" | "confirmation" | null>(null);
+  const sessionCounterRef = useRef(0);
+  const openSessionRef = useRef<number | null>(null);
+  const failureFocusRef = useRef<{ session: number; target: "reason" | "confirmation" } | null>(null);
+  const refreshPendingSessionRef = useRef<number | null>(null);
   const refreshScheduledRef = useRef(false);
   const refreshFrameRef = useRef<number | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -47,6 +50,7 @@ export function AdminActionPanel({
   const [errors, setErrors] = useState<AdminActionFormErrors>({});
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
+  const [refreshPending, setRefreshPending] = useState(false);
   const titleId = `${id}-title`;
   const impactId = `${id}-impact`;
   const reasonHelpId = `${id}-reason-help`;
@@ -56,36 +60,56 @@ export function AdminActionPanel({
 
   useEffect(() => {
     if (busy || !failureFocusRef.current) return;
-    const target = failureFocusRef.current === "confirmation" ? confirmationRef.current : reasonRef.current;
+    const pendingFocus = failureFocusRef.current;
+    if (!isCurrentDialogSession(pendingFocus.session)) {
+      failureFocusRef.current = null;
+      return;
+    }
+    const target = pendingFocus.target === "confirmation" ? confirmationRef.current : reasonRef.current;
     failureFocusRef.current = null;
     target?.focus();
   }, [busy, errors]);
 
   useEffect(() => {
-    if (status !== SUCCESS_STATUS || refreshScheduledRef.current) return;
+    const session = refreshPendingSessionRef.current;
+    if (!refreshPending || status !== SUCCESS_STATUS || session === null || refreshScheduledRef.current) return;
     refreshScheduledRef.current = true;
     refreshFrameRef.current = requestAnimationFrame(() => {
       refreshFrameRef.current = null;
       refreshTimeoutRef.current = setTimeout(() => {
         refreshTimeoutRef.current = null;
+        if (refreshPendingSessionRef.current !== session || openSessionRef.current !== null || dialogRef.current?.open) return;
+        refreshPendingSessionRef.current = null;
+        refreshScheduledRef.current = false;
+        setRefreshPending(false);
         router.refresh();
       }, REFRESH_DELAY_MS);
     });
-  }, [router, status]);
+  }, [refreshPending, router, status]);
 
   useEffect(() => () => {
     if (refreshFrameRef.current !== null) cancelAnimationFrame(refreshFrameRef.current);
     if (refreshTimeoutRef.current !== null) clearTimeout(refreshTimeoutRef.current);
     refreshFrameRef.current = null;
     refreshTimeoutRef.current = null;
+    refreshPendingSessionRef.current = null;
+    refreshScheduledRef.current = false;
+    failureFocusRef.current = null;
+    openSessionRef.current = null;
   }, []);
+
+  function isCurrentDialogSession(session: number) {
+    return openSessionRef.current === session && dialogRef.current?.open === true;
+  }
 
   function restoreTriggerFocus() {
     triggerRef.current?.focus();
   }
 
   function openDialog() {
-    if (refreshFrameRef.current === null && refreshTimeoutRef.current === null) refreshScheduledRef.current = false;
+    if (submittingRef.current || refreshPendingSessionRef.current !== null) return;
+    openSessionRef.current = ++sessionCounterRef.current;
+    failureFocusRef.current = null;
     setReason("");
     setConfirmation("");
     setErrors({});
@@ -94,11 +118,15 @@ export function AdminActionPanel({
   }
 
   function closeDialog() {
-    dialogRef.current?.close();
+    failureFocusRef.current = null;
+    openSessionRef.current = null;
+    if (dialogRef.current?.open) dialogRef.current.close();
     restoreTriggerFocus();
   }
 
   function handleDialogClose() {
+    failureFocusRef.current = null;
+    openSessionRef.current = null;
     if (typeof document === "undefined" || document.activeElement !== triggerRef.current) restoreTriggerFocus();
   }
 
@@ -112,17 +140,22 @@ export function AdminActionPanel({
     if (errors.confirmation || errors.form) setErrors((current) => ({ ...current, confirmation: undefined, form: undefined }));
   }
 
-  function showErrors(nextErrors: AdminActionFormErrors) {
-    failureFocusRef.current = nextErrors.reason || !nextErrors.confirmation ? "reason" : "confirmation";
+  function showErrors(nextErrors: AdminActionFormErrors, session: number) {
+    if (!isCurrentDialogSession(session)) return;
+    failureFocusRef.current = {
+      session,
+      target: nextErrors.reason || !nextErrors.confirmation ? "reason" : "confirmation",
+    };
     setErrors(nextErrors);
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submittingRef.current) return;
+    const session = openSessionRef.current;
+    if (submittingRef.current || refreshPendingSessionRef.current !== null || session === null || !isCurrentDialogSession(session)) return;
     const nextErrors = validateAdminActionForm(reason, confirmationLabel, confirmation);
     if (Object.keys(nextErrors).length > 0) {
-      showErrors(nextErrors);
+      showErrors(nextErrors, session);
       return;
     }
 
@@ -146,16 +179,18 @@ export function AdminActionPanel({
           form: body.error ?? "操作失败，请稍后重试",
           reason: body.fields?.reason?.[0],
           confirmation: body.fields?.confirmation?.[0],
-        });
+        }, session);
         return;
       }
 
+      refreshPendingSessionRef.current = session;
       setReason("");
       setConfirmation("");
       setStatus(SUCCESS_STATUS);
-      closeDialog();
+      setRefreshPending(true);
+      if (isCurrentDialogSession(session)) closeDialog();
     } catch {
-      showErrors({ form: "操作失败，请稍后重试" });
+      showErrors({ form: "操作失败，请稍后重试" }, session);
     } finally {
       submittingRef.current = false;
       setBusy(false);
@@ -172,6 +207,7 @@ export function AdminActionPanel({
       ref={triggerRef}
       type="button"
       aria-haspopup="dialog"
+      aria-disabled={busy || refreshPending}
       onClick={openDialog}
       className={`admin-action-panel__trigger${danger ? " is-danger" : ""}`}
     >
