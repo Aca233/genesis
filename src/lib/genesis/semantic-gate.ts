@@ -220,6 +220,37 @@ function canonicalizeDirectArrayIssuePath(
   return { ...issue, path };
 }
 
+const REMOVABLE_REFERENCE_ISSUE_TYPES = new Set<GenesisSemanticIssue["type"]>([
+  "anchor_state_leak",
+  "ontology_mismatch",
+  "causal_disconnect",
+  "unsupported_canon_claim",
+]);
+
+function canonicalizeReferenceLeafIssuePath(
+  deck: WorldDeck,
+  issue: GenesisSemanticIssue,
+): GenesisSemanticIssue {
+  if (issue.severity !== "error" || !REMOVABLE_REFERENCE_ISSUE_TYPES.has(issue.type)) {
+    return issue;
+  }
+  const segments = pathSegments(issue.path);
+  const field = segments.at(-1);
+  const index = segments.at(-2);
+  const collection = segments.at(-3);
+  const isRemovableReference = (collection === "keyCharacterRefs" && field === "ref")
+    || (collection === "factionMemberships" && field === "factionRef");
+  if (!isRemovableReference || index === undefined || !/^\d+$/.test(index)) return issue;
+
+  const entrySegments = segments.slice(0, -1);
+  const entry = readPath(deck, entrySegments);
+  if (entry === MISSING_PATH) return issue;
+  return {
+    ...issue,
+    path: issue.path.replace(/\.(?:ref|factionRef)$/, ""),
+  };
+}
+
 function requiredUnsupportedRemovalPaths(
   deck: WorldDeck,
   issues: GenesisSemanticIssue[],
@@ -231,6 +262,25 @@ function requiredUnsupportedRemovalPaths(
     if (key === undefined || !/^\d+$/.test(key)) return [];
     const parent = readPath(deck, segments.slice(0, -1));
     return Array.isArray(parent) && Number(key) < parent.length ? [issue.path] : [];
+  });
+}
+
+function requiredReferenceRemovalPaths(
+  deck: WorldDeck,
+  issues: GenesisSemanticIssue[],
+): string[] {
+  return issues.flatMap((issue) => {
+    if (issue.severity !== "error" || !REMOVABLE_REFERENCE_ISSUE_TYPES.has(issue.type)) return [];
+    const segments = pathSegments(issue.path);
+    const index = segments.at(-1);
+    const collection = segments.at(-2);
+    if (
+      index === undefined
+      || !/^\d+$/.test(index)
+      || (collection !== "keyCharacterRefs" && collection !== "factionMemberships")
+    ) return [];
+    const parent = readPath(deck, segments.slice(0, -1));
+    return Array.isArray(parent) && Number(index) < parent.length ? [issue.path] : [];
   });
 }
 
@@ -429,13 +479,21 @@ export async function enforceGenesisQuality(
     let repairedDeck: WorldDeck | null = null;
     let repairFeedback: string | undefined;
     const repairIssues = currentReport.issues.map((issue) =>
-      canonicalizeDirectArrayIssuePath(currentDeck, issue),
+      canonicalizeReferenceLeafIssuePath(
+        currentDeck,
+        canonicalizeDirectArrayIssuePath(currentDeck, issue),
+      ),
     );
     const issueValues = repairIssues.map(({ path }) => {
       const value = readPath(currentDeck, pathSegments(path));
       return { path, value: value === MISSING_PATH ? null : value };
     });
-    const requiredRemovePaths = requiredUnsupportedRemovalPaths(currentDeck, repairIssues);
+    const requiredRemovePaths = [
+      ...new Set([
+        ...requiredUnsupportedRemovalPaths(currentDeck, repairIssues),
+        ...requiredReferenceRemovalPaths(currentDeck, repairIssues),
+      ]),
+    ];
     for (let patchAttempt = 1; patchAttempt <= 2; patchAttempt += 1) {
       const repairRequest = {
         task: "genesis" as const,

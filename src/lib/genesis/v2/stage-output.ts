@@ -91,6 +91,33 @@ export type GenesisV2StageOutputs = {
   characters: z.infer<typeof GenesisV2CharactersOutputSchema>;
 };
 
+const MIN_CHARACTER_ABILITIES = 2;
+
+export function sanitizeGenesisV2CharactersTemporalOutput(
+  rawOutput: GenesisV2StageOutputs["characters"],
+): GenesisV2StageOutputs["characters"] {
+  const output = GenesisV2CharactersOutputSchema.parse(rawOutput);
+  return {
+    ...output,
+    majorCharacters: output.majorCharacters.map((character) => {
+      if ((character.statusAtAnchor ?? "active") !== "active") return character;
+
+      let removableAbilities = Math.max(0, character.abilities.length - MIN_CHARACTER_ABILITIES);
+      const abilities = character.abilities.filter((ability) => {
+        if (ability.timing !== "future" || removableAbilities === 0) return true;
+        removableAbilities -= 1;
+        return false;
+      });
+      const racialOverrides = character.racialOverrides.filter(({ timing }) => timing !== "future");
+      if (
+        abilities.length === character.abilities.length
+        && racialOverrides.length === character.racialOverrides.length
+      ) return character;
+      return { ...character, abilities, racialOverrides };
+    }),
+  };
+}
+
 export function getGenesisV2StageOutputSchema(
   stageId: GenesisV2StageId,
   mode: WorldMode,

@@ -391,6 +391,48 @@ describe("enforceGenesisQuality", () => {
     expect(result.deck.majorCharacters[3]!.factionMemberships).toEqual([]);
   });
 
+  it.each([
+    ["factions[1].keyCharacterRefs[0].ref", "unsupported_canon_claim"],
+    ["majorCharacters[3].factionMemberships[0].factionRef", "causal_disconnect"],
+  ] as const)("引用叶子问题 %s 强制删除整个关系项", async (path, type) => {
+    const original = completeDeck();
+    const report: GenesisSemanticAuditResult = {
+      verdict: "errors",
+      issues: [{
+        severity: "error",
+        path,
+        type,
+        explanation: "该引用在锚点时刻不成立",
+        evidenceRefs: ["futureOnly"],
+        repairInstruction: "移除错误引用",
+      }],
+    };
+    const audit = vi.fn()
+      .mockResolvedValueOnce(report)
+      .mockResolvedValueOnce(passReport);
+    const repair = vi.fn().mockResolvedValue({
+      operations: [{ path, action: "replace", valueJson: JSON.stringify("") }],
+    });
+
+    const result = await enforceGenesisQuality({
+      ...qualityInput(),
+      deck: original,
+      mode: "pantheon",
+    }, {
+      audit,
+      repair,
+      validate: vi.fn().mockImplementation((deck) => deck),
+    });
+
+    const expectedPath = path.replace(/\.(?:ref|factionRef)$/, "");
+    expect(repair.mock.calls[0]![1].user).toContain(JSON.stringify(expectedPath));
+    if (path.startsWith("factions")) {
+      expect(result.deck.factions[1]!.keyCharacterRefs).toEqual([]);
+    } else {
+      expect(result.deck.majorCharacters[3]!.factionMemberships).toEqual([]);
+    }
+  });
+
   it("两次补丁都无法通过完整校验时抛出可分类的补丁校验错误", async () => {
     const input = qualityInput();
     const audit = vi.fn().mockResolvedValue(errorReport);
