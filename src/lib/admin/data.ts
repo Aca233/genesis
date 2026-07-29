@@ -1,6 +1,7 @@
 import "server-only";
 import os from "node:os";
 import { readFile, statfs } from "node:fs/promises";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { redactAdminError } from "./security";
 
@@ -140,18 +141,109 @@ export async function listAdminUsers(input: AdminListInput & { role: string; ban
   return { items, total };
 }
 
-export async function listAdminTasks(input: AdminListInput & { kind: string; status: string }, db: AdminDb = prisma) {
+type AdminTaskListInput = AdminListInput & {
+  kind: string;
+  status: string;
+  attention: string;
+  stale: string;
+  repeated: string;
+};
+
+type AdminLlmListInput = AdminListInput & {
+  ok: string;
+  task: string;
+  userId: string;
+  worldId: string;
+};
+
+type AdminAuditListInput = AdminListInput & {
+  targetId: string;
+  action: string;
+  success: string;
+};
+
+function combineWhere<T>(conditions: Array<T | undefined>): T {
+  const active = conditions.filter((condition): condition is T => condition !== undefined);
+  if (active.length === 0) return {} as T;
+  if (active.length === 1) return active[0];
+  return { AND: active } as T;
+}
+
+function genesisTaskSearchWhere(search: string): Prisma.GenesisTaskWhereInput | undefined {
+  if (!search) return undefined;
+  const contains = { contains: search, mode: "insensitive" as const };
+  return { OR: [
+    { id: contains },
+    { userId: contains },
+    { worldId: contains },
+    { user: { name: contains } },
+    { user: { email: contains } },
+    { world: { name: contains } },
+  ] };
+}
+
+function narrativeTaskSearchWhere(search: string): Prisma.GenerationRequestWhereInput | undefined {
+  if (!search) return undefined;
+  const contains = { contains: search, mode: "insensitive" as const };
+  return { OR: [
+    { id: contains },
+    { chapter: { timeline: { worldId: contains } } },
+    { chapter: { timeline: { world: { name: contains } } } },
+    { chapter: { timeline: { world: { userId: contains } } } },
+    { chapter: { timeline: { world: { user: { name: contains } } } } },
+    { chapter: { timeline: { world: { user: { email: contains } } } } },
+  ] };
+}
+
+function rewriteTaskSearchWhere(search: string): Prisma.RealityRewriteWhereInput | undefined {
+  if (!search) return undefined;
+  const contains = { contains: search, mode: "insensitive" as const };
+  return { OR: [
+    { id: contains },
+    { worldId: contains },
+    { world: { name: contains } },
+    { world: { userId: contains } },
+    { world: { user: { name: contains } } },
+    { world: { user: { email: contains } } },
+  ] };
+}
+
+export async function listAdminTasks(input: AdminTaskListInput, db: AdminDb = prisma, now = new Date()) {
   const status = input.status === "all" ? undefined : input.status;
+  const search = searchFilter(input.search);
   const kinds = input.kind === "all" ? ["genesis", "narrative", "rewrite"] : [input.kind];
   const take = input.kind === "all" ? input.skip + input.pageSize : input.pageSize;
   const skip = input.kind === "all" ? 0 : input.skip;
+
+  const genesisWhere = combineWhere<Prisma.GenesisTaskWhereInput>([
+    status ? { status } : undefined,
+    genesisTaskSearchWhere(search),
+    input.attention === "yes" ? { OR: [{ status: "failed" }, { status: { in: ["queued", "running", "repairing"] }, leaseExpiresAt: { lt: now } }] } : undefined,
+    input.stale === "yes" ? { status: { in: ["queued", "running", "repairing"] }, leaseExpiresAt: { lt: now } } : undefined,
+    input.repeated === "yes" ? { status: "failed", attempt: { gte: 3 } } : undefined,
+  ]);
+  const narrativeWhere = combineWhere<Prisma.GenerationRequestWhereInput>([
+    status ? { status } : undefined,
+    narrativeTaskSearchWhere(search),
+    input.attention === "yes" ? { OR: [{ status: "failed" }, { status: "pending", leaseExpiresAt: { lt: now } }] } : undefined,
+    input.stale === "yes" ? { status: "pending", leaseExpiresAt: { lt: now } } : undefined,
+    input.repeated === "yes" ? { status: "failed", attempt: { gte: 3 } } : undefined,
+  ]);
+  const rewriteWhere = combineWhere<Prisma.RealityRewriteWhereInput>([
+    status ? { status } : undefined,
+    rewriteTaskSearchWhere(search),
+    input.attention === "yes" ? { OR: [{ status: "failed" }, { status: { in: ["planning", "applying", "narrating"] }, leaseExpiresAt: { lt: now } }] } : undefined,
+    input.stale === "yes" ? { status: { in: ["planning", "applying", "narrating"] }, leaseExpiresAt: { lt: now } } : undefined,
+    input.repeated === "yes" ? { id: { in: [] } } : undefined,
+  ]);
+
   const [genesis, narratives, rewrites, genesisTotal, narrativeTotal, rewriteTotal] = await Promise.all([
-    kinds.includes("genesis") ? db.genesisTask.findMany({ where: status ? { status } : {}, orderBy: { updatedAt: "desc" }, take, skip, select: { id: true, status: true, stage: true, attempt: true, leaseExpiresAt: true, createdAt: true, updatedAt: true, error: true, user: { select: { id: true, name: true, email: true } }, world: { select: { id: true, name: true } } } }) : [],
-    kinds.includes("narrative") ? db.generationRequest.findMany({ where: status ? { status } : {}, orderBy: { updatedAt: "desc" }, take, skip, select: { id: true, status: true, stage: true, attempt: true, leaseExpiresAt: true, createdAt: true, updatedAt: true, safeError: true, error: true, chapter: { select: { timeline: { select: { world: { select: { id: true, name: true, user: { select: { id: true, name: true, email: true } } } } } } } } } }) : [],
-    kinds.includes("rewrite") ? db.realityRewrite.findMany({ where: status ? { status } : {}, orderBy: { updatedAt: "desc" }, take, skip, select: { id: true, status: true, scope: true, leaseExpiresAt: true, createdAt: true, updatedAt: true, error: true, world: { select: { id: true, name: true, user: { select: { id: true, name: true, email: true } } } } } }) : [],
-    kinds.includes("genesis") ? db.genesisTask.count({ where: status ? { status } : {} }) : 0,
-    kinds.includes("narrative") ? db.generationRequest.count({ where: status ? { status } : {} }) : 0,
-    kinds.includes("rewrite") ? db.realityRewrite.count({ where: status ? { status } : {} }) : 0,
+    kinds.includes("genesis") ? db.genesisTask.findMany({ where: genesisWhere, orderBy: { updatedAt: "desc" }, take, skip, select: { id: true, status: true, stage: true, attempt: true, leaseExpiresAt: true, createdAt: true, updatedAt: true, error: true, user: { select: { id: true, name: true, email: true } }, world: { select: { id: true, name: true } } } }) : [],
+    kinds.includes("narrative") ? db.generationRequest.findMany({ where: narrativeWhere, orderBy: { updatedAt: "desc" }, take, skip, select: { id: true, status: true, stage: true, attempt: true, leaseExpiresAt: true, createdAt: true, updatedAt: true, safeError: true, error: true, chapter: { select: { timeline: { select: { world: { select: { id: true, name: true, user: { select: { id: true, name: true, email: true } } } } } } } } } }) : [],
+    kinds.includes("rewrite") ? db.realityRewrite.findMany({ where: rewriteWhere, orderBy: { updatedAt: "desc" }, take, skip, select: { id: true, status: true, scope: true, leaseExpiresAt: true, createdAt: true, updatedAt: true, error: true, world: { select: { id: true, name: true, user: { select: { id: true, name: true, email: true } } } } } }) : [],
+    kinds.includes("genesis") ? db.genesisTask.count({ where: genesisWhere }) : 0,
+    kinds.includes("narrative") ? db.generationRequest.count({ where: narrativeWhere }) : 0,
+    kinds.includes("rewrite") ? db.realityRewrite.count({ where: rewriteWhere }) : 0,
   ]);
   const items = [
     ...genesis.map((row) => ({ kind: "genesis" as const, id: row.id, status: row.status, stage: row.stage, attempt: row.attempt, leaseExpiresAt: row.leaseExpiresAt, createdAt: row.createdAt, updatedAt: row.updatedAt, error: row.error ? redactAdminError(row.error) : null, user: row.user, world: row.world })),
@@ -161,13 +253,29 @@ export async function listAdminTasks(input: AdminListInput & { kind: string; sta
   return { items: input.kind === "all" ? items.slice(input.skip, input.skip + input.pageSize) : items, total: genesisTotal + narrativeTotal + rewriteTotal };
 }
 
-export async function listAdminLlmCalls(input: AdminListInput & { ok: string; task: string }, db: AdminDb = prisma) {
-  const where = { ...(input.ok === "yes" ? { ok: true } : input.ok === "no" ? { ok: false } : {}), ...(input.task !== "all" ? { task: input.task } : {}) };
-  const [items, total] = await Promise.all([db.llmCall.findMany({ where, orderBy: { createdAt: "desc" }, skip: input.skip, take: input.pageSize, select: { id: true, task: true, slot: true, provider: true, model: true, durationMs: true, ok: true, error: true, inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheWriteTokens: true, cacheRequested: true, cacheFallback: true, userId: true, worldId: true, createdAt: true } }), db.llmCall.count({ where })]);
+export async function listAdminLlmCalls(input: AdminLlmListInput, db: AdminDb = prisma) {
+  const where = {
+    ...(input.ok === "yes" ? { ok: true } : input.ok === "no" ? { ok: false } : {}),
+    ...(input.task !== "all" ? { task: input.task } : {}),
+    ...(input.userId ? { userId: input.userId } : {}),
+    ...(input.worldId ? { worldId: input.worldId } : {}),
+  };
+  const [items, total] = await Promise.all([
+    db.llmCall.findMany({ where, orderBy: { createdAt: "desc" }, skip: input.skip, take: input.pageSize, select: { id: true, task: true, slot: true, provider: true, model: true, durationMs: true, ok: true, error: true, inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheWriteTokens: true, cacheRequested: true, cacheFallback: true, userId: true, worldId: true, createdAt: true } }),
+    db.llmCall.count({ where }),
+  ]);
   return { items: items.map((row) => ({ ...row, error: row.error ? redactAdminError(row.error) : null })), total };
 }
 
-export async function listAdminAudit(input: AdminListInput, db: AdminDb = prisma) {
-  const [items, total] = await Promise.all([db.adminAuditLog.findMany({ orderBy: { createdAt: "desc" }, skip: input.skip, take: input.pageSize, select: { id: true, action: true, targetType: true, targetId: true, targetLabel: true, reason: true, success: true, requestIp: true, metadata: true, createdAt: true, actor: { select: { id: true, name: true, email: true } } } }), db.adminAuditLog.count()]);
+export async function listAdminAudit(input: AdminAuditListInput, db: AdminDb = prisma) {
+  const where = {
+    ...(input.targetId ? { targetId: input.targetId } : {}),
+    ...(input.action !== "all" ? { action: input.action } : {}),
+    ...(input.success === "yes" ? { success: true } : input.success === "no" ? { success: false } : {}),
+  };
+  const [items, total] = await Promise.all([
+    db.adminAuditLog.findMany({ where, orderBy: { createdAt: "desc" }, skip: input.skip, take: input.pageSize, select: { id: true, action: true, targetType: true, targetId: true, targetLabel: true, reason: true, success: true, requestIp: true, metadata: true, createdAt: true, actor: { select: { id: true, name: true, email: true } } } }),
+    db.adminAuditLog.count({ where }),
+  ]);
   return { items, total };
 }
