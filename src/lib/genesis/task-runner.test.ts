@@ -6,6 +6,7 @@ import {
   persistWorld,
   renewGenesisLease,
   resolveLorebookExcerpts,
+  runGenesisTask,
   safeError,
   toGenesisTaskDto,
 } from "./task-runner";
@@ -18,6 +19,13 @@ import {
 } from "@/lib/lorebook/st-import";
 import { LORE_GENESIS_BUDGET_CHARS, selectLoreForGenesis } from "@/lib/lore-index/selection";
 import type { LoreIndexRow } from "@/lib/lore-index/schemas";
+import type { GenesisIntentContract } from "./intent";
+import { GenesisIntentGenerationError } from "./intent-generator";
+import {
+  GenesisSemanticAuditError,
+  type GenesisQualityReport,
+} from "./semantic-audit";
+import { GenesisSemanticGateError } from "./semantic-gate";
 
 function task(overrides: Record<string, unknown> = {}) {
   return {
@@ -31,6 +39,161 @@ function task(overrides: Record<string, unknown> = {}) {
     createdAt: new Date("2026-07-21T00:00:00Z"),
     updatedAt: new Date("2026-07-21T00:00:10Z"),
     ...overrides,
+  };
+}
+
+const crossoverIntent: GenesisIntentContract = {
+  sourceBasis: "multi_ip",
+  sourceIps: ["无职转生", "钢铁侠"],
+  explicitPremise: ["托尼·斯塔克转生为鲁迪乌斯"],
+  narrativeCenter: {
+    identity: "托尼意识下的鲁迪乌斯",
+    role: "唯一叙事中心",
+    startState: "保留成年意识但受新生儿身体与资源约束",
+  },
+  playerRole: {
+    type: "independent_god",
+    narrativeFunction: "limited_intervener",
+    mustNotReplaceProtagonist: true,
+  },
+  forbiddenExpansions: ["独立贾维斯神格", "开局完成方舟反应堆"],
+  factsAtAnchor: ["鲁迪乌斯刚出生"],
+  futureOnly: ["制造成熟装甲"],
+  fusionBoundaries: ["魔法与科技的兼容性尚未证实"],
+  uncertaintyPolicy: "omit_or_generalize",
+  corePressures: ["婴儿身体限制", "资源与保密压力"],
+};
+
+const creatorIntent: GenesisIntentContract = {
+  ...crossoverIntent,
+  sourceBasis: "original",
+  sourceIps: [],
+  playerRole: {
+    type: "external_creator",
+    narrativeFunction: "external_author",
+    mustNotReplaceProtagonist: false,
+  },
+};
+
+const repairedReport: GenesisQualityReport = {
+  verdict: "pass",
+  issues: [],
+  meta: {
+    initialErrorCount: 2,
+    initialWarningCount: 1,
+    repaired: true,
+    auditPasses: 2,
+    durationMs: 87,
+  },
+};
+
+const rejectedReport: GenesisQualityReport = {
+  verdict: "errors",
+  issues: [{
+    severity: "error",
+    path: "openingChapterBrief.objective",
+    type: "power_shortcut",
+    explanation: "正文不应进入观测事件",
+    evidenceRefs: [],
+    repairInstruction: "移除开局成品能力",
+  }],
+  meta: {
+    initialErrorCount: 1,
+    initialWarningCount: 0,
+    repaired: true,
+    auditPasses: 2,
+    durationMs: 42,
+  },
+};
+
+function createRunnerHarness(overrides: {
+  intentContract?: unknown;
+  intentError?: Error;
+  qualityError?: Error;
+} = {}) {
+  const generatedDeck = completeDeck();
+  const repairedDeck = structuredClone(generatedDeck);
+  repairedDeck.worldName = "语义修复后的世界";
+  const order: string[] = [];
+  const taskUpdateMany = vi.fn(async (args: { data?: Record<string, unknown> }) => {
+    if (args.data?.intentContract !== undefined) order.push("intent_persisted");
+    return { count: 1 };
+  });
+  const jobUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const worldCreate = vi.fn().mockResolvedValue({ id: "world-1" });
+  const tx = {
+    genesisTask: {
+      findFirst: vi.fn().mockResolvedValue({ id: "task-1", aggregateVersion: 7 }),
+      updateMany: taskUpdateMany,
+    },
+    genesisJob: { updateMany: jobUpdateMany },
+    genesisOutbox: { create: vi.fn().mockResolvedValue({}) },
+    world: { create: worldCreate },
+  };
+  const db = {
+    genesisTask: { updateMany: taskUpdateMany },
+    genesisJob: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({
+        id: "job-1",
+        leaseEpoch: 4,
+        leaseExpiresAt: new Date("2026-07-29T10:01:00.000Z"),
+      }),
+    },
+    $transaction: vi.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
+  };
+  const claimedTask = {
+    ...task({
+      userId: "user-1",
+      decree: "无职转生，但是鲁迪是托尼斯塔克转生",
+      lorebook: null,
+      materialSelection: null,
+      status: "running",
+      stage: "oracle",
+      completedKeys: [],
+      attempt: 1,
+      leaseToken: "lease-1",
+      intentContract: overrides.intentContract ?? null,
+    }),
+  };
+  const generateIntent = overrides.intentError
+    ? vi.fn().mockRejectedValue(overrides.intentError)
+    : vi.fn().mockResolvedValue(crossoverIntent);
+  const qualityGate = overrides.qualityError
+    ? vi.fn().mockRejectedValue(overrides.qualityError)
+    : vi.fn().mockImplementation(async (input: { onStage?: (stage: "audit" | "semantic_repair") => unknown }) => {
+      await input.onStage?.("audit");
+      await input.onStage?.("semantic_repair");
+      return { deck: repairedDeck, report: repairedReport };
+    });
+  const buildRequest = vi.fn((input) => buildGenesisRequest(input));
+  const generateDeck = vi.fn().mockImplementation(async () => {
+    order.push("deck_generation");
+    return generatedDeck;
+  });
+  const recordQualityEvent = vi.fn();
+
+  return {
+    buildRequest,
+    claimedTask,
+    db,
+    generateDeck,
+    generateIntent,
+    order,
+    qualityGate,
+    recordQualityEvent,
+    repairedDeck,
+    taskUpdateMany,
+    worldCreate,
+    deps: {
+      db: db as never,
+      claimTask: vi.fn().mockResolvedValue(claimedTask),
+      resolveLorebook: vi.fn().mockResolvedValue(undefined),
+      generateIntent,
+      buildRequest,
+      generateDeck,
+      qualityGate,
+      recordQualityEvent,
+    },
   };
 }
 
@@ -150,7 +313,7 @@ describe("genesis task runner", () => {
     expect(dto).not.toHaveProperty("decree");
   });
 
-  it("DTO 暴露报告型审计结果；形状不符的历史脏数据按无审计处理（§10.4）", () => {
+  it("DTO 迁移旧审计报告并归一化阻断等级；形状不符的历史脏数据按无审计处理", () => {
     const report = {
       verdict: "warnings",
       issues: [{
@@ -161,7 +324,14 @@ describe("genesis task runner", () => {
         evidenceRefs: ["char:hero"],
       }],
     };
-    expect(toGenesisTaskDto(task({ auditReport: report }) as never).auditReport).toEqual(report);
+    expect(toGenesisTaskDto(task({ auditReport: report }) as never).auditReport).toEqual({
+      verdict: "errors",
+      issues: [{
+        ...report.issues[0],
+        severity: "error",
+        repairInstruction: "按原报告说明检查并修复该字段",
+      }],
+    });
     expect(toGenesisTaskDto(task({ auditReport: { verdict: "block" } }) as never).auditReport)
       .toBeNull();
     expect(toGenesisTaskDto(task() as never).auditReport).toBeNull();
@@ -170,6 +340,164 @@ describe("genesis task runner", () => {
   it("DTO 通过世界模式 schema 解析持久化值", () => {
     expect(toGenesisTaskDto(task({ mode: "creator" }) as never)).toMatchObject({ mode: "creator" });
     expect(() => toGenesisTaskDto(task({ mode: "absolute" }) as never)).toThrow();
+  });
+
+  it("先持久化冻结 intent，再生成完整 deck，并把同一 owner 传给 intent 与质量门", async () => {
+    const harness = createRunnerHarness();
+
+    await runGenesisTask("task-1", harness.deps as never);
+
+    const llmOwner = {
+      kind: "genesis_job",
+      id: "job-1",
+      genesisTaskId: "task-1",
+      genesisJobId: "job-1",
+      leaseEpoch: 4,
+      leaseExpiresAt: "2026-07-29T10:01:00.000Z",
+      budgetScope: "primary",
+    };
+    expect(harness.generateIntent).toHaveBeenCalledTimes(1);
+    expect(harness.generateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "pantheon",
+      decree: "无职转生，但是鲁迪是托尼斯塔克转生",
+      userId: "user-1",
+      owner: llmOwner,
+    }));
+    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        stage: "intent",
+        intentContract: crossoverIntent,
+      }),
+    }));
+    expect(harness.order.indexOf("intent_persisted"))
+      .toBeLessThan(harness.order.indexOf("deck_generation"));
+    expect(harness.buildRequest).toHaveBeenCalledWith(expect.objectContaining({
+      intentContract: crossoverIntent,
+    }));
+    expect(harness.qualityGate).toHaveBeenCalledTimes(1);
+    expect(harness.qualityGate).toHaveBeenCalledWith(expect.objectContaining({
+      deck: completeDeck(),
+      intent: crossoverIntent,
+      owner: llmOwner,
+    }));
+    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ auditReport: repairedReport }),
+    }));
+    expect(harness.worldCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        draftDeck: harness.repairedDeck,
+        genesisIntent: crossoverIntent,
+      }),
+    }));
+    expect(harness.recordQualityEvent).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "intent_generated",
+      taskId: "task-1",
+    }));
+    expect(harness.recordQualityEvent).toHaveBeenCalledWith({
+      kind: "semantic_gate_completed",
+      taskId: "task-1",
+      initialErrorCount: 2,
+      initialWarningCount: 1,
+      repaired: true,
+      auditPasses: 2,
+      durationMs: 87,
+      issueCounts: {},
+    });
+  });
+
+  it("lease takeover 复用有效 intent，不再次生成", async () => {
+    const harness = createRunnerHarness({ intentContract: crossoverIntent });
+
+    await runGenesisTask("task-1", harness.deps as never);
+
+    expect(harness.generateIntent).not.toHaveBeenCalled();
+    expect(harness.buildRequest).toHaveBeenCalledWith(expect.objectContaining({
+      intentContract: crossoverIntent,
+    }));
+    expect(harness.worldCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("非空损坏 intent 直接失败，不重新生成且不创建 world", async () => {
+    const harness = createRunnerHarness({
+      intentContract: { sourceBasis: "broken", sourceIps: ["泄漏正文"] },
+    });
+
+    await runGenesisTask("task-1", harness.deps as never);
+
+    expect(harness.generateIntent).not.toHaveBeenCalled();
+    expect(harness.generateDeck).not.toHaveBeenCalled();
+    expect(harness.worldCreate).not.toHaveBeenCalled();
+    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "failed",
+        error: "已冻结的创世意图契约已损坏",
+      }),
+    }));
+    expect(harness.taskUpdateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "waiting_for_provider" }),
+    }));
+  });
+
+  it("intent 生成耗尽直接 failed，不落 world 且记录无正文失败事件", async () => {
+    const harness = createRunnerHarness({
+      intentError: new GenesisIntentGenerationError(new Error("provider terminal unknown")),
+    });
+
+    await runGenesisTask("task-1", harness.deps as never);
+
+    expect(harness.worldCreate).not.toHaveBeenCalled();
+    expect(harness.qualityGate).not.toHaveBeenCalled();
+    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "failed" }),
+    }));
+    expect(harness.recordQualityEvent).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "intent_failed",
+      taskId: "task-1",
+    }));
+  });
+
+  it.each([
+    ["audit exhaustion", new GenesisSemanticAuditError(new Error("provider terminal unknown"))],
+    ["residual semantic errors", new GenesisSemanticGateError(rejectedReport)],
+  ])("%s 直接 failed，不进入 waiting_for_provider 且不落 world", async (_label, error) => {
+    const harness = createRunnerHarness({
+      intentContract: crossoverIntent,
+      qualityError: error,
+    });
+
+    await runGenesisTask("task-1", harness.deps as never);
+
+    expect(harness.worldCreate).not.toHaveBeenCalled();
+    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "failed" }),
+    }));
+    expect(harness.taskUpdateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "waiting_for_provider" }),
+    }));
+  });
+
+  it("semantic gate 拒绝时持久化最终报告并仅记录问题类型计数", async () => {
+    const harness = createRunnerHarness({
+      intentContract: crossoverIntent,
+      qualityError: new GenesisSemanticGateError(rejectedReport),
+    });
+
+    await runGenesisTask("task-1", harness.deps as never);
+
+    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "failed",
+        auditReport: rejectedReport,
+      }),
+    }));
+    expect(harness.recordQualityEvent).toHaveBeenCalledWith({
+      kind: "semantic_gate_rejected",
+      taskId: "task-1",
+      errorCount: 1,
+      issueCounts: { power_shortcut: 1 },
+    });
+    expect(JSON.stringify(harness.recordQualityEvent.mock.calls))
+      .not.toContain("正文不应进入观测事件");
   });
 
   it("长时间修补期间只由当前 lease token 续租并刷新心跳", async () => {
@@ -235,25 +563,42 @@ describe("genesis task runner", () => {
     const creator = buildGenesisRequest({
       mode: "creator",
       decree: "创造自行运转的星海",
+      intentContract: creatorIntent,
       lorebookExcerpts: "星海法则",
       materialConstraints: "锁定素材",
     });
     expect(creator.mode).toBe("creator");
     expect(creator.system).toContain('mode="creator"');
     expect(creator.user).toContain('mode="creator"');
+    expect(creator.user).toContain(creatorIntent.narrativeCenter.identity);
     expect(creator.schema).toBe(CreatorWorldDeckSchema);
 
-    const pantheon = buildGenesisRequest({ mode: "pantheon", decree: "我是群星之神" });
+    const pantheon = buildGenesisRequest({
+      mode: "pantheon",
+      decree: "我是群星之神",
+      intentContract: crossoverIntent,
+    });
     expect(pantheon.system).toContain('mode="pantheon"');
     expect(pantheon.user).toContain('mode="pantheon"');
     expect(pantheon.schema).toBe(PantheonWorldDeckSchema);
   });
 
   it("创世整套修补只允许一次语义尝试，避免在外层修补轮内重复生成三套长 JSON", () => {
+    const owner = {
+      kind: "genesis_job",
+      id: "job-1",
+      genesisTaskId: "task-1",
+      genesisJobId: "job-1",
+      leaseEpoch: 4,
+      leaseExpiresAt: "2026-07-29T10:01:00.000Z",
+      budgetScope: "primary" as const,
+    };
     const request = buildGenesisRepairRequest({
       mode: "pantheon",
       userId: "test-user",
+      owner,
       decree: "创造测试界",
+      intentContract: crossoverIntent,
       invalidOutput: "{\"mode\":\"pantheon\"}",
       validationError: "races.0.abilities 至少需要两项",
     });
@@ -261,6 +606,7 @@ describe("genesis task runner", () => {
     expect(request).toMatchObject({
       task: "genesis",
       userId: "test-user",
+      owner,
       schema: PantheonWorldDeckSchema,
       maxTokens: 4096,
       maxAttempts: 1,
@@ -269,12 +615,14 @@ describe("genesis task runner", () => {
       maxInputBytes: 262144,
       maxOutputBytes: 2097152,
     });
+    expect(request.user).toContain(crossoverIntent.narrativeCenter.identity);
   });
 
   it("创世初稿使用短轮输出上限，由续写接力完成整套卡组", () => {
     const request = buildGenesisRequest({
       mode: "pantheon",
       decree: "创造测试界",
+      intentContract: crossoverIntent,
     });
 
     expect(request.maxTokens).toBe(4096);
@@ -323,7 +671,7 @@ describe("genesis task runner", () => {
       mode: "creator",
       decree: "创造星海",
       leaseToken: "lease-1",
-    }) as never, "lease-1", creator, []);
+    }) as never, "lease-1", creator, creatorIntent, []);
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ mode: "creator" }),
@@ -348,6 +696,7 @@ describe("genesis task runner", () => {
       task({ mode: "creator", decree: "创造星海" }) as never,
       "lease-1",
       completeDeck(),
+      creatorIntent,
       [],
     )).rejects.toThrow("创世卡组模式不匹配");
     expect(db.$transaction).not.toHaveBeenCalled();

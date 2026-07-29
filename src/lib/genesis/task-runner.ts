@@ -5,6 +5,7 @@ import { isTransientLlmError, stream } from "@/lib/llm/gateway";
 import { LlmCircuitOpenError } from "@/lib/llm/permits";
 import { classifyTransportFailure } from "@/lib/llm/transport";
 import { completeStructured } from "@/lib/llm/structured";
+import type { CompletionRequest } from "@/lib/llm/types";
 import {
   CreatorWorldDeckSchema,
   PantheonWorldDeckSchema,
@@ -16,10 +17,17 @@ import { classifyLoreEntries } from "@/lib/lore-index/classifier";
 import { LORE_GENESIS_BUDGET_CHARS, selectLoreForGenesis } from "@/lib/lore-index/selection";
 import { generateGenesisDeck } from "./generate";
 import {
-  auditTemporalSemantics,
-  TemporalAuditResultSchema,
-  type TemporalAuditResult,
-} from "./temporal-audit";
+  GenesisSemanticAuditError,
+  parseGenesisQualityReport,
+  type GenesisQualityReport,
+} from "./semantic-audit";
+import { generateGenesisIntent, GenesisIntentGenerationError } from "./intent-generator";
+import { parseGenesisIntent, type GenesisIntentContract } from "./intent";
+import { enforceGenesisQuality, GenesisSemanticGateError } from "./semantic-gate";
+import {
+  countGenesisSemanticIssues,
+  recordGenesisQualityEvent,
+} from "./quality-observability";
 import { GenesisMaterialSnapshotSchema, type GenesisMaterialSnapshot } from "@/lib/materials/types";
 import { materialConstraintsPrompt } from "@/lib/materials/prompt";
 import { deriveStreamingStage, furthestStage, mergeCompletedKeys } from "./stages";
@@ -52,11 +60,8 @@ export type GenesisTaskDto = {
   worldId: string | null;
   createdAt: string;
   updatedAt: string;
-  /**
-   * 报告型 AI 语义审计结果（时间一致设计稿 §10.4）。仅 IP 世界产出；
-   * 原创世界、旧任务或审计调用失败为 null。确认页只读展示，不阻断。
-   */
-  auditReport: TemporalAuditResult | null;
+  /** 完整世界通过语义质量门后产生的报告；历史脏数据按 null 处理。 */
+  auditReport: GenesisQualityReport | null;
   aggregateVersion: number;
   snapshotHash: string;
 };
@@ -68,8 +73,8 @@ type PublicTask = Pick<
 type VersionedPublicTask = PublicTask & Partial<Pick<GenesisTask, "aggregateVersion">>;
 
 export function toGenesisTaskDto(task: VersionedPublicTask): GenesisTaskDto {
-  // 持久化 Json 不可尽信：形状不符（历史脏数据）一律按无审计处理，DTO 永不抛错。
-  const audit = TemporalAuditResultSchema.safeParse(task.auditReport);
+  // 持久化 Json 不可尽信：兼容旧报告，形状不符一律按无审计处理。
+  const auditReport = parseGenesisQualityReport(task.auditReport);
   const projection = {
     id: task.id,
     mode: WorldModeSchema.parse(task.mode),
@@ -80,7 +85,7 @@ export function toGenesisTaskDto(task: VersionedPublicTask): GenesisTaskDto {
     worldId: task.worldId,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
-    auditReport: audit.success ? audit.data : null,
+    auditReport,
     aggregateVersion: task.aggregateVersion ?? 0,
   };
   return {
@@ -92,12 +97,14 @@ export function toGenesisTaskDto(task: VersionedPublicTask): GenesisTaskDto {
 type GenesisRequestInput = {
   mode: WorldMode;
   decree: string;
+  intentContract: GenesisIntentContract;
   lorebookExcerpts?: string;
   materialConstraints?: string;
 };
 
 type GenesisRepairRequestInput = GenesisRequestInput & {
   userId: string;
+  owner?: CompletionRequest["owner"];
   invalidOutput: string;
   validationError: string;
 };
@@ -114,14 +121,7 @@ type GenesisRepairRequest = {
   cache: { namespace: string };
   maxInputBytes: number;
   maxOutputBytes: number;
-  owner?: {
-    kind: string;
-    id: string;
-    genesisTaskId?: string;
-    genesisJobId?: string;
-    leaseEpoch?: number;
-    leaseExpiresAt?: string;
-  };
+  owner?: CompletionRequest["owner"];
 };
 
 export function buildGenesisRequest(input: GenesisRequestInput) {
@@ -130,6 +130,7 @@ export function buildGenesisRequest(input: GenesisRequestInput) {
     user: genesisUserPrompt({
       mode: input.mode,
       decree: input.decree,
+      intentContract: input.intentContract,
       lorebookExcerpts: input.lorebookExcerpts,
       materialConstraints: input.materialConstraints,
     }),
@@ -146,14 +147,20 @@ export function buildGenesisRepairRequest(
 export function buildGenesisRepairRequest(
   input: GenesisRepairRequestInput & { mode: "creator" },
 ): GenesisRepairRequest & { schema: typeof CreatorWorldDeckSchema };
-export function buildGenesisRepairRequest(input: GenesisRepairRequestInput) {
+export function buildGenesisRepairRequest(
+  input: GenesisRepairRequestInput,
+): GenesisRepairRequest & {
+  schema: typeof PantheonWorldDeckSchema | typeof CreatorWorldDeckSchema;
+} {
   const shared = {
     task: "genesis" as const,
     userId: input.userId,
+    owner: input.owner,
     system: genesisSystem(input.mode),
     user: genesisRepairPrompt({
       mode: input.mode,
       decree: input.decree,
+      intentContract: input.intentContract,
       lorebookExcerpts: input.lorebookExcerpts,
       invalidOutput: input.invalidOutput,
       validationError: input.validationError,
@@ -305,6 +312,40 @@ export async function claimGenesisTask(
 
 const activeRunners = new Map<string, Promise<void>>();
 
+type GenesisTaskRunnerDeps = {
+  db: typeof prisma;
+  claimTask: typeof claimGenesisTask;
+  resolveLorebook: typeof resolveLorebookExcerpts;
+  generateIntent: typeof generateGenesisIntent;
+  buildRequest: typeof buildGenesisRequest;
+  buildRepairRequest: typeof buildGenesisRepairRequest;
+  generateDeck: typeof generateGenesisDeck;
+  qualityGate: typeof enforceGenesisQuality;
+  recordQualityEvent: typeof recordGenesisQualityEvent;
+  persistWorld: typeof persistWorld;
+};
+
+const defaultGenesisTaskRunnerDeps: GenesisTaskRunnerDeps = {
+  db: prisma,
+  claimTask: claimGenesisTask,
+  resolveLorebook: resolveLorebookExcerpts,
+  generateIntent: generateGenesisIntent,
+  buildRequest: buildGenesisRequest,
+  buildRepairRequest: buildGenesisRepairRequest,
+  generateDeck: generateGenesisDeck,
+  qualityGate: enforceGenesisQuality,
+  recordQualityEvent: recordGenesisQualityEvent,
+  persistWorld,
+};
+
+class GenesisPersistedIntentError extends Error {
+  override name = "GenesisPersistedIntentError";
+
+  constructor() {
+    super("已冻结的创世意图契约已损坏");
+  }
+}
+
 export function ensureGenesisTaskRunning(taskId: string): void {
   if (activeRunners.has(taskId)) return;
   const promise = runGenesisTask(taskId).finally(() => activeRunners.delete(taskId));
@@ -328,12 +369,16 @@ export function safeError(error: unknown): string {
     .slice(0, 1000);
 }
 
-async function runGenesisTask(taskId: string): Promise<void> {
-  const task = await claimGenesisTask(prisma as unknown as ClaimDb, taskId);
+export async function runGenesisTask(
+  taskId: string,
+  dependencies: Partial<GenesisTaskRunnerDeps> = {},
+): Promise<void> {
+  const deps = { ...defaultGenesisTaskRunnerDeps, ...dependencies };
+  const task = await deps.claimTask(deps.db as unknown as ClaimDb, taskId);
   if (!task?.leaseToken) return;
 
   const leaseToken = task.leaseToken;
-  const legacyJob = await prisma.genesisJob.findUniqueOrThrow({
+  const legacyJob = await deps.db.genesisJob.findUniqueOrThrow({
     where: { genesisTaskId_nodeKey: { genesisTaskId: taskId, nodeKey: "legacy-world-deck" } },
     select: { id: true, leaseEpoch: true, leaseExpiresAt: true },
   });
@@ -344,6 +389,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
     genesisJobId: legacyJob.id,
     leaseEpoch: legacyJob.leaseEpoch,
     leaseExpiresAt: legacyJob.leaseExpiresAt?.toISOString(),
+    budgetScope: "primary" as const,
   };
   let persistedKeys = mergeCompletedKeys([], task.completedKeys as GenesisTopLevelKey[]);
   let persistedStage = task.stage as GenesisStageId;
@@ -358,7 +404,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
     eventType?: string,
   ) => {
     if (eventType) {
-      await prisma.$transaction(async (tx) => {
+      await deps.db.$transaction(async (tx) => {
         const current = await tx.genesisTask.findFirst({
           where: { id: taskId, leaseToken, status: { in: ["running", "repairing"] } },
           select: { aggregateVersion: true },
@@ -394,7 +440,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
       });
       return;
     }
-    const result = await prisma.genesisTask.updateMany({
+    const result = await deps.db.genesisTask.updateMany({
       where: { id: taskId, leaseToken, status: { in: ["running", "repairing"] } },
       data,
     });
@@ -402,20 +448,61 @@ async function runGenesisTask(taskId: string): Promise<void> {
   };
 
   const leaseHeartbeat = setInterval(() => {
-    void renewGenesisLease(prisma as unknown as LeaseDb, taskId, leaseToken).catch(() => {});
+    void renewGenesisLease(deps.db as unknown as LeaseDb, taskId, leaseToken).catch(() => {});
   }, Math.floor(LEASE_MS / 3));
 
   try {
     parsedEntries = task.lorebook ? parseStWorldbook(task.lorebook) : [];
-    excerpts = await resolveLorebookExcerpts(parsedEntries, task.userId);
+    excerpts = await deps.resolveLorebook(parsedEntries, task.userId);
     const materialSnapshot: GenesisMaterialSnapshot | null = task.materialSelection == null
       ? null
       : GenesisMaterialSnapshotSchema.parse(task.materialSelection);
     const mode = WorldModeSchema.parse(task.mode);
     const materialText = materialConstraintsPrompt(materialSnapshot, mode);
-    const genesisRequest = buildGenesisRequest({
+    let intent = task.intentContract === null
+      ? null
+      : parseGenesisIntent(task.intentContract);
+
+    if (task.intentContract !== null && intent === null) {
+      throw new GenesisPersistedIntentError();
+    }
+
+    if (intent === null) {
+      persistedStage = furthestStage(persistedStage, "intent");
+      await updateOwnedTask({ stage: persistedStage }, "stage_changed");
+      const intentStartedAt = Date.now();
+      try {
+        intent = await deps.generateIntent({
+          mode,
+          decree: task.decree,
+          userId: task.userId,
+          lorebookExcerpts: excerpts,
+          owner: llmOwner,
+        });
+        deps.recordQualityEvent({
+          kind: "intent_generated",
+          taskId,
+          durationMs: Math.max(0, Date.now() - intentStartedAt),
+        });
+      } catch (error) {
+        deps.recordQualityEvent({
+          kind: "intent_failed",
+          taskId,
+          durationMs: Math.max(0, Date.now() - intentStartedAt),
+        });
+        throw error;
+      }
+      await updateOwnedTask({
+        stage: persistedStage,
+        intentContract: intent as unknown as Prisma.InputJsonValue,
+        leaseExpiresAt: new Date(Date.now() + LEASE_MS),
+      });
+    }
+
+    const genesisRequest = deps.buildRequest({
       mode,
       decree: task.decree,
+      intentContract: intent,
       lorebookExcerpts: excerpts,
       materialConstraints: materialText,
     });
@@ -424,7 +511,7 @@ async function runGenesisTask(taskId: string): Promise<void> {
       await updateOwnedTask({ stage: persistedStage }, "stage_changed");
     }
 
-    const deck = await generateGenesisDeck({
+    const deck = await deps.generateDeck({
       mode,
       decree: task.decree,
       lorebookExcerpts: excerpts,
@@ -454,17 +541,18 @@ async function runGenesisTask(taskId: string): Promise<void> {
           userId: task.userId,
           owner: llmOwner,
           decree: task.decree,
+          intentContract: intent,
           lorebookExcerpts: excerpts,
           invalidOutput: input.invalidOutput,
           validationError: input.validationError,
           materialConstraints: materialText,
         };
         return input.mode === "pantheon"
-          ? completeStructured("narrative", buildGenesisRepairRequest({
+          ? completeStructured("narrative", deps.buildRepairRequest({
             ...sharedRepairRequest,
             mode: input.mode,
           }))
-          : completeStructured("narrative", buildGenesisRepairRequest({
+          : completeStructured("narrative", deps.buildRepairRequest({
             ...sharedRepairRequest,
             mode: input.mode,
           }));
@@ -511,13 +599,53 @@ async function runGenesisTask(taskId: string): Promise<void> {
       },
     });
 
-    // 报告型 AI 语义审计（§10.4）：校验通过后、落库前执行一次；仅 IP 世界
-    // （temporalAnchor 存在 ∧ basis≠original）触发模型调用。审计失败返回 null
-    // → 不落任何报告，静默跳过——绝不阻断创世。租约心跳仍在运行，覆盖调用时长。
-    const auditReport = await auditTemporalSemantics(deck, {
-      userId: task.userId,
-      lorebookExcerpts: excerpts,
-      owner: llmOwner,
+    let quality: Awaited<ReturnType<typeof enforceGenesisQuality>>;
+    try {
+      quality = await deps.qualityGate({
+        deck,
+        mode,
+        decree: task.decree,
+        intent,
+        userId: task.userId,
+        lorebookExcerpts: excerpts,
+        materialSnapshot,
+        materialConstraints: materialText,
+        owner: llmOwner,
+        onStage: async (stage) => {
+          const nextStage = furthestStage(persistedStage, stage);
+          const visibleChanged = nextStage !== persistedStage;
+          persistedStage = nextStage;
+          await updateOwnedTask({
+            stage: persistedStage,
+            ...(stage === "semantic_repair" ? { status: "repairing" } : {}),
+            leaseExpiresAt: new Date(Date.now() + LEASE_MS),
+          }, visibleChanged ? "stage_changed" : undefined);
+        },
+      });
+    } catch (error) {
+      if (error instanceof GenesisSemanticGateError) {
+        deps.recordQualityEvent({
+          kind: "semantic_gate_rejected",
+          taskId,
+          errorCount: error.report.issues.filter(({ severity }) => severity === "error").length,
+          issueCounts: countGenesisSemanticIssues(error.report.issues),
+        });
+      }
+      throw error;
+    }
+
+    const qualityMeta = quality.report.meta;
+    deps.recordQualityEvent({
+      kind: "semantic_gate_completed",
+      taskId,
+      initialErrorCount: qualityMeta?.initialErrorCount
+        ?? quality.report.issues.filter(({ severity }) => severity === "error").length,
+      initialWarningCount: qualityMeta?.initialWarningCount
+        ?? quality.report.issues.filter(({ severity }) => severity === "warning").length,
+      repaired: qualityMeta?.repaired ?? false,
+      auditPasses: qualityMeta?.auditPasses ?? 1,
+      durationMs: qualityMeta?.durationMs ?? 0,
+      issueCounts: countGenesisSemanticIssues(quality.report.issues),
     });
 
     persistedStage = furthestStage(persistedStage, "saving");
@@ -526,22 +654,34 @@ async function runGenesisTask(taskId: string): Promise<void> {
       status: "running",
       rawOutput: latestRaw,
       rawExpiresAt: latestRaw ? new Date(Date.now() + GENESIS_RAW_TTL_MS) : null,
-      ...(auditReport === null
-        ? {}
-        : { auditReport: auditReport as unknown as Prisma.InputJsonValue }),
+      auditReport: quality.report as unknown as Prisma.InputJsonValue,
       leaseExpiresAt: new Date(Date.now() + LEASE_MS),
     }, "stage_changed");
     clearInterval(leaseHeartbeat);
-    await persistWorld(prisma as unknown as PersistWorldDb, task, leaseToken, deck, parsedEntries);
+    await deps.persistWorld(
+      deps.db as unknown as PersistWorldDb,
+      task,
+      leaseToken,
+      quality.deck,
+      intent,
+      parsedEntries,
+    );
   } catch (error) {
-    // 瞬时网络故障（中转站掐断长响应等）自动重排队，而非终局失败；其余错误照旧终局。
-    const waitingForProvider = error instanceof LlmCircuitOpenError
-      || classifyTransportFailure(error).terminalEvidence === "terminal_unknown";
-    const transient = !waitingForProvider
+    const terminalQualityFailure = error instanceof GenesisIntentGenerationError
+      || error instanceof GenesisSemanticAuditError
+      || error instanceof GenesisSemanticGateError
+      || error instanceof GenesisPersistedIntentError;
+    // 质量契约错误必须先于 generic terminal_unknown 判定，绝不重排队或等待 provider。
+    const waitingForProvider = !terminalQualityFailure && (
+      error instanceof LlmCircuitOpenError
+      || classifyTransportFailure(error).terminalEvidence === "terminal_unknown"
+    );
+    const transient = !terminalQualityFailure
+      && !waitingForProvider
       && isTransientLlmError(error)
       && task.attempt < MAX_TRANSIENT_ATTEMPTS;
     const terminalError = transient ? null : safeError(error);
-    await prisma.$transaction(async (tx) => {
+    await deps.db.$transaction(async (tx) => {
       const current = await tx.genesisTask.findFirst({
         where: { id: taskId, leaseToken, status: { in: ["running", "repairing"] } },
         select: { aggregateVersion: true },
@@ -553,6 +693,9 @@ async function runGenesisTask(taskId: string): Promise<void> {
         data: {
           status: waitingForProvider ? "waiting_for_provider" : transient ? "queued" : "failed",
           error: terminalError,
+          ...(error instanceof GenesisSemanticGateError
+            ? { auditReport: error.report as unknown as Prisma.InputJsonValue }
+            : {}),
           rawOutput: latestRaw,
           rawExpiresAt: latestRaw ? new Date(Date.now() + GENESIS_RAW_TTL_MS) : null,
           leaseToken: null,
@@ -620,6 +763,7 @@ export async function persistWorld(
   task: GenesisTask,
   leaseToken: string,
   deck: WorldDeck,
+  intent: GenesisIntentContract,
   parsedEntries: ReturnType<typeof parseStWorldbook>,
 ) {
   const mode = WorldModeSchema.parse(task.mode);
@@ -639,6 +783,7 @@ export async function persistWorld(
         userId: task.userId,
         name: deck.worldName,
         genesisInput: task.decree,
+        genesisIntent: intent as unknown as Prisma.InputJsonValue,
         mode,
         status: "draft",
         draftDeck: deck as unknown as Prisma.InputJsonValue,

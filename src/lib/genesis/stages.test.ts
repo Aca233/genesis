@@ -8,6 +8,26 @@ import {
 } from "./stages";
 
 describe("创世阶段映射", () => {
+  it("按冻结意图、语义审阅与语义修复的持久顺序推进", () => {
+    expect(GENESIS_STAGES.map((stage) => stage.id)).toEqual([
+      "oracle",
+      "intent",
+      "laws",
+      "gods",
+      "peoples",
+      "characters",
+      "conflict",
+      "validation",
+      "repair",
+      "audit",
+      "semantic_repair",
+      "saving",
+      "completed",
+    ]);
+    expect(furthestStage("audit", "repair")).toBe("audit");
+    expect(furthestStage("audit", "semantic_repair")).toBe("semantic_repair");
+  });
+
   it("诸神阶段文案不假定玩家位于世界内", () => {
     const gods = GENESIS_STAGES.find(({ id }) => id === "gods")!;
     expect(gods.description).toContain("诸神谱系");
@@ -85,7 +105,7 @@ describe("创世阶段映射", () => {
   });
 
   it("失败状态仍可按当前阶段计算已完成时间线", () => {
-    expect(completedStageIndex("repair", "failed")).toBe(7);
+    expect(completedStageIndex("repair", "failed")).toBe(8);
     expect(completedStageIndex("completed", "completed")).toBe(GENESIS_STAGES.length);
   });
 });
