@@ -31,6 +31,7 @@ export function AdminActionPanel({
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const submittingRef = useRef(false);
   const id = useId();
   const [reason, setReason] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -77,12 +78,14 @@ export function AdminActionPanel({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submittingRef.current) return;
     const nextErrors = validateAdminActionForm(reason, confirmationLabel, confirmation);
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
       return;
     }
 
+    submittingRef.current = true;
     setBusy(true);
     setErrors({});
     setStatus("");
@@ -103,7 +106,6 @@ export function AdminActionPanel({
           reason: body.fields?.reason?.[0],
           confirmation: body.fields?.confirmation?.[0],
         });
-        if (response.status === 409) router.refresh();
         return;
       }
 
@@ -115,6 +117,7 @@ export function AdminActionPanel({
     } catch {
       setErrors({ form: "操作失败，请稍后重试" });
     } finally {
+      submittingRef.current = false;
       setBusy(false);
     }
   }

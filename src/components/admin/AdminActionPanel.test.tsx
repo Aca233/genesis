@@ -58,6 +58,13 @@ const defaultProps: AdminActionPanelProps = {
   payload: { targetType: "user", targetUserId: "user-1", action: "delete" },
 };
 
+const taskProps: AdminActionPanelProps = {
+  label: "重新执行",
+  targetLabel: "创世任务 · 样本世界",
+  impact: "保留失败记录，从允许恢复的位置重新开始。",
+  payload: { targetType: "task", kind: "genesis", taskId: "task-1", action: "retry" },
+};
+
 function childrenOf(node: ReactNode): ReactNode[] {
   if (node === null || node === undefined || typeof node === "boolean" || typeof node === "string" || typeof node === "number") return [];
   if (Array.isArray(node)) return node.flatMap(childrenOf);
@@ -83,9 +90,30 @@ function change(element: ReactElement<Record<string, unknown>>, value: string) {
   (element.props.onChange as (event: { currentTarget: { value: string } }) => void)({ currentTarget: { value } });
 }
 
-async function submit(root: ReactNode) {
+function submit(root: ReactNode) {
   const form = findElement(root, (element) => element.type === "form" && typeof element.props.onSubmit === "function");
-  await (form.props.onSubmit as (event: { preventDefault: () => void }) => Promise<void>)({ preventDefault: vi.fn() });
+  return (form.props.onSubmit as (event: { preventDefault: () => void }) => Promise<void>)({ preventDefault: vi.fn() });
+}
+
+function bindNativeElements(root: ReactNode) {
+  const triggerButton = findElement(root, (element) => element.type === "button" && element.props["aria-haspopup"] === "dialog");
+  const dialogElement = findElement(root, (element) => element.type === "dialog");
+  const dialog = { showModal: vi.fn(), close: vi.fn() };
+  const trigger = { focus: vi.fn() };
+  (triggerButton.props.ref as { current: unknown }).current = trigger;
+  (dialogElement.props.ref as { current: unknown }).current = dialog;
+  return { triggerButton, dialogElement, dialog, trigger };
+}
+
+function enterPermanentAction(root: ReactNode, reason = "保留这个原因") {
+  change(findElement(root, (element) => element.type === "textarea"), reason);
+  change(findElement(root, (element) => element.type === "input" && element.props.name === "confirmation"), "sample@example.com");
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
 }
 
 describe("AdminActionPanel", () => {
@@ -107,15 +135,18 @@ describe("AdminActionPanel", () => {
     expect(css).toContain("@media (max-width: 640px)");
   });
 
-  it("renders one native dialog with a real method=dialog cancel form and no browser prompts", () => {
+  it("renders one native dialog with a real method=dialog cancel form and native Escape behavior", () => {
     const source = readFileSync(new URL("./AdminActionPanel.tsx", import.meta.url), "utf8");
     const root = renderPanel();
     const dialogs = childrenOf(root).filter((node) => typeof node === "object" && node !== null && !Array.isArray(node) && "type" in node && (node as ReactElement).type === "dialog");
     const cancelForm = findElement(root, (element) => element.type === "form" && element.props.method === "dialog");
+    const dialog = findElement(root, (element) => element.type === "dialog");
 
     expect((root as ReactElement).type).toBe("div");
     expect(dialogs).toHaveLength(1);
     expect(cancelForm.props.onSubmit).toBeUndefined();
+    expect(dialog.props.onCancel).toBeUndefined();
+    expect(typeof dialog.props.onClose).toBe("function");
     expect(source).toContain("showModal()");
     expect(source).not.toContain("window.prompt");
     expect(source).not.toContain("window.alert");
@@ -123,36 +154,58 @@ describe("AdminActionPanel", () => {
     expect(JSON.stringify(root)).toContain("永久删除账号及其关联元数据，此操作不可撤销。");
   });
 
-  it("keeps reason and confirmation values while surfacing API field and form errors", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      json: vi.fn().mockResolvedValue({
-        error: "管理操作参数无效",
-        fields: { reason: ["操作原因至少需要 2 个字"], confirmation: ["确认文字不匹配"] },
-      }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const dialog = { showModal: vi.fn(), close: vi.fn() };
-    const trigger = { focus: vi.fn() };
-
-    let root = renderPanel();
-    const triggerButton = findElement(root, (element) => element.type === "button" && element.props["aria-haspopup"] === "dialog");
-    const dialogElement = findElement(root, (element) => element.type === "dialog");
-    (triggerButton.props.ref as { current: unknown }).current = trigger;
-    (dialogElement.props.ref as { current: unknown }).current = dialog;
+  it("restores trigger focus from the native close event used by cancel and Escape", () => {
+    const root = renderPanel();
+    const { triggerButton, dialogElement, dialog, trigger } = bindNativeElements(root);
     (triggerButton.props.onClick as () => void)();
+    expect(dialog.showModal).toHaveBeenCalledOnce();
 
-    root = renderPanel();
-    change(findElement(root, (element) => element.type === "textarea"), "保留这个原因");
-    change(findElement(root, (element) => element.type === "input" && element.props.name === "confirmation"), "sample@example.com");
+    (dialogElement.props.onClose as () => void)();
+    expect(trigger.focus).toHaveBeenCalledOnce();
+
+    trigger.focus.mockClear();
+    (dialogElement.props.onClose as () => void)();
+    expect(trigger.focus).toHaveBeenCalledOnce();
+  });
+
+  it("keeps invalid values visible and does not request, close, or refresh on client validation failure", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    let root = renderPanel();
+    const { dialog } = bindNativeElements(root);
+    enterPermanentAction(root, "a");
+
     root = renderPanel();
     await submit(root);
     root = renderPanel();
 
-    const reason = findElement(root, (element) => element.type === "textarea");
-    const confirmation = findElement(root, (element) => element.type === "input" && element.props.name === "confirmation");
-    expect(reason.props.value).toBe("保留这个原因");
-    expect(confirmation.props.value).toBe("sample@example.com");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(findElement(root, (element) => element.type === "textarea").props.value).toBe("a");
+    expect(findElement(root, (element) => element.type === "input" && element.props.name === "confirmation").props.value).toBe("sample@example.com");
+    expect(JSON.stringify(root)).toContain("操作原因至少需要 2 个字");
+    expect(dialog.close).not.toHaveBeenCalled();
+    expect(router.refresh).not.toHaveBeenCalled();
+  });
+
+  it("keeps values and field/form errors visible on an ordinary API failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: vi.fn().mockResolvedValue({
+        error: "管理操作参数无效",
+        fields: { reason: ["操作原因至少需要 2 个字"], confirmation: ["确认文字不匹配"] },
+      }),
+    }));
+    let root = renderPanel();
+    const { dialog } = bindNativeElements(root);
+    enterPermanentAction(root);
+
+    root = renderPanel();
+    await submit(root);
+    root = renderPanel();
+
+    expect(findElement(root, (element) => element.type === "textarea").props.value).toBe("保留这个原因");
+    expect(findElement(root, (element) => element.type === "input" && element.props.name === "confirmation").props.value).toBe("sample@example.com");
     expect(JSON.stringify(root)).toContain("管理操作参数无效");
     expect(JSON.stringify(root)).toContain("操作原因至少需要 2 个字");
     expect(JSON.stringify(root)).toContain("确认文字不匹配");
@@ -160,21 +213,63 @@ describe("AdminActionPanel", () => {
     expect(router.refresh).not.toHaveBeenCalled();
   });
 
-  it("closes, announces completion, restores focus, and refreshes without navigation", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ ok: true }) }));
-    const dialog = { showModal: vi.fn(), close: vi.fn() };
-    const trigger = { focus: vi.fn() };
+  it("keeps the dialog, inputs, and conflict error visible without refreshing on 409", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: vi.fn().mockResolvedValue({ error: "任务状态已经变化，请核对后重试" }),
+    }));
+    let root = renderPanel();
+    const { dialog } = bindNativeElements(root);
+    enterPermanentAction(root, "核对状态冲突");
 
-    let root = renderPanel({ ...defaultProps, confirmationLabel: undefined, payload: { targetType: "task", kind: "genesis", taskId: "task-1", action: "retry" } });
-    const triggerButton = findElement(root, (element) => element.type === "button" && element.props["aria-haspopup"] === "dialog");
-    const dialogElement = findElement(root, (element) => element.type === "dialog");
-    (triggerButton.props.ref as { current: unknown }).current = trigger;
-    (dialogElement.props.ref as { current: unknown }).current = dialog;
+    root = renderPanel();
+    await submit(root);
+    root = renderPanel();
+
+    expect(findElement(root, (element) => element.type === "textarea").props.value).toBe("核对状态冲突");
+    expect(findElement(root, (element) => element.type === "input" && element.props.name === "confirmation").props.value).toBe("sample@example.com");
+    expect(JSON.stringify(root)).toContain("任务状态已经变化，请核对后重试");
+    expect(dialog.close).not.toHaveBeenCalled();
+    expect(router.refresh).not.toHaveBeenCalled();
+    expect(router.push).not.toHaveBeenCalled();
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it("prevents a concurrent double submit while exposing the busy state", async () => {
+    const pendingResponse = deferred<{ ok: boolean; status: number; json: () => Promise<{ ok: boolean }> }>();
+    const fetchMock = vi.fn().mockReturnValue(pendingResponse.promise);
+    vi.stubGlobal("fetch", fetchMock);
+    let root = renderPanel(taskProps);
+    const { dialog } = bindNativeElements(root);
     change(findElement(root, (element) => element.type === "textarea"), "重新排队");
 
-    root = renderPanel({ ...defaultProps, confirmationLabel: undefined, payload: { targetType: "task", kind: "genesis", taskId: "task-1", action: "retry" } });
+    root = renderPanel(taskProps);
+    const first = submit(root);
+    const second = submit(root);
+    root = renderPanel(taskProps);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const form = findElement(root, (element) => element.type === "form" && typeof element.props.onSubmit === "function");
+    const submitButton = findElement(root, (element) => element.type === "button" && element.props.type === "submit" && typeof element.props.children === "string" && element.props.children === "处理中…");
+    expect(form.props["aria-busy"]).toBe(true);
+    expect(submitButton.props.disabled).toBe(true);
+
+    pendingResponse.resolve({ ok: true, status: 200, json: async () => ({ ok: true }) });
+    await Promise.all([first, second]);
+    expect(dialog.close).toHaveBeenCalledOnce();
+    expect(router.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("closes, announces completion, restores focus, and refreshes without navigation on success", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: vi.fn().mockResolvedValue({ ok: true }) }));
+    let root = renderPanel(taskProps);
+    const { dialog, trigger } = bindNativeElements(root);
+    change(findElement(root, (element) => element.type === "textarea"), "重新排队");
+
+    root = renderPanel(taskProps);
     await submit(root);
-    root = renderPanel({ ...defaultProps, confirmationLabel: undefined, payload: { targetType: "task", kind: "genesis", taskId: "task-1", action: "retry" } });
+    root = renderPanel(taskProps);
 
     expect(dialog.close).toHaveBeenCalledOnce();
     expect(trigger.focus).toHaveBeenCalledOnce();
