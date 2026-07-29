@@ -9,6 +9,7 @@ export type SemanticRepairPromptInput = {
   intent: GenesisIntentContract;
   invalidDeck: WorldDeck;
   issues: GenesisSemanticIssue[];
+  requiredRemovePaths?: string[];
   lockedPaths?: string[];
   lorebookExcerpts?: string;
   materialConstraints?: string;
@@ -16,7 +17,7 @@ export type SemanticRepairPromptInput = {
 };
 
 export const GENESIS_SEMANTIC_REPAIR_SYSTEM = `You are a bounded semantic repair planner for a god-roleplay world generator.
-Return only path-level repair operations for the supplied semantic issues. Never return or rewrite the complete world deck. Every operation path must exactly match one supplied issue path. Use action="replace" with valueJson containing a JSON-encoded string (example: valueJson="\\\"corrected text\\\""); use action="remove" with valueJson=null. Do not reorder arrays or modify unlisted paths.`;
+Return only path-level repair operations for the supplied semantic issues. Never return or rewrite the complete world deck. Every operation path must exactly match one supplied issue path. Use action="replace" with valueJson containing a JSON-encoded string (example: valueJson="\\\"corrected text\\\""); use action="remove" with valueJson=null. Paths listed under Required remove paths must use action="remove" and must never be replaced with invented objects. Do not reorder arrays or modify unlisted paths.`;
 
 export function semanticRepairPrompt(input: SemanticRepairPromptInput): string {
   const sections = [
@@ -25,6 +26,7 @@ export function semanticRepairPrompt(input: SemanticRepairPromptInput): string {
     `Creator decree:\n${input.decree}`,
     `FROZEN GENESIS INTENT CONTRACT:\n${JSON.stringify(input.intent)}`,
     `Blocking semantic issues:\n${JSON.stringify(input.issues)}`,
+    `Required remove paths (must use action="remove"):\n${JSON.stringify(input.requiredRemovePaths ?? [])}`,
     `Invalid world deck JSON (read-only context):\n${JSON.stringify(input.invalidDeck)}`,
     `Locked paths (must remain byte-for-byte equivalent as JSON values):\n${JSON.stringify(input.lockedPaths ?? [])}`,
   ];

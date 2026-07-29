@@ -14,6 +14,7 @@ import {
   auditGenesisSemantics,
   hasBlockingIssues,
   type GenesisQualityReport,
+  type GenesisSemanticIssue,
   type GenesisSemanticAuditResult,
 } from "./semantic-audit";
 import { preserveLockedPaths } from "./locked-paths";
@@ -189,6 +190,38 @@ function readPath(value: unknown, segments: string[]): unknown | typeof MISSING_
   return current;
 }
 
+function requiredUnsupportedRemovalPaths(
+  deck: WorldDeck,
+  issues: GenesisSemanticIssue[],
+): string[] {
+  return issues.flatMap((issue) => {
+    if (issue.severity !== "error" || issue.type !== "unsupported_canon_claim") return [];
+    const segments = pathSegments(issue.path);
+    const key = segments.at(-1);
+    if (key === undefined || !/^\d+$/.test(key)) return [];
+    const parent = readPath(deck, segments.slice(0, -1));
+    return Array.isArray(parent) && Number(key) < parent.length ? [issue.path] : [];
+  });
+}
+
+function enforceRequiredRemovals(
+  repair: GenesisSemanticRepairResult,
+  requiredRemovePaths: string[],
+): GenesisSemanticRepairResult {
+  if (requiredRemovePaths.length === 0) return repair;
+  const required = new Set(requiredRemovePaths);
+  return {
+    operations: [
+      ...repair.operations.filter(({ path }) => !required.has(path)),
+      ...requiredRemovePaths.map((path) => ({
+        path,
+        action: "remove" as const,
+        valueJson: null,
+      })),
+    ],
+  };
+}
+
 function writePath(target: unknown, segments: string[], replacement: unknown | typeof MISSING_PATH): void {
   const key = segments.at(-1);
   if (key === undefined) return;
@@ -211,7 +244,21 @@ function applySemanticRepairs(
 ): unknown {
   const bounded = structuredClone(original) as unknown;
   const allowedPaths = new Set(issuePaths);
-  for (const operation of repair.operations) {
+  const operations = [...repair.operations].sort((left, right) => {
+    if (left.action !== right.action) return left.action === "replace" ? -1 : 1;
+    if (left.action !== "remove" || right.action !== "remove") return 0;
+    const leftSegments = pathSegments(left.path);
+    const rightSegments = pathSegments(right.path);
+    const leftParent = leftSegments.slice(0, -1).join("\u0000");
+    const rightParent = rightSegments.slice(0, -1).join("\u0000");
+    const leftKey = leftSegments.at(-1) ?? "";
+    const rightKey = rightSegments.at(-1) ?? "";
+    if (leftParent === rightParent && /^\d+$/.test(leftKey) && /^\d+$/.test(rightKey)) {
+      return Number(rightKey) - Number(leftKey);
+    }
+    return rightSegments.length - leftSegments.length;
+  });
+  for (const operation of operations) {
     if (!allowedPaths.has(operation.path)) continue;
     const segments = pathSegments(operation.path);
     if (segments.length === 0) continue;
@@ -247,6 +294,7 @@ export async function enforceGenesisQuality(
     await input.onStage?.("semantic_repair");
     let repairedDeck: WorldDeck | null = null;
     let repairFeedback: string | undefined;
+    const requiredRemovePaths = requiredUnsupportedRemovalPaths(currentDeck, currentReport.issues);
     for (let patchAttempt = 1; patchAttempt <= 2; patchAttempt += 1) {
       const repairRequest = {
         task: "genesis" as const,
@@ -259,6 +307,7 @@ export async function enforceGenesisQuality(
           intent: input.intent,
           invalidDeck: currentDeck,
           issues: currentReport.issues,
+          requiredRemovePaths,
           lockedPaths: input.lockedPaths,
           lorebookExcerpts: input.lorebookExcerpts,
           materialConstraints: input.materialConstraints,
@@ -280,7 +329,10 @@ export async function enforceGenesisQuality(
       });
       const boundedRepair = applySemanticRepairs(
         currentDeck,
-        GenesisSemanticRepairResultSchema.parse(repairedRaw),
+        enforceRequiredRemovals(
+          GenesisSemanticRepairResultSchema.parse(repairedRaw),
+          requiredRemovePaths,
+        ),
         currentReport.issues.map(({ path }) => path),
       );
       const restored = input.currentDeck === undefined
