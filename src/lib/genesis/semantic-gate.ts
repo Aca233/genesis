@@ -190,6 +190,36 @@ function readPath(value: unknown, segments: string[]): unknown | typeof MISSING_
   return current;
 }
 
+function semanticIdentityTokens(value: unknown): string[] {
+  if (value === null || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  return [record.ref, record.name, ...(Array.isArray(record.aliases) ? record.aliases : [])]
+    .filter((token): token is string => typeof token === "string" && token.length >= 2);
+}
+
+function canonicalizeDirectArrayIssuePath(
+  deck: WorldDeck,
+  issue: GenesisSemanticIssue,
+): GenesisSemanticIssue {
+  const segments = pathSegments(issue.path);
+  const key = segments.at(-1);
+  if (key === undefined || !/^\d+$/.test(key)) return issue;
+  const parent = readPath(deck, segments.slice(0, -1));
+  if (!Array.isArray(parent)) return issue;
+
+  const evidence = [issue.explanation, issue.repairInstruction, ...issue.evidenceRefs].join("\n");
+  const matches = parent.flatMap((value, index) =>
+    semanticIdentityTokens(value).some((token) => evidence.includes(token)) ? [index] : [],
+  );
+  if (matches.length !== 1 || matches[0] === Number(key)) return issue;
+
+  const correctedIndex = String(matches[0]);
+  const path = issue.path.endsWith(`[${key}]`)
+    ? `${issue.path.slice(0, -(`[${key}]`.length))}[${correctedIndex}]`
+    : `${issue.path.slice(0, -(key.length))}${correctedIndex}`;
+  return { ...issue, path };
+}
+
 function requiredUnsupportedRemovalPaths(
   deck: WorldDeck,
   issues: GenesisSemanticIssue[],
@@ -294,7 +324,10 @@ export async function enforceGenesisQuality(
     await input.onStage?.("semantic_repair");
     let repairedDeck: WorldDeck | null = null;
     let repairFeedback: string | undefined;
-    const requiredRemovePaths = requiredUnsupportedRemovalPaths(currentDeck, currentReport.issues);
+    const repairIssues = currentReport.issues.map((issue) =>
+      canonicalizeDirectArrayIssuePath(currentDeck, issue),
+    );
+    const requiredRemovePaths = requiredUnsupportedRemovalPaths(currentDeck, repairIssues);
     for (let patchAttempt = 1; patchAttempt <= 2; patchAttempt += 1) {
       const repairRequest = {
         task: "genesis" as const,
@@ -306,7 +339,7 @@ export async function enforceGenesisQuality(
           decree: input.decree,
           intent: input.intent,
           invalidDeck: currentDeck,
-          issues: currentReport.issues,
+          issues: repairIssues,
           requiredRemovePaths,
           lockedPaths: input.lockedPaths,
           lorebookExcerpts: input.lorebookExcerpts,
@@ -333,7 +366,7 @@ export async function enforceGenesisQuality(
           GenesisSemanticRepairResultSchema.parse(repairedRaw),
           requiredRemovePaths,
         ),
-        currentReport.issues.map(({ path }) => path),
+        repairIssues.map(({ path }) => path),
       );
       const restored = input.currentDeck === undefined
         ? boundedRepair
