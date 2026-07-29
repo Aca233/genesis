@@ -396,11 +396,8 @@ describe("enforceGenesisQuality", () => {
     expect(repair).not.toHaveBeenCalled();
   });
 
-  it("两轮修复后的复审仍有 error 时抛携带最终 report 的安全 terminal error", async () => {
-    const audit = vi.fn()
-      .mockResolvedValueOnce(errorReport)
-      .mockResolvedValueOnce(errorReport)
-      .mockResolvedValueOnce(errorReport);
+  it("四轮修复后的复审仍有 error 时抛携带最终 report 的安全 terminal error", async () => {
+    const audit = vi.fn().mockResolvedValue(errorReport);
     const repair = vi.fn().mockResolvedValue({
       operations: [{
         path: "majorCharacters.0.situation",
@@ -428,14 +425,14 @@ describe("enforceGenesisQuality", () => {
         initialErrorCount: 1,
         initialWarningCount: 0,
         repaired: true,
-        auditPasses: 3,
+        auditPasses: 5,
         durationMs: expect.any(Number),
       },
     });
     expect((caught as Error).message).toBe("创世语义修复后仍有阻断问题，已安全终止生成");
     expect((caught as Error).message).not.toContain("旧王冠已经归还");
     expect(isTransientLlmError(caught)).toBe(false);
-    expect(repair).toHaveBeenCalledTimes(2);
-    expect(audit).toHaveBeenCalledTimes(3);
+    expect(repair).toHaveBeenCalledTimes(4);
+    expect(audit).toHaveBeenCalledTimes(5);
   });
 });
