@@ -4,7 +4,10 @@ import type { WorldDeck } from "@/lib/cards/schemas";
 import { LlmCircuitOpenError } from "@/lib/llm/permits";
 import { StructuredOutputValidationError } from "@/lib/llm/structured";
 import type { GenesisIntentContract } from "../intent";
-import { GenesisSemanticGateError } from "../semantic-gate";
+import {
+  GenesisSemanticGateError,
+  GenesisSemanticRepairValidationError,
+} from "../semantic-gate";
 import type { GenesisV2StageOutputs } from "./stage-output";
 
 const mocks = vi.hoisted(() => ({
@@ -397,6 +400,36 @@ describe("Genesis V2 primary runner", () => {
       data: expect.objectContaining({
         status: "queued",
         error: expect.stringContaining("FUTURE_ABILITY_HELD"),
+      }),
+    }));
+    expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "running", error: null }),
+    }));
+    expect(mocks.wakeScheduler).toHaveBeenCalledOnce();
+  });
+
+  it("语义补丁校验失败只重排人物节点并保留精确引用错误", async () => {
+    const deck = completeDeck();
+    const outputs = splitDeck(deck);
+    configureJob("characters");
+    mocks.acceptedCount.mockResolvedValue(3);
+    mocks.completeStructured.mockResolvedValue(outputs.characters);
+    mocks.artifactFindMany.mockResolvedValue([
+      { stageKey: "pantheon_domain", outputHash: "p", content: outputs.pantheon_domain },
+      { stageKey: "civilizations", outputHash: "c", content: outputs.civilizations },
+      { stageKey: "eras", outputHash: "e", content: outputs.eras },
+    ]);
+    mocks.artifactFindFirst.mockResolvedValue({ content: outputs.blueprint, outputHash: "b" });
+    mocks.enforceQuality.mockRejectedValue(new GenesisSemanticRepairValidationError(
+      "势力引用 gv2:pantheon:faction:04 不存在",
+    ));
+
+    await runGenesisV2PrimaryJob("job-characters");
+
+    expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "queued",
+        error: expect.stringContaining("faction:04"),
       }),
     }));
     expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
