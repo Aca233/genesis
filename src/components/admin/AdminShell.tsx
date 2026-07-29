@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { PlayBackground } from "@/components/play/PlayBackground";
 import { AdminNav } from "./AdminNav";
+import { AdminRefreshButton } from "./AdminRefreshButton";
 
-export function AdminShell({ adminName, children }: { adminName: string; children: React.ReactNode }) {
+export function AdminShell({ adminName, attentionCount, children }: { adminName: string; attentionCount: number | null; children: React.ReactNode }) {
   return <main className="admin-shell relative min-h-screen overflow-x-hidden text-ink">
     <PlayBackground variant="supporting" />
     <div className="admin-shell__layout relative z-10">
@@ -13,7 +14,7 @@ export function AdminShell({ adminName, children }: { adminName: string; childre
             <span><small>GENESIS CONTROL</small><strong>创世中枢</strong></span>
           </Link>
           <p className="admin-sidebar__brief">运行态势、异常处置与管理审计。所有视图只读取元数据，不展示用户正文。</p>
-          <AdminNav />
+          <AdminNav attentionCount={attentionCount} />
         </div>
         <div className="admin-identity">
           <span className="admin-identity__dot" />
@@ -23,10 +24,13 @@ export function AdminShell({ adminName, children }: { adminName: string; childre
       </aside>
       <div className="admin-workspace">
         <header className="admin-topbar">
-          <div><p>天文台总录 / 管理控制台</p><span>仅管理员可见 · 数据动态读取</span></div>
-          <div className="admin-topbar__actions"><span className="admin-privacy-badge">正文边界已启用</span><Link href="/admin?refresh=1" className="seal-button seal-button--lit px-4 py-2 text-sm">刷新数据</Link></div>
+          <div><p>管理中枢 / 任务处置</p><span>仅管理员可见 · 数据动态读取</span></div>
+          <div className="admin-topbar__actions">
+            <span className="admin-privacy-badge">正文边界已启用</span>
+            <AdminRefreshButton />
+          </div>
         </header>
-        <div className="admin-mobile-nav"><AdminNav /></div>
+        <div className="admin-mobile-nav"><AdminNav attentionCount={attentionCount} /></div>
         <div className="admin-content">{children}</div>
       </div>
     </div>
