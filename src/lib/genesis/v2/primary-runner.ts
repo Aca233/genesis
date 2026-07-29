@@ -294,7 +294,7 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
       schema: getGenesisV2StageOutputSchema(stageId, mode),
       maxAttempts: 2,
       transportMaxAttempts: 2,
-      allowTransportFallback: false,
+      allowTransportFallback: true,
       maxTokens: preflight.budgetPlan.stages.find((budget) => budget.stage === stageId)?.maxOutputTokens,
       cache: { namespace: bundle.routingNamespace },
     }) as Record<string, unknown>;

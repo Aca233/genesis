@@ -553,7 +553,7 @@ export async function enforceGenesisQuality(
         maxTokens: 8000,
         maxAttempts: 2,
         transportMaxAttempts: 2,
-        allowTransportFallback: false,
+        allowTransportFallback: true,
         failOnTruncation: false,
         cache: { namespace: `genesis-quality:v2:${input.mode}:round-${round}:patch-${patchAttempt}` },
         maxInputBytes: GENESIS_MODEL_INPUT_MAX_BYTES,

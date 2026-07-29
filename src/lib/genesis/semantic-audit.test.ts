@@ -325,7 +325,7 @@ describe("auditGenesisSemantics", () => {
       maxTokens: 8000,
       maxAttempts: 1,
       transportMaxAttempts: 2,
-      allowTransportFallback: false,
+      allowTransportFallback: true,
       failOnTruncation: false,
     }));
     expect(complete.mock.calls[0]![1].user).toContain("鲁迪乌斯出生时仍是婴儿");

@@ -182,7 +182,7 @@ describe("enforceGenesisQuality", () => {
         schema: GenesisSemanticRepairResultSchema,
         maxAttempts: 2,
         transportMaxAttempts: 2,
-        allowTransportFallback: false,
+        allowTransportFallback: true,
         failOnTruncation: false,
       });
       expect(opts.user).toContain("晨钟议会名称不可修改");
