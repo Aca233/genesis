@@ -44,6 +44,7 @@ describe("semanticRepairPrompt", () => {
       intent,
       invalidDeck,
       issues: [issue],
+      issueValues: [{ path: issue.path, value: invalidDeck.majorCharacters[0]!.situation }],
       requiredRemovePaths: ["majorGods[0]"],
       lockedPaths: ["worldName", "majorGods.0.ref"],
       lorebookExcerpts: "旧王冠尚未被发现",
@@ -57,6 +58,8 @@ describe("semanticRepairPrompt", () => {
     expect(prompt).toContain(JSON.stringify(invalidDeck));
     expect(prompt).toContain(issue.path);
     expect(prompt).toContain(issue.repairInstruction);
+    expect(prompt).toContain("Current JSON values at the exact issue paths");
+    expect(prompt).toContain(invalidDeck.majorCharacters[0]!.situation);
     expect(prompt).toContain('Required remove paths (must use action="remove")');
     expect(prompt).toContain("majorGods[0]");
     expect(prompt).toContain("worldName");

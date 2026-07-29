@@ -431,6 +431,10 @@ export async function enforceGenesisQuality(
     const repairIssues = currentReport.issues.map((issue) =>
       canonicalizeDirectArrayIssuePath(currentDeck, issue),
     );
+    const issueValues = repairIssues.map(({ path }) => {
+      const value = readPath(currentDeck, pathSegments(path));
+      return { path, value: value === MISSING_PATH ? null : value };
+    });
     const requiredRemovePaths = requiredUnsupportedRemovalPaths(currentDeck, repairIssues);
     for (let patchAttempt = 1; patchAttempt <= 2; patchAttempt += 1) {
       const repairRequest = {
@@ -444,6 +448,7 @@ export async function enforceGenesisQuality(
           intent: input.intent,
           invalidDeck: currentDeck,
           issues: repairIssues,
+          issueValues,
           requiredRemovePaths,
           lockedPaths: input.lockedPaths,
           lorebookExcerpts: input.lorebookExcerpts,
