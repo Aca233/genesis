@@ -350,6 +350,50 @@ describe("enforceGenesisQuality", () => {
     });
   });
 
+  it("整个神明集合补丁仍保留每个既有神明的能力结构", async () => {
+    const original = completeDeck();
+    const report: GenesisSemanticAuditResult = {
+      verdict: "errors",
+      issues: [{
+        severity: "error",
+        path: "majorGods",
+        type: "ontology_mismatch",
+        explanation: "神明描述需要回到锚点时刻",
+        evidenceRefs: ["factsAtAnchor"],
+        repairInstruction: "修正神明语义描述",
+      }],
+    };
+    const audit = vi.fn()
+      .mockResolvedValueOnce(report)
+      .mockResolvedValueOnce(passReport);
+    const repair = vi.fn().mockResolvedValue({
+      operations: [{
+        path: "majorGods",
+        action: "replace",
+        valueJson: JSON.stringify(original.majorGods.map((god) => ({
+          ref: god.ref,
+          name: god.name,
+          persona: `${god.persona}（锚点修正版）`,
+          abilities: [],
+        }))),
+      }],
+    });
+
+    const result = await enforceGenesisQuality({
+      ...qualityInput(),
+      deck: original,
+      mode: "pantheon",
+    }, {
+      audit,
+      repair,
+      validate: vi.fn().mockImplementation((deck) => deck),
+    });
+
+    expect(result.deck.majorGods.map(({ abilities }) => abilities))
+      .toEqual(original.majorGods.map(({ abilities }) => abilities));
+    expect(result.deck.majorGods[0]!.persona).toContain("锚点修正版");
+  });
+
   it("势力成员关系补丁丢弃不存在的势力引用", async () => {
     const original = completeDeck();
     const membershipReport: GenesisSemanticAuditResult = {

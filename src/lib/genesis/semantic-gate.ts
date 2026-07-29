@@ -379,6 +379,32 @@ function hardenDirectArrayEntityReplacement(
   return mergeEntitySemanticFields(original, replacement);
 }
 
+const TOP_LEVEL_ENTITY_COLLECTIONS = new Set([
+  "majorGods",
+  "majorCharacters",
+  "factions",
+  "races",
+  "places",
+]);
+
+function hardenEntityCollectionReplacement(
+  target: unknown,
+  path: string,
+  replacement: unknown,
+): unknown {
+  if (!TOP_LEVEL_ENTITY_COLLECTIONS.has(path) || !Array.isArray(replacement)) return replacement;
+  const original = readPath(target, pathSegments(path));
+  if (!Array.isArray(original)) return replacement;
+
+  return replacement.map((entity, index) => {
+    const replacementTokens = new Set(semanticIdentityTokens(entity));
+    const matched = original.find((candidate) =>
+      semanticIdentityTokens(candidate).some((token) => replacementTokens.has(token)),
+    ) ?? original[index];
+    return matched === undefined ? entity : mergeEntitySemanticFields(matched, entity);
+  });
+}
+
 function sanitizeReferenceCollectionReplacement(
   target: unknown,
   path: string,
@@ -450,10 +476,14 @@ function applySemanticRepairs(
       : hardenDirectArrayEntityReplacement(
         bounded,
         segments,
-        sanitizeReferenceCollectionReplacement(
+        hardenEntityCollectionReplacement(
           bounded,
           operation.path,
-          JSON.parse(operation.valueJson),
+          sanitizeReferenceCollectionReplacement(
+            bounded,
+            operation.path,
+            JSON.parse(operation.valueJson),
+          ),
         ),
       );
     writePath(bounded, segments, replacement);
