@@ -265,9 +265,9 @@ describe("enforceGenesisQuality", () => {
         severity: "error",
         path: "majorGods[0]",
         type: "unsupported_canon_claim",
-        explanation: "该神明不存在于原作",
+        explanation: "律法之神不存在于原作",
         evidenceRefs: ["forbiddenExpansions"],
-        repairInstruction: "移除该虚构神明",
+        repairInstruction: "移除 majorGods[0]（律法之神）",
       }],
     };
     const audit = vi.fn()
@@ -293,15 +293,15 @@ describe("enforceGenesisQuality", () => {
     }, { audit, repair, validate });
 
     expect(repair).toHaveBeenCalledTimes(1);
-    expect(repair.mock.calls[0]![1].user).toContain('Required remove paths (must use action="remove"):\n["majorGods[0]"]');
+    expect(repair.mock.calls[0]![1].user).toContain('Required remove paths (must use action="remove"):\n["majorGods[3]"]');
     expect(validate).toHaveBeenCalledWith(
       expect.objectContaining({
-        majorGods: original.majorGods.slice(1),
+        majorGods: original.majorGods.slice(0, -1),
       }),
       "pantheon",
       null,
     );
-    expect(result.deck.majorGods).toEqual(original.majorGods.slice(1));
+    expect(result.deck.majorGods).toEqual(original.majorGods.slice(0, -1));
   });
 
   it("两次补丁都无法通过完整校验时抛出可分类的补丁校验错误", async () => {
