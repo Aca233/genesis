@@ -417,6 +417,26 @@ describe("genesis task runner", () => {
     expect(harness.worldCreate).toHaveBeenCalledTimes(1);
   });
 
+  it("lease takeover 拒绝与任务模式不匹配的非空 intent，直接 failed 且不重生或创建 world", async () => {
+    const harness = createRunnerHarness({ intentContract: creatorIntent });
+
+    await runGenesisTask("task-1", harness.deps as never);
+
+    expect(harness.generateIntent).not.toHaveBeenCalled();
+    expect(harness.buildRequest).not.toHaveBeenCalled();
+    expect(harness.generateDeck).not.toHaveBeenCalled();
+    expect(harness.worldCreate).not.toHaveBeenCalled();
+    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "failed",
+        error: "已冻结的创世意图契约与任务模式不匹配",
+      }),
+    }));
+    expect(harness.taskUpdateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "waiting_for_provider" }),
+    }));
+  });
+
   it("非空损坏 intent 直接失败，不重新生成且不创建 world", async () => {
     const harness = createRunnerHarness({
       intentContract: { sourceBasis: "broken", sourceIps: ["泄漏正文"] },

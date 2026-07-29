@@ -22,7 +22,11 @@ import {
   type GenesisQualityReport,
 } from "./semantic-audit";
 import { generateGenesisIntent, GenesisIntentGenerationError } from "./intent-generator";
-import { parseGenesisIntent, type GenesisIntentContract } from "./intent";
+import {
+  assertGenesisIntentForMode,
+  parseGenesisIntent,
+  type GenesisIntentContract,
+} from "./intent";
 import { enforceGenesisQuality, GenesisSemanticGateError } from "./semantic-gate";
 import {
   countGenesisSemanticIssues,
@@ -341,8 +345,8 @@ const defaultGenesisTaskRunnerDeps: GenesisTaskRunnerDeps = {
 class GenesisPersistedIntentError extends Error {
   override name = "GenesisPersistedIntentError";
 
-  constructor() {
-    super("已冻结的创世意图契约已损坏");
+  constructor(message = "已冻结的创世意图契约已损坏") {
+    super(message);
   }
 }
 
@@ -465,6 +469,13 @@ export async function runGenesisTask(
 
     if (task.intentContract !== null && intent === null) {
       throw new GenesisPersistedIntentError();
+    }
+    if (task.intentContract !== null && intent !== null) {
+      try {
+        assertGenesisIntentForMode(intent, mode);
+      } catch {
+        throw new GenesisPersistedIntentError("已冻结的创世意图契约与任务模式不匹配");
+      }
     }
 
     if (intent === null) {

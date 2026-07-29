@@ -10,7 +10,10 @@ import {
   AbilityVisibilitySchema,
 } from "@/lib/abilities/types";
 import { validateAbilityOwnership } from "@/lib/abilities/validator";
-import { GenesisIntentContractSchema } from "@/lib/genesis/intent";
+import {
+  assertGenesisIntentForMode,
+  GenesisIntentContractSchema,
+} from "@/lib/genesis/intent";
 import { WorldModeSchema } from "@/lib/world-mode";
 import {
   ObserverStateSchema,
@@ -1072,6 +1075,17 @@ export const POST = withAuth(async (userId, request: Request) => {
     );
   }
   const w = parsed.data.world;
+
+  if (w.genesisIntent != null) {
+    try {
+      assertGenesisIntentForMode(w.genesisIntent, w.mode);
+    } catch {
+      return NextResponse.json(
+        { error: "genesisIntent 与世界模式不匹配" },
+        { status: 400 },
+      );
+    }
+  }
 
   const newWorldId = crypto.randomUUID();
   const archiveIds = new Map<string, string>();

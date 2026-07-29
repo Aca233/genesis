@@ -21,7 +21,11 @@ import { withAuth } from "@/lib/auth/route";
 import { ownedWhere } from "@/lib/auth/ownership";
 import type { ParsedLorebookEntry } from "@/lib/lorebook/st-import";
 import { generateGenesisIntent } from "@/lib/genesis/intent-generator";
-import { parseGenesisIntent, type GenesisIntentContract } from "@/lib/genesis/intent";
+import {
+  assertGenesisIntentForMode,
+  parseGenesisIntent,
+  type GenesisIntentContract,
+} from "@/lib/genesis/intent";
 import type { GenesisQualityReport } from "@/lib/genesis/semantic-audit";
 import {
   enforceGenesisQuality,
@@ -112,6 +116,16 @@ export const POST = withAuth(async (
   const persistedIntent = parseGenesisIntent(world.genesisIntent);
   if (world.genesisIntent !== null && persistedIntent === null) {
     return NextResponse.json({ error: "创世意图契约已损坏" }, { status: 500 });
+  }
+  if (persistedIntent !== null) {
+    try {
+      assertGenesisIntentForMode(persistedIntent, mode);
+    } catch {
+      return NextResponse.json(
+        { error: "创世意图契约与世界模式不匹配" },
+        { status: 500 },
+      );
+    }
   }
 
   let lorebookExcerpts: string | undefined;

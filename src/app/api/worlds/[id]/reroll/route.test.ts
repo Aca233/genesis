@@ -271,6 +271,33 @@ describe("POST /api/worlds/[id]/reroll", () => {
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
 
+  it("拒绝与世界模式不匹配的非空 intent，且不生成或更新", async () => {
+    mocks.findUnique.mockResolvedValue({
+      id: "world-1",
+      mode: "pantheon",
+      status: "draft",
+      updatedAt: new Date("2026-07-22T00:00:00.123Z"),
+      draftDeck: completeDeck(),
+      lockedPaths: [],
+      genesisInput: "托尼转生鲁迪乌斯",
+      genesisIntent: creatorIntent,
+      lorebookEntries: [],
+    });
+
+    const response = await POST(request(), context);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "创世意图契约与世界模式不匹配",
+    });
+    expect(mocks.generateIntent).not.toHaveBeenCalled();
+    expect(mocks.completeStructured).not.toHaveBeenCalled();
+    expect(mocks.qualityGate).not.toHaveBeenCalled();
+    expect(mocks.updateMany).not.toHaveBeenCalled();
+    expect(mocks.genesisTaskUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it("把冻结 intent、当前 deck、锁定路径与 lorebook 交给质量门", async () => {
     const currentDeck = completeDeck();
     currentDeck.playerGod.name = "玩家锁定神名";

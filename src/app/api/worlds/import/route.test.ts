@@ -25,6 +25,15 @@ const crossoverIntent: GenesisIntentContract = {
   corePressures: ["成年意识受婴儿身体限制"],
 };
 
+const creatorIntent: GenesisIntentContract = {
+  ...crossoverIntent,
+  playerRole: {
+    type: "external_creator",
+    narrativeFunction: "external_author",
+    mustNotReplaceProtagonist: true,
+  },
+};
+
 const mocks = vi.hoisted(() => {
   const model = () => ({
     create: vi.fn(),
@@ -758,14 +767,28 @@ describe("存档导入", () => {
 
   it("导入有效 genesisIntent 时原样持久化且不参与 ID 重映射", async () => {
     const archive = versionFourArchive();
-    Object.assign(archive.world, { genesisIntent: crossoverIntent });
+    Object.assign(archive.world, { genesisIntent: creatorIntent });
 
     const response = await importWorld(request(archive));
 
     expect(response.status).toBe(200);
     expect(mocks.prisma.world.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ genesisIntent: crossoverIntent }),
+      data: expect.objectContaining({ genesisIntent: creatorIntent }),
     }));
+  });
+
+  it.each([
+    ["creator 世界携带 pantheon intent", versionFourArchive, crossoverIntent],
+    ["pantheon 世界携带 creator intent", versionTwoArchive, creatorIntent],
+  ])("拒绝 %s 且不启动写事务", async (_label, buildArchive, genesisIntent) => {
+    const archive = buildArchive();
+    Object.assign(archive.world, { genesisIntent });
+
+    const response = await importWorld(request(archive));
+
+    expect(response.status).toBe(400);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.prisma.world.create).not.toHaveBeenCalled();
   });
 
   it.each([
