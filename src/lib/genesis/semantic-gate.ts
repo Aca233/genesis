@@ -64,19 +64,46 @@ const JsonTextSchema = z.string().refine((value) => {
   }
 }, "valueJson 必须包含一个合法 JSON 值");
 
+const NormalizedJsonTextSchema = z.preprocess((value) => {
+  if (typeof value === "string") {
+    try {
+      JSON.parse(value);
+      return value;
+    } catch {
+      return JSON.stringify(value);
+    }
+  }
+  return JSON.stringify(value);
+}, JsonTextSchema);
+
+const ReplaceOperationSchema = z.union([
+  z.object({
+    path: z.string().min(1),
+    action: z.literal("replace"),
+    valueJson: NormalizedJsonTextSchema,
+  }).strict(),
+  z.object({
+    path: z.string().min(1),
+    action: z.literal("replace"),
+    value: NormalizedJsonTextSchema,
+  }).strict().transform(({ path, action, value }) => ({ path, action, valueJson: value })),
+]);
+
+const RemoveOperationSchema = z.union([
+  z.object({
+    path: z.string().min(1),
+    action: z.literal("remove"),
+    valueJson: z.null().optional(),
+  }).strict(),
+  z.object({
+    path: z.string().min(1),
+    action: z.literal("remove"),
+    value: z.null(),
+  }).strict(),
+]).transform(({ path, action }) => ({ path, action, valueJson: null }));
+
 export const GenesisSemanticRepairResultSchema = z.object({
-  operations: z.array(z.discriminatedUnion("action", [
-    z.object({
-      path: z.string().min(1),
-      action: z.literal("replace"),
-      valueJson: JsonTextSchema,
-    }).strict(),
-    z.object({
-      path: z.string().min(1),
-      action: z.literal("remove"),
-      valueJson: z.null(),
-    }).strict(),
-  ])).max(16),
+  operations: z.array(z.union([ReplaceOperationSchema, RemoveOperationSchema])).max(16),
 }).strict();
 type GenesisSemanticRepairResult = z.infer<typeof GenesisSemanticRepairResultSchema>;
 

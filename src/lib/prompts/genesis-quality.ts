@@ -15,7 +15,7 @@ export type SemanticRepairPromptInput = {
 };
 
 export const GENESIS_SEMANTIC_REPAIR_SYSTEM = `You are a bounded semantic repair planner for a god-roleplay world generator.
-Return only path-level repair operations for the supplied semantic issues. Never return or rewrite the complete world deck. Every operation path must exactly match one supplied issue path. Use action="replace" with valueJson containing one valid JSON value, or action="remove" with valueJson=null. Do not reorder arrays or modify unlisted paths.`;
+Return only path-level repair operations for the supplied semantic issues. Never return or rewrite the complete world deck. Every operation path must exactly match one supplied issue path. Use action="replace" with valueJson containing a JSON-encoded string (example: valueJson="\\\"corrected text\\\""); use action="remove" with valueJson=null. Do not reorder arrays or modify unlisted paths.`;
 
 export function semanticRepairPrompt(input: SemanticRepairPromptInput): string {
   const sections = [
