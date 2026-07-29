@@ -1,4 +1,5 @@
-import { AdminAttentionQueue } from "@/components/admin/AdminAttentionQueue";
+import { redirect } from "next/navigation";
+import { AdminAttentionQueue, workbenchHref } from "@/components/admin/AdminAttentionQueue";
 import { AdminRefreshButton } from "@/components/admin/AdminRefreshButton";
 import { AdminTaskDetail } from "@/components/admin/AdminTaskDetail";
 import { loadAdminTaskWorkbench, type AdminWorkbenchFilters } from "@/lib/admin/workbench";
@@ -33,6 +34,10 @@ export default async function AdminPage({ searchParams }: { searchParams: AdminP
       </div>
       <AdminRefreshButton />
     </section>;
+  }
+
+  if (selected && result.selected === null) {
+    redirect(workbenchHref({ view, q: search, task: selected }, { task: null }));
   }
 
   return <div className="admin-workbench">

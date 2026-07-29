@@ -93,6 +93,7 @@ export function AdminAttentionQueue({
 
     <form action="/admin" method="get" className="admin-workbench-search" role="search">
       <input type="hidden" name="view" value={current.view} />
+      {selected && <input type="hidden" name="task" value={taskSelectionKey(selected)} />}
       <label htmlFor="admin-task-search">搜索任务元数据</label>
       <div>
         <input id="admin-task-search" name="q" type="search" defaultValue={current.q} placeholder="任务、用户或世界（至少 2 字）" />

@@ -72,6 +72,7 @@ describe("AdminAttentionQueue", () => {
     expect(markup).toContain("href=\"/admin?view=failed&amp;q=%E8%96%84%E6%9A%AE&amp;task=genesis%3Agenesis-001\"");
     expect(markup).toContain("href=\"/admin?view=stale&amp;q=%E8%96%84%E6%9A%AE\"");
     expect(markup).toContain("href=\"/admin?view=attention&amp;q=%E8%96%84%E6%9A%AE&amp;task=narrative%3Anarrative-002\"");
+    expect(markup).toContain("type=\"hidden\" name=\"task\" value=\"genesis:genesis-001\"");
   });
 });
 
@@ -122,5 +123,13 @@ describe("task workbench styles", () => {
     expect(css).toMatch(/\.admin-workbench-row:focus-visible[\s\S]*?outline:\s*2px solid var\(--gilt-strong\)/);
     expect(css).toMatch(/@media\s*\(max-width:\s*1024px\)[\s\S]*?\.admin-workbench-layout\s*\{[\s\S]*?grid-template-columns:\s*1fr/);
     expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.admin-workbench-row[^{]*\{[\s\S]*?transition:\s*none[\s\S]*?transform:\s*none/);
+    expect(css).toMatch(/\.admin-workbench-filters a\s*\{[\s\S]*?min-height:\s*40px/);
+    expect(css).toMatch(/\.admin-workbench-search input,[^{]*\.admin-workbench-search button,[^{]*\.admin-workbench-search a\s*\{[\s\S]*?min-height:\s*40px/);
+    expect(css).toMatch(/\.admin-workbench-header p\s*\{[\s\S]*?font-size:\s*\.75rem/);
+    expect(css).toMatch(/\.admin-workbench-eyebrow\s*\{[\s\S]*?font:[^;}]*\.6875rem/);
+    expect(css).toMatch(/\.admin-workbench\s*\{[\s\S]*?overflow-x:\s*clip/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*640px\)[\s\S]*?\.admin-workbench-row\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*640px\)[\s\S]*?\.admin-workbench-row__identity\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1[\s\S]*?grid-row:\s*2/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*640px\)[\s\S]*?\.admin-workbench-row__reason\s*\{[\s\S]*?grid-column:\s*1[\s\S]*?grid-row:\s*3[\s\S]*?\.admin-workbench-row>time\s*\{[\s\S]*?grid-column:\s*2[\s\S]*?grid-row:\s*3/);
   });
 });
