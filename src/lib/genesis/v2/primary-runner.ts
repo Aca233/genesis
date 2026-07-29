@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { buildWorldIconTheme } from "@/lib/icons/theme";
-import { completeStructured } from "@/lib/llm/structured";
+import {
+  completeStructured,
+  StructuredOutputValidationError,
+} from "@/lib/llm/structured";
 import { isTransientLlmError } from "@/lib/llm/gateway";
 import { LlmCircuitOpenError } from "@/lib/llm/permits";
 import { classifyTransportFailure } from "@/lib/llm/transport";
@@ -513,6 +516,7 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
     const retry = !terminalQualityFailure
       && !waitingForProvider
       && (error instanceof GenesisV2RecoverableStageError
+        || error instanceof StructuredOutputValidationError
         || isTransientLlmError(error)
         || isRetryablePersistenceError(error))
       && job.attempt < MAX_JOB_ATTEMPTS;

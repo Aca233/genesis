@@ -173,7 +173,7 @@ export async function runGenesisShadowJob(jobId: string): Promise<void> {
       stageId,
       engineVersion: "dag-v2-shadow",
       globalContractVersion: "genesis-v2/core/v1",
-      mode: job.task.mode,
+      mode,
       normalizedDecree: job.task.decree.trim(),
       rawUserIntentHash: preflight.preflightHash,
       intentContract: job.task.intentContract,

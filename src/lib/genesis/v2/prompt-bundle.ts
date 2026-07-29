@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
+import type { WorldMode } from "@/lib/world-mode";
+import { getGenesisV2StageOutputSchema } from "./stage-output";
 import {
   getGenesisV2StageContract,
   type GenesisV2StageId,
   type GenesisV2WaveId,
 } from "./stage-registry";
 
-const PROMPT_BUNDLE_COMPILER_VERSION = "genesis-v2/prompt-bundle/v1";
+const PROMPT_BUNDLE_COMPILER_VERSION = "genesis-v2/prompt-bundle/v2";
 
 export interface GenesisV2SourceObligation {
   readonly obligationId: string;
@@ -42,7 +45,7 @@ export interface CompileGenesisV2PromptBundleInput {
   readonly stageId: GenesisV2StageId;
   readonly engineVersion: string;
   readonly globalContractVersion: string;
-  readonly mode: string;
+  readonly mode: WorldMode;
   readonly normalizedDecree: string;
   readonly rawUserIntentHash: string;
   readonly intentContract?: unknown;
@@ -125,6 +128,22 @@ function compileBlock(name: string, value: unknown): string {
 
 function joinBlocks(blocks: readonly string[]): string {
   return blocks.join("");
+}
+
+function stageOutputRules(stageId: GenesisV2StageId): readonly string[] {
+  const common = [
+    "Return exactly one JSON object matching outputJsonSchema; no markdown or commentary.",
+    "Do not add fields owned by another stage and do not omit required fields.",
+    "All user-facing string values must be Chinese; schema keys remain English.",
+    "Every generated ref must exactly equal a registered canonicalRef from the structural manifest.",
+  ];
+  if (stageId !== "blueprint") return common;
+  return [
+    ...common,
+    "temporalAnchor must be the nested card {source, anchor, anchorOrdinal}; never flatten anchor fields into temporalAnchor.",
+    "Set temporalAnchor.anchorOrdinal to 0. For original worlds source.basis=original and anchor.canonCutoff=null; IP worlds require sourceIps, continuity, and a non-null canonCutoff.",
+    "slotBriefs must contain exactly one entry for every canonicalRef in the structural manifest.",
+  ];
 }
 
 function stableObligations(
@@ -233,6 +252,8 @@ export function compileGenesisV2PromptBundle(
       allowedTargetKinds: contract.allowedTargetKinds,
       contractVersion: contract.contractVersion,
       evidenceSlice: contract.evidenceSlice,
+      outputJsonSchema: z.toJSONSchema(getGenesisV2StageOutputSchema(contract.id, input.mode)),
+      outputRules: stageOutputRules(contract.id),
       outputSchemaId: contract.outputSchemaId,
       ownedFields: contract.ownedFields,
       stageId: contract.id,

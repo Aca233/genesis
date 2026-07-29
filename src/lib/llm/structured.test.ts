@@ -4,7 +4,7 @@ import { z } from "zod";
 const mocks = vi.hoisted(() => ({ complete: vi.fn() }));
 vi.mock("./gateway", () => ({ complete: mocks.complete }));
 
-import { completeStructured } from "./structured";
+import { completeStructured, StructuredOutputValidationError } from "./structured";
 
 describe("completeStructured attempts", () => {
   it("maxAttempts=1 时结构错误也只调用模型一次", async () => {
@@ -17,7 +17,7 @@ describe("completeStructured attempts", () => {
       user: "user",
       schema: z.object({ ok: z.boolean() }),
       maxAttempts: 1,
-    })).rejects.toThrow("1 次尝试");
+    })).rejects.toBeInstanceOf(StructuredOutputValidationError);
 
     expect(mocks.complete).toHaveBeenCalledTimes(1);
   });

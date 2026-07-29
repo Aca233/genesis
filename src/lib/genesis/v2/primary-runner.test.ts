@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { completeDeck } from "@/lib/abilities/embark.test-fixtures";
 import type { WorldDeck } from "@/lib/cards/schemas";
 import { LlmCircuitOpenError } from "@/lib/llm/permits";
+import { StructuredOutputValidationError } from "@/lib/llm/structured";
 import type { GenesisIntentContract } from "../intent";
 import { GenesisSemanticGateError } from "../semantic-gate";
 import type { GenesisV2StageOutputs } from "./stage-output";
@@ -63,7 +64,10 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-vi.mock("@/lib/llm/structured", () => ({ completeStructured: mocks.completeStructured }));
+vi.mock("@/lib/llm/structured", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/llm/structured")>(),
+  completeStructured: mocks.completeStructured,
+}));
 vi.mock("../intent-generator", async (importOriginal) => ({
   ...await importOriginal<typeof import("../intent-generator")>(),
   generateGenesisIntent: mocks.generateIntent,
@@ -331,6 +335,25 @@ describe("Genesis V2 primary runner", () => {
     await runGenesisV2PrimaryJob("job-blueprint");
 
     expect(mocks.artifactUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: "job-blueprint", leaseToken: "lease-1" }),
+      data: expect.objectContaining({ status: "queued", error: null }),
+    }));
+    expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "running" }),
+    }));
+    expect(mocks.wakeScheduler).toHaveBeenCalledOnce();
+  });
+
+  it("结构化校验耗尽时按当前阶段重排，而不是直接终止整个任务", async () => {
+    configureJob("blueprint");
+    mocks.completeStructured.mockRejectedValue(new StructuredOutputValidationError(
+      2,
+      "temporalAnchor.source 缺少对象",
+    ));
+
+    await runGenesisV2PrimaryJob("job-blueprint");
+
     expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: "job-blueprint", leaseToken: "lease-1" }),
       data: expect.objectContaining({ status: "queued", error: null }),
