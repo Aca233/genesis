@@ -3,6 +3,12 @@ import { prisma } from "@/lib/db";
 import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
 import { withAuth } from "@/lib/auth/route";
 
+const V2_RETRY_BUDGET_ALLOWANCE = {
+  calls: 6,
+  inputTokens: 250_000,
+  outputTokens: 48_000,
+} as const;
+
 export const POST = withAuth(async (
   userId,
   _request: Request,
@@ -27,6 +33,11 @@ export const POST = withAuth(async (
         leaseExpiresAt: null,
         attempt: 0,
         aggregateVersion,
+        ...(current.engineVersion === "dag-v2" ? {
+          budgetMaxCalls: { increment: V2_RETRY_BUDGET_ALLOWANCE.calls },
+          budgetMaxInput: { increment: V2_RETRY_BUDGET_ALLOWANCE.inputTokens },
+          budgetMaxOutput: { increment: V2_RETRY_BUDGET_ALLOWANCE.outputTokens },
+        } : {}),
       },
     });
     if (updated.count !== 1) return false;
