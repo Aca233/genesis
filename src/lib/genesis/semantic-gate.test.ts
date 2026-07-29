@@ -304,6 +304,53 @@ describe("enforceGenesisQuality", () => {
     expect(result.deck.majorGods).toEqual(original.majorGods.slice(0, -1));
   });
 
+  it("整个人物对象补丁保留结构字段，只采纳语义字段修改", async () => {
+    const original = completeDeck();
+    const originalCharacter = original.majorCharacters[3]!;
+    const characterReport: GenesisSemanticAuditResult = {
+      verdict: "errors",
+      issues: [{
+        severity: "error",
+        path: "majorCharacters[3]",
+        type: "anchor_state_leak",
+        explanation: `${originalCharacter.name} 的当前处境提前泄漏未来事件`,
+        evidenceRefs: ["futureOnly"],
+        repairInstruction: "只修正当前处境，不修改人物结构与能力",
+      }],
+    };
+    const audit = vi.fn()
+      .mockResolvedValueOnce(characterReport)
+      .mockResolvedValueOnce(passReport);
+    const repair = vi.fn().mockResolvedValue({
+      operations: [{
+        path: "majorCharacters[3]",
+        action: "replace",
+        valueJson: JSON.stringify({
+          ...originalCharacter,
+          situation: "仍在等待开局事件发生",
+          factionMemberships: [{ role: "未知" }],
+          abilities: originalCharacter.abilities.map((ability) => ({
+            ...ability,
+            state: "正常",
+          })),
+        }),
+      }],
+    });
+    const validate = vi.fn().mockImplementation((deck) => deck);
+
+    const result = await enforceGenesisQuality({
+      ...qualityInput(),
+      deck: original,
+      mode: "pantheon",
+    }, { audit, repair, validate });
+
+    expect(result.deck.majorCharacters[3]).toMatchObject({
+      situation: "仍在等待开局事件发生",
+      factionMemberships: originalCharacter.factionMemberships,
+      abilities: originalCharacter.abilities,
+    });
+  });
+
   it("两次补丁都无法通过完整校验时抛出可分类的补丁校验错误", async () => {
     const input = qualityInput();
     const audit = vi.fn().mockResolvedValue(errorReport);

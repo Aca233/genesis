@@ -252,6 +252,77 @@ function enforceRequiredRemovals(
   };
 }
 
+const STRUCTURAL_ENTITY_FIELDS = new Set([
+  "ref",
+  "factionRef",
+  "raceRef",
+  "sourceAbilityRef",
+  "targetGodRef",
+  "state",
+  "status",
+  "statusAtAnchor",
+  "kind",
+  "mastery",
+  "visibility",
+  "rank",
+  "level",
+  "timing",
+  "canonRelation",
+  "mode",
+]);
+
+const STRUCTURAL_ENTITY_COLLECTIONS = new Set([
+  "abilities",
+  "factionMemberships",
+  "learnedTraditionRefs",
+  "racialOverrides",
+  "relations",
+  "keyCharacterRefs",
+]);
+
+function mergeEntitySemanticFields(
+  original: unknown,
+  replacement: unknown,
+  field?: string,
+): unknown {
+  if (field !== undefined && (
+    STRUCTURAL_ENTITY_FIELDS.has(field)
+    || STRUCTURAL_ENTITY_COLLECTIONS.has(field)
+  )) {
+    return structuredClone(original);
+  }
+  if (
+    original === null
+    || replacement === null
+    || typeof original !== "object"
+    || typeof replacement !== "object"
+    || Array.isArray(original)
+    || Array.isArray(replacement)
+  ) {
+    return structuredClone(replacement);
+  }
+
+  const result = structuredClone(original) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(replacement)) {
+    if (!(key in result)) continue;
+    result[key] = mergeEntitySemanticFields(result[key], value, key);
+  }
+  return result;
+}
+
+function hardenDirectArrayEntityReplacement(
+  target: unknown,
+  segments: string[],
+  replacement: unknown,
+): unknown {
+  const key = segments.at(-1);
+  if (key === undefined || !/^\d+$/.test(key)) return replacement;
+  const parent = readPath(target, segments.slice(0, -1));
+  if (!Array.isArray(parent)) return replacement;
+  const original = parent[Number(key)];
+  return mergeEntitySemanticFields(original, replacement);
+}
+
 function writePath(target: unknown, segments: string[], replacement: unknown | typeof MISSING_PATH): void {
   const key = segments.at(-1);
   if (key === undefined) return;
@@ -292,11 +363,14 @@ function applySemanticRepairs(
     if (!allowedPaths.has(operation.path)) continue;
     const segments = pathSegments(operation.path);
     if (segments.length === 0) continue;
-    writePath(
-      bounded,
-      segments,
-      operation.action === "remove" ? MISSING_PATH : JSON.parse(operation.valueJson),
-    );
+    const replacement = operation.action === "remove"
+      ? MISSING_PATH
+      : hardenDirectArrayEntityReplacement(
+        bounded,
+        segments,
+        JSON.parse(operation.valueJson),
+      );
+    writePath(bounded, segments, replacement);
   }
   return bounded;
 }
