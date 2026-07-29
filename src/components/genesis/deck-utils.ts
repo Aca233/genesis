@@ -81,6 +81,14 @@ export function deckCardOrder(deck: WorldDeck): DeckCardKey[] {
   return order;
 }
 
+/** IP 世界只保留高置信神祇；原创与无锚点旧卡组沿用四席编辑下限。 */
+export function minimumMajorGodCount(
+  deck: Pick<WorldDeck, "temporalAnchor">,
+): 1 | 4 {
+  const basis = deck.temporalAnchor?.source.basis;
+  return basis === "single_ip" || basis === "multi_ip" ? 1 : 4;
+}
+
 type CreatorGodRelation = CreatorMajorGodCard["relations"][number];
 
 /** Creator 关系目标不允许指向自身或被其他关系行重复占用；当前行目标始终可保留。 */

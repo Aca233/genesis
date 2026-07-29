@@ -7,6 +7,28 @@ import {
   rerollUserPrompt,
 } from "./genesis";
 
+const crossoverIntent = {
+  sourceBasis: "multi_ip" as const,
+  sourceIps: ["无职转生", "钢铁侠"],
+  explicitPremise: ["鲁迪乌斯由托尼·斯塔克转生"],
+  narrativeCenter: {
+    identity: "托尼·斯塔克转生后的鲁迪乌斯",
+    role: "转生主角",
+    startState: "刚出生，仅保留人格、记忆与工程思维",
+  },
+  playerRole: {
+    type: "independent_god" as const,
+    narrativeFunction: "limited_intervener" as const,
+    mustNotReplaceProtagonist: true,
+  },
+  forbiddenExpansions: ["独立贾维斯神格", "开局已有钢铁装甲"],
+  factsAtAnchor: ["鲁迪乌斯刚出生"],
+  futureOnly: ["建立工坊", "验证魔力能否驱动机械"],
+  fusionBoundaries: ["工程知识只能提出假设，不能直接改写世界物理规律"],
+  uncertaintyPolicy: "omit_or_generalize" as const,
+  corePressures: ["婴儿身体限制", "隐瞒成年意识"],
+};
+
 describe("genesis mode prompts", () => {
   it("pantheon 保留玩家神规则和 pantheon schema", () => {
     const prompt = genesisSystem("pantheon");
@@ -17,6 +39,18 @@ describe("genesis mode prompts", () => {
     expect(prompt).toContain("NEVER cast the player as a mortal");
     expect(prompt).toContain('mode="pantheon"');
     expect(prompt).toMatch(/mode, worldName/);
+  });
+
+  it("系统提示词约束 IP 神谱、融合事实、锚点资产与核心冲突", () => {
+    const system = genesisSystem("pantheon");
+    expect(system).toContain("1-5");
+    expect(system).toContain("never pad the pantheon");
+    expect(system).toContain("a title containing 神 is not evidence of divinity");
+    expect(system).toContain("establishedRules");
+    expect(system).toContain("openQuestions");
+    expect(system).toContain("hardLimits");
+    expect(system).toContain("anchor-time asset test");
+    expect(system).toContain("decree deletion test");
   });
 
   it("creator 将玩家置于世界外并禁止 playerGod", () => {
@@ -138,5 +172,47 @@ describe("genesis mode prompts", () => {
     expect(reroll).toContain("Never add playerGod");
     expect(repair).toContain('mode="creator"');
     expect(repair).toContain("Never introduce playerGod");
+  });
+
+  it("生成、结构修补、重掷与引用修补都携带冻结意图契约", () => {
+    const prompts = [
+      genesisUserPrompt({
+        mode: "pantheon",
+        decree: "创世",
+        intentContract: crossoverIntent,
+      }),
+      genesisRepairPrompt({
+        mode: "pantheon",
+        decree: "创世",
+        invalidOutput: "{}",
+        validationError: "缺字段",
+        intentContract: crossoverIntent,
+      }),
+      rerollUserPrompt({
+        mode: "pantheon",
+        decree: "创世",
+        cardKey: "majorGods",
+        currentDeckJson: "{}",
+        intentContract: crossoverIntent,
+      }),
+      rerollReferenceRepairPrompt({
+        mode: "pantheon",
+        decree: "创世",
+        currentDeckJson: "{}",
+        referenceIssue: "引用无效",
+        intentContract: crossoverIntent,
+      }),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain("FROZEN GENESIS INTENT CONTRACT");
+      expect(prompt).toContain("托尼·斯塔克转生后的鲁迪乌斯");
+      expect(prompt).toContain("omit_or_generalize");
+    }
+    expect(genesisUserPrompt({
+      mode: "pantheon",
+      decree: "创世",
+      intentContract: "预序列化契约",
+    })).toContain("预序列化契约");
   });
 });

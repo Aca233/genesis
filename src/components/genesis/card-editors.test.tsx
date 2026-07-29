@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { completeCreatorDeck } from "@/lib/abilities/embark.test-fixtures";
-import { MajorGodEditor } from "./card-editors";
+import { completeCreatorDeck, completeDeck } from "@/lib/abilities/embark.test-fixtures";
+import { FusionAxiomEditor, MajorGodEditor } from "./card-editors";
 
 
 describe("Creator MajorGodEditor", () => {
@@ -25,5 +25,32 @@ describe("Creator MajorGodEditor", () => {
     expect(html).toContain('name="majorGods.0.relations.0.targetGodRef"');
     expect(html).toContain('name="majorGods.0.relations.0.label"');
     expect(html).toContain('name="majorGods.0.relations.0.note"');
+  });
+});
+
+describe("FusionAxiomEditor", () => {
+  it("编辑已确立规则、待验证问题与硬性限制，不再暴露旧字段", () => {
+    const deck = {
+      ...completeDeck(),
+      fusionAxiom: {
+        sourceIps: ["无职转生", "钢铁侠"],
+        establishedRules: ["转生保留人格与记忆"],
+        openQuestions: ["魔力能否驱动机械仍待验证"],
+        hardLimits: ["开局没有装甲、工坊或助手"],
+        conflictRule: "以锚点事实和原作规则为准",
+      },
+    };
+    const html = renderToStaticMarkup(
+      <FusionAxiomEditor deck={deck} lockedPaths={[]} onEdit={vi.fn()} />,
+    );
+
+    expect(html).toContain("已确立规则");
+    expect(html).toContain("待验证问题");
+    expect(html).toContain("硬性限制");
+    expect(html).toContain("转生保留人格与记忆");
+    expect(html).toContain("魔力能否驱动机械仍待验证");
+    expect(html).toContain("开局没有装甲、工坊或助手");
+    expect(html).not.toContain("fusionAxiom.axioms");
+    expect(html).not.toContain("fusionAxiom.powerMapping");
   });
 });

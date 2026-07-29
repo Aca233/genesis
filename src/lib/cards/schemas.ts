@@ -291,11 +291,34 @@ export const CosmologyCardSchema = z.object({
 });
 
 export const FusionAxiomCardSchema = z.object({
-  sourceIps: z.array(z.string()).min(2).describe("融合的IP列表"),
-  axioms: z.array(z.string()).min(1).describe("缝合公理，逐条"),
-  powerMapping: z.string().describe("力量对标表"),
-  conflictRule: z.string().describe("设定冲突时以谁为准"),
+  sourceIps: z.array(z.string()).min(2),
+  establishedRules: z.array(z.string()).min(1).max(8),
+  openQuestions: z.array(z.string()).min(1).max(8),
+  hardLimits: z.array(z.string()).min(1).max(8),
+  conflictRule: z.string().min(1),
+}).strict();
+
+const LegacyFusionAxiomCardSchema = z.object({
+  sourceIps: z.array(z.string()).min(2),
+  axioms: z.array(z.string()).min(1),
+  powerMapping: z.string(),
+  conflictRule: z.string(),
 });
+
+export function normalizePersistedFusionAxiom(value: unknown): unknown {
+  const current = FusionAxiomCardSchema.safeParse(value);
+  if (current.success) return current.data;
+
+  const legacy = LegacyFusionAxiomCardSchema.safeParse(value);
+  if (!legacy.success) return value;
+  return {
+    sourceIps: legacy.data.sourceIps,
+    establishedRules: legacy.data.axioms,
+    openQuestions: [legacy.data.powerMapping],
+    hardLimits: ["旧版融合公理未记录明确限制"],
+    conflictRule: legacy.data.conflictRule,
+  };
+}
 
 export const GodVoiceSchema = z.object({
   verbalTics: z.array(z.string()).describe("语癖"),
@@ -582,13 +605,13 @@ const PantheonWorldDeckObjectSchema = z.object({
   mode: z.literal("pantheon"),
   ...SharedWorldDeckShape,
   playerGod: PlayerGodCardSchema,
-  majorGods: z.array(MajorGodCardSchema).min(4).max(10),
+  majorGods: z.array(MajorGodCardSchema).min(1).max(10),
 }).strict();
 
 const CreatorWorldDeckObjectSchema = z.object({
   mode: z.literal("creator"),
   ...SharedWorldDeckShape,
-  majorGods: z.array(CreatorMajorGodCardSchema).min(4).max(10),
+  majorGods: z.array(CreatorMajorGodCardSchema).min(1).max(10),
 }).strict();
 
 /** Compatibility-only cards used after a positively identified pre-ability draft. */
@@ -891,11 +914,21 @@ function validateOpeningChapterBrief(deck: DeckReferenceGraph, ctx: z.Refinement
 function validateDeckIntegrity(
   deck: DeckReferenceGraph & {
     canonEvents?: CanonFutureEvent[];
-    temporalAnchor?: { anchorOrdinal: number };
+    temporalAnchor?: {
+      anchorOrdinal: number;
+      source: { basis: "original" | "single_ip" | "multi_ip" };
+    };
     relationsAtAnchor?: Array<{ sourceRef: string; targetRef: string }>;
   },
   ctx: z.RefinementCtx,
 ): void {
+  if (deck.temporalAnchor?.source.basis === "original" && deck.majorGods.length < 4) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["majorGods"],
+      message: "原创世界至少需要 4 位主神",
+    });
+  }
   validateModeAwareDeckReferenceUniqueness(deck, ctx);
   validateCanonFutureAxis(deck, ctx);
   validateRelationsAtAnchor(deck, ctx);
@@ -1012,10 +1045,14 @@ export function isLegacyWorldDeck(raw: unknown): boolean {
 function normalizePersistedPantheonDeck(raw: unknown): unknown {
   if (!isLooseRecord(raw)) return raw;
   const withMode = hasOwn(raw, "mode") ? raw : { mode: "pantheon", ...raw };
-  if (!Array.isArray(withMode.places)) return withMode;
-  return {
+  const withFusion = {
     ...withMode,
-    places: withMode.places.map((rawPlace, index) => {
+    fusionAxiom: normalizePersistedFusionAxiom(withMode.fusionAxiom),
+  };
+  if (!Array.isArray(withFusion.places)) return withFusion;
+  return {
+    ...withFusion,
+    places: withFusion.places.map((rawPlace, index) => {
       const place = asLooseRecord(rawPlace);
       return hasOwn(place, "ref") ? place : { ...place, ref: `place-${index + 1}` };
     }),
@@ -1047,6 +1084,7 @@ export function normalizeLegacyWorldDeck(raw: unknown): LegacyWorldDeck {
   return LegacyWorldDeckSchema.parse({
     ...deck,
     mode: "pantheon",
+    fusionAxiom: normalizePersistedFusionAxiom(deck.fusionAxiom),
     playerGod: {
       ...playerGod,
       ...(hasOwn(playerGod, "ref") ? {} : { ref: "player-god-1" }),

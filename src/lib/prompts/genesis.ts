@@ -3,6 +3,7 @@ import {
   CreatorWorldDeckSchema,
   PantheonWorldDeckSchema,
 } from "@/lib/cards/schemas";
+import type { GenesisIntentContract } from "@/lib/genesis/intent";
 import type { WorldMode } from "@/lib/world-mode";
 
 /** Genesis prompts are generated from the exact schema selected by frozen mode. */
@@ -11,6 +12,16 @@ const deckJsonSchemas: Record<WorldMode, string> = {
   creator: JSON.stringify(z.toJSONSchema(CreatorWorldDeckSchema), null, 2),
 };
 
+type IntentContractInput = GenesisIntentContract | string;
+
+function frozenIntentSection(intentContract?: IntentContractInput): string {
+  if (intentContract === undefined) return "";
+  const serialized = typeof intentContract === "string"
+    ? intentContract
+    : JSON.stringify(intentContract, null, 2);
+  return `\n\n--- FROZEN GENESIS INTENT CONTRACT START ---\n${serialized}\n--- FROZEN GENESIS INTENT CONTRACT END ---`;
+}
+
 const SHARED_RULES = `Rules:
 1. IDENTIFY source IPs in the decree. If existing IP(s) are referenced (e.g. Warhammer 40K, Fate, Mushoku Tensei, 凡人修仙传), REUSE their canonical pantheon, factions, cosmology and tone faithfully. Do not invent replacements for things canon already provides.
 2. TEMPORAL ANCHOR FIRST (hard constraints): fix the world's source and opening time BEFORE creating any entity, and emit temporalAnchor immediately after worldName. temporalAnchor.source declares basis "original" (pure original world), "single_ip" or "multi_ip" with sourceIps and the continuity you follow. temporalAnchor.anchor pins the opening moment: honor a period the player states (selectionSource "player_explicit"); else follow the lorebook ("lorebook"); otherwise DEFAULT to the eve of the canon main storyline (anchorType "main_story_opening", selectionSource "model_inferred"). canonCutoff is the canon-knowledge cutoff of this playthrough — canon events after the cutoff have NOT happened in this world yet and may only arrive later as canonEvents; for basis "original", canonCutoff MUST be null. Set anchorOrdinal to 0: integer ordinals are the ONLY machine-checked time (past events sit below anchorOrdinal, future events above it); every time label is display-only.
@@ -18,12 +29,13 @@ const SHARED_RULES = `Rules:
    ANCHOR SNAPSHOTS (slim, current-state only): fill stateAtAnchor for every active major character and active faction. majorCharacters[].stateAtAnchor is {identity, locationRef (an existing place ref or null), factionMemberships [{factionRef, role, status active|former|secret}], currentGoals (at most 3), currentObstacles (at most 3), currentSituation, nextOffscreenMove, knowledgeHints (at most 3)}; factions[].stateAtAnchor is {leaderRefs, territoryRefs, currentStrength, currentObjectives (at most 3), operatingConstraints (at most 3), nextOffscreenMove}. God stateAtAnchor {currentRank, currentDomains} remains optional and is used when current state differs from the card face. A snapshot records ONLY the state AS OF the anchor moment — never biography, never future turns.
    BOUNDED RELATIONS: emit top-level relationsAtAnchor immediately after majorCharacters — 1-4 anchor-relevant relations PER active major character, never more than 4 for one character. Each relation is {sourceRef, targetRef, status ally|enemy|rival|subordinate|family|unknown|no_contact, publicDescription, hiddenDescription (optional, hidden truths only)}; every ref must resolve to an existing card ref. A relation whose target is NOT active at the anchor (dead, unborn, dissolved...) MUST set memorial: true — a remembrance such as 先王之子, not a live tie.
    PROVENANCE (IP worlds only): when basis is "single_ip" or "multi_ip", stamp every majorGods/majorCharacters/factions/races/places entry with provenance {canonRelation, evidence (at most 3 short cues)} — canon for entities lifted from the source work, canon_inferred for reasonable extrapolation from it, player_override where the decree overrides canon, generated_original for new inventions. When basis is "original", omit provenance everywhere.
+   Apply the anchor-time asset test: every current ability, faith base, relationship, item, assistant, place, and institution must answer why it already exists at the anchor. If the cause is future-only, remove it from current state. Player-god assets cannot be borrowed from the mortal protagonist.
    LIVING WORLD CONTRACT: the anchor is already in motion. Every active major character MUST have stateAtAnchor with concrete currentGoals, currentObstacles, currentSituation, nextOffscreenMove, and knowledgeHints. Every active faction MUST have stateAtAnchor with currentObjectives, operatingConstraints, currentStrength, and nextOffscreenMove. The off-screen next move states what the actor will do if the player does nothing; no actor may exist only to wait for or orbit the player.
-   CAUSAL PRESSURE: every epochConflict.overtConflicts and hiddenCurrents entry must identify an actor, objective, obstacle, trigger, and consequence in concrete world terms. Derive pressure from existing motives, resources, rules, relations and prior conditions; never create a random accident, surprise newcomer or unexplained intervention merely to add drama.
+   CAUSAL PRESSURE: every epochConflict.overtConflicts and hiddenCurrents entry must identify an actor, objective, obstacle, trigger, and consequence in concrete world terms. Apply the decree deletion test: if removing the decree leaves the same conflict, rewrite it so the premise directly causes the pressure. Derive pressure from existing motives, resources, rules, relations and prior conditions; never create a random accident, surprise newcomer or unexplained intervention merely to add drama.
    INFORMATION BOUNDARIES: separate public facts, viewpoint knowledge, hidden truths and hint-only material. A character knowledgeHints list may contain only what that character can know at the anchor through position, experience or communication. hiddenCurrents remain author-only; relationsAtAnchor.hiddenDescription and openingChapterBrief.mustHide must never be restated as public knowledge.
    FIRST CHAPTER BRIDGE: emit openingChapterBrief immediately after epochConflict. Choose viewpointCharacterRef from an active major character, or null only when a world/god overview is necessary. Its objective must advance exactly one small causal node from an existing conflict; openingConstraint starts from a concrete action, consequence or anomaly rather than an encyclopedia introduction; endingConstraint leaves a choice, question or reaction open. readerKnows and viewpointKnows must respect the information boundary; mustHide stays unrevealed, hintOnly may receive indirect evidence only, and forbiddenDevelopments blocks premature canonEvents, total conflict resolution, deus ex machina and unearned new actors.
-4. If MULTIPLE IPs are fused, you MUST fill fusionAxiom: explicit rules for how the systems merge, a power-scale mapping, and which canon wins on conflict. If single-IP or original, set fusionAxiom to null.
-5. DIVINITY BAR (strict): only beings who are genuinely DIVINE by the canon's own cosmology qualify — true gods, god-like warp entities, ascended immortals worshipped as deities. Powerful mortals, heroes, demigod champions and faction leaders do NOT qualify no matter how strong. They belong in faction or character cards.
+4. If MULTIPLE IPs are fused, you MUST fill fusionAxiom with sourceIps, establishedRules, openQuestions, hardLimits, and conflictRule. Established facts, unresolved hypotheses, and impossible shortcuts must remain separate. If single-IP or original, set fusionAxiom to null.
+5. DIVINITY BAR (strict): only beings who are genuinely DIVINE by the canon's own cosmology qualify — true gods, god-like warp entities, ascended immortals worshipped as deities; a title containing 神 is not evidence of divinity. Powerful mortals, heroes, demigod champions and faction leaders do NOT qualify no matter how strong. They belong in faction or character cards.
 6. FACTIONS/RACES/PLACES: each faction includes faith alignment (which gods, how fervent). Keep counts sensible for the world.
    STABLE REFS AND ABILITIES (hard constraints): every major god, race, faction, place, major character and ability MUST have a unique non-empty stable ref. Every raceRef, factionRef, keyCharacterRefs[].ref, sourceAbilityRef, ability reference, and god relation target MUST resolve to an existing matching card; never use display names as relationship keys. Generate 2–5 race abilities per race, limited to racial_innate or racial_tradition. Generate 3–6 divine abilities for each major god. Ability cost must name a god-specific, concrete resource or consequence tied to that god's power source (e.g. 消耗教会累积的信仰、加速自身因果裂缝暴露、折损与龙族的盟约威信); the bare phrase 『神力消耗』 may be used as a cost at most twice per deck. Generate 4–12 majorCharacters; each has 2–5 personal abilities. Personality fields: the contrast template 『表面X，实则Y』/『外表X，内心Y』 may appear at most ONCE per deck; every other character's personality must instead anchor on one concrete habit, tic, or contradictory behavior (e.g. 『每次说谎前会先摸一下左手袖口』), not a surface/inner dichotomy. Accuracy beats quota: when the canon at the anchor genuinely offers fewer active figures, 4 faithful characters beat 6 padded ones. A character may only learn a racial_tradition explicitly referenced from that character's primary race. Do not duplicate ordinary inherited racial abilities on a character card; use racialOverrides only for exceptions. Hidden or rumored abilities are allowed only when they serve a concrete secret, era undercurrent, or divine agenda; all other abilities are known.
 7. STYLE: infer the narrative style from the decree's phrasing (epic 史诗 / webnovel 网文爽文 / grimdark 黑深残 / lightnovel 轻小说 / canon 仿原IP文风). THEME: era naming, rank vocabulary matching the world's flavor (map every internal rank key to an in-world term), and typeNames — an in-world Chinese label for each codex category (faction/character/race/place/artifact/cult). Fill the style card completely: rhythm, narrationNotes, 2-3 dictionExamples written in the world's own voice, and tabooPhrases listing the overused AI-writing cliches this world must ration (e.g. 仿佛/似乎 hedges, 一丝/一抹 quantifiers, 眼中闪过, 空气仿佛凝固, inflated intensifiers like 极度/终极). The deck's own Chinese prose must obey the same discipline it prescribes: across ALL deck fields, the degree-word family 极度/终极/无尽/彻底/永恒/极为/极其/极强/极大/极重/无比/无上 may appear at most 6 times combined; where tempted, replace the degree word with a concrete behavior, number, or consequence.
@@ -35,7 +47,7 @@ const SHARED_RULES = `Rules:
 const MODE_RULES: Record<WorldMode, string> = {
   pantheon: `PANTHEON MODE (hard constraints):
 - Output mode="pantheon".
-- PANTHEON: select 6-9 MAJOR gods with maximal dramatic tension versus the player god (rivals, potential allies, ideological mirrors).
+- PANTHEON: for original worlds select 4-9 major gods. For single_ip or multi_ip worlds select 1-5 high-confidence divine entities and never pad the pantheon to satisfy a quota; omission is better than false divinity.
   DIVINITY BAR (strict): only beings who are genuinely DIVINE by the canon's own cosmology qualify — true gods, god-like warp entities, ascended immortals worshipped as deities. Powerful mortals, heroes, demigod champions and faction leaders do NOT qualify no matter how strong (e.g. in Warhammer 40K: the Chaos Gods and the God-Emperor qualify; primarchs like Guilliman, chapter masters, inquisitors do NOT — they belong in faction cards as keyFigures). When in doubt, ask: "is this being worshipped as a god AND operating on a divine plane?" If no, it is not pantheon material.
   If canon has more true gods than 9, the overflow becomes one-line minorGods. For each major god produce persona, a distinctive VOICE card (verbal tics, forms of address, catchphrases, things they would never say — each god must be unmistakable in dialogue; at least one catchphrase per god must be a plain speakable line in that god's daily register — a grumble, an order, a dismissal (e.g. 剑神的『拔剑。』) — not a polished antithetical aphorism: two symmetrical epigrams per god reads as a single author's voice), and a hidden AGENDA card (goals, methods, stance toward the player god with motive, active schemes). Agendas must interlock with epochConflict.hiddenCurrents so the world has living intrigue.
 - PLAYER GOD: the player is ALWAYS a genuine GOD of this world — a divine being with a rank, domains and (possibly tiny) faith base, operating on the divine plane. NEVER cast the player as a mortal, a reincarnated human, a cultivator climbing ranks, or the source IP's mortal protagonist — even when the decree references a reincarnation/mortal-protagonist IP (无职转生, 凡人修仙传...): in that case the player god watches over / interferes with such mortals, they do not BECOME one. Infer the god's origin from the decree (newborn god / canonical god / ascended immortal / usurper...); respect what the player states about themselves; fill gaps boldly. Their situation must be god-scale (faith, rivals, divine politics) with immediate hooks — never "you are born as a baby somewhere". The DIVINITY BAR above applies to the player god too.
@@ -44,7 +56,7 @@ const MODE_RULES: Record<WorldMode, string> = {
 - Output mode="creator".
 - The player is outside the world and is not a god, character, faction, force, hidden entity, or worship target inside it.
 - Never create playerGod. Do not encode the player as any world-internal identity, power, secret cause, faith object, or hidden actor.
-- Select 6–9 genuinely divine major gods and build the pantheon around tensions among world-internal gods. Every agenda and relation may reference only world-internal objects.
+- Select 4–9 genuinely divine major gods and build the pantheon around tensions among world-internal gods. Every agenda and relation may reference only world-internal objects.
 - Creator god agendas never contain stanceToPlayer; creator major gods never contain initialRelationToPlayer. Use relations with targetGodRef/label/note for world-internal god relationships only.`,
 };
 
@@ -63,6 +75,7 @@ export const GENESIS_SYSTEM = genesisSystem("pantheon");
 export function genesisUserPrompt(opts: {
   mode: WorldMode;
   decree: string;
+  intentContract?: IntentContractInput;
   lorebookExcerpts?: string,
   materialConstraints?: string,
 }): string {
@@ -70,12 +83,13 @@ export function genesisUserPrompt(opts: {
     ? `\n\nAuthoritative lorebook excerpts (override your own knowledge on conflict):\n${opts.lorebookExcerpts}`
     : "";
   const materialText = opts.materialConstraints ? `\n\n${opts.materialConstraints}` : "";
-  return `Frozen world mode: mode="${opts.mode}".\nPrimordial decree from the player:\n"""\n${opts.decree}\n"""${lore}${materialText}\n\nGenerate the complete world deck JSON now.`;
+  return `Frozen world mode: mode="${opts.mode}".\nPrimordial decree from the player:\n"""\n${opts.decree}\n"""${frozenIntentSection(opts.intentContract)}${lore}${materialText}\n\nGenerate the complete world deck JSON now.`;
 }
 
 export function genesisRepairPrompt(opts: {
   mode: WorldMode;
   decree: string;
+  intentContract?: IntentContractInput;
   lorebookExcerpts?: string;
   invalidOutput: string;
   validationError: string;
@@ -89,7 +103,7 @@ export function genesisRepairPrompt(opts: {
   const modeGuard = mode === "creator"
     ? "Never introduce playerGod, stanceToPlayer, or initialRelationToPlayer. Preserve only world-internal god relations."
     : "Keep exactly one playerGod and all pantheon player-god relationship fields.";
-  return `The previous Genesis output failed validation.\n\nFrozen world mode: mode="${mode}". ${modeGuard}\nPrimordial decree:\n"""\n${opts.decree}\n"""${lore}${materials}\n\nValidation error:\n${opts.validationError}\n\nInvalid output:\n${opts.invalidOutput.slice(0, 50000)}\n\nRepair every reported structural, stable-reference, temporal-consistency, and material inheritance issue while preserving valid content. Enforce every GENESIS MATERIALS locked path verbatim and do not reveal hidden material. Return ONLY the complete corrected JSON in this order: ${TOP_LEVEL_ORDER[mode]}. The first property must be mode="${mode}".`;
+  return `The previous Genesis output failed validation.\n\nFrozen world mode: mode="${mode}". ${modeGuard}\nPrimordial decree:\n"""\n${opts.decree}\n"""${frozenIntentSection(opts.intentContract)}${lore}${materials}\n\nValidation error:\n${opts.validationError}\n\nInvalid output:\n${opts.invalidOutput.slice(0, 50000)}\n\nRepair every reported structural, stable-reference, temporal-consistency, and material inheritance issue while preserving valid content. Enforce every GENESIS MATERIALS locked path verbatim and do not reveal hidden material. Return ONLY the complete corrected JSON in this order: ${TOP_LEVEL_ORDER[mode]}. The first property must be mode="${mode}".`;
 }
 
 /** 单卡重掷：其余卡组为约束 */
@@ -98,6 +112,7 @@ export function rerollUserPrompt(opts: {
   decree: string;
   cardKey: string;
   currentDeckJson: string;
+  intentContract?: IntentContractInput;
   lockedNote?: string;
   playerNote?: string;
 }) {
@@ -105,7 +120,7 @@ export function rerollUserPrompt(opts: {
     ? 'Frozen world mode: mode="creator". Never add playerGod, stanceToPlayer, or initialRelationToPlayer; preserve world-internal relations.'
     : 'Frozen world mode: mode="pantheon". Keep playerGod and all player-god relationship fields.';
   return `${modeGuard}
-Primordial decree: """${opts.decree}"""
+Primordial decree: """${opts.decree}"""${frozenIntentSection(opts.intentContract)}
 
 Current world deck (all other cards are CONSTRAINTS — stay consistent with them):
 ${opts.currentDeckJson}
@@ -125,12 +140,13 @@ export function rerollReferenceRepairPrompt(opts: {
   decree: string;
   currentDeckJson: string;
   referenceIssue: string;
+  intentContract?: IntentContractInput;
 }) {
   const modeGuard = opts.mode === "creator"
     ? 'Frozen world mode: mode="creator". Never introduce playerGod or player-facing god relation fields.'
     : 'Frozen world mode: mode="pantheon". Preserve playerGod and player-facing god relation fields.';
   return `${modeGuard}
-Primordial decree: """${opts.decree}"""
+Primordial decree: """${opts.decree}"""${frozenIntentSection(opts.intentContract)}
 
 The following full world deck matches the field schema but has an invalid cross-card reference:
 ${opts.currentDeckJson}

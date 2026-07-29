@@ -14,6 +14,7 @@ import {
   RANK_LABELS,
   RELATION_LABELS,
   CARD_KEY_LABELS,
+  minimumMajorGodCount,
   removeCreatorMajorGod,
 } from "@/components/genesis/deck-utils";
 import { DeckCard, GroupHeader } from "@/components/genesis/DeckCard";
@@ -226,8 +227,9 @@ export default function GenesisEditorPage({
   const deleteMajorGod = useCallback(
     (index: number) => {
       if (!deck) return;
-      if (deck.majorGods.length <= 4) {
-        setNotice({ ok: false, text: "主神席不得少于 4 位，不可再删" });
+      const minimum = minimumMajorGodCount(deck);
+      if (deck.majorGods.length <= minimum) {
+        setNotice({ ok: false, text: `主神席不得少于 ${minimum} 位，不可再删` });
         return;
       }
       setOpenCard(null);
@@ -445,7 +447,11 @@ export default function GenesisEditorPage({
             <DeckCard
               title="融合公理"
               subtitle={deck.fusionAxiom.sourceIps.join(" × ")}
-              lines={deck.fusionAxiom.axioms.slice(0, 3).map((a) => clip(a))}
+              lines={[
+                clip(`已确立：${deck.fusionAxiom.establishedRules[0]}`),
+                clip(`待验证：${deck.fusionAxiom.openQuestions[0]}`),
+                clip(`硬限制：${deck.fusionAxiom.hardLimits[0]}`),
+              ]}
               lockedCount={countLockedUnder(lockedPaths, "fusionAxiom")}
               rerolling={rerolling === "fusionAxiom"}
               onOpen={() => setOpenCard({ kind: "fusionAxiom" })}

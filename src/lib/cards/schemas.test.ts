@@ -4,6 +4,7 @@ import {
   CreatorWorldDeckSchema,
   DECK_CARD_KEYS,
   LegacyWorldDeckSchema,
+  PantheonWorldDeckSchema,
   TemporalAnchorCardSchema,
   WorldDeckSchema,
   isLegacyWorldDeck,
@@ -252,6 +253,60 @@ describe("WorldDeck 模式判别联合", () => {
     const { mode: _mode, ...persisted } = completeDeck();
     void _mode;
     expect(parsePersistedWorldDeck(persisted).mode).toBe("pantheon");
+  });
+
+  it("仅接受新版融合公理，并将已持久化旧字段归一为新版结构", () => {
+    const legacyFusion = {
+      sourceIps: ["甲", "乙"],
+      axioms: ["旧公理"],
+      powerMapping: "旧力量对标",
+      conflictRule: "以甲为准",
+    };
+    const canonicalFusion = {
+      sourceIps: ["甲", "乙"],
+      establishedRules: ["旧公理"],
+      openQuestions: ["旧力量对标"],
+      hardLimits: ["旧版融合公理未记录明确限制"],
+      conflictRule: "以甲为准",
+    };
+
+    expect(PantheonWorldDeckSchema.safeParse({
+      ...completeDeck(),
+      fusionAxiom: canonicalFusion,
+    }).success).toBe(true);
+    expect(PantheonWorldDeckSchema.safeParse({
+      ...completeDeck(),
+      fusionAxiom: legacyFusion,
+    }).success).toBe(false);
+    expect(parsePersistedWorldDeck({
+      ...completeDeck(),
+      fusionAxiom: legacyFusion,
+    }).fusionAxiom).toEqual(canonicalFusion);
+
+    const legacyDeck = completeLegacyDeck();
+    legacyDeck.fusionAxiom = legacyFusion;
+    expect(parsePersistedWorldDeck(legacyDeck).fusionAxiom).toEqual(canonicalFusion);
+  });
+
+  it("按来源类型约束主神下限，同时保持无时间锚点旧卡组可读", () => {
+    const gods = completeDeck().majorGods;
+    const ipDeck = {
+      ...completeDeck(),
+      temporalAnchor: ipTemporalAnchorCard(),
+      majorGods: gods.slice(0, 1),
+    };
+    expect(PantheonWorldDeckSchema.safeParse(ipDeck).success).toBe(true);
+    expect(PantheonWorldDeckSchema.safeParse({ ...ipDeck, majorGods: [] }).success).toBe(false);
+
+    expect(PantheonWorldDeckSchema.safeParse({
+      ...completeDeck(),
+      temporalAnchor: originalTemporalAnchorCard(),
+      majorGods: gods.slice(0, 3),
+    }).success).toBe(false);
+    expect(PantheonWorldDeckSchema.safeParse({
+      ...completeDeck(),
+      majorGods: gods.slice(0, 1),
+    }).success).toBe(true);
   });
 });
 
