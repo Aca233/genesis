@@ -230,6 +230,32 @@ describe("enforceGenesisQuality", () => {
     });
   });
 
+  it("补丁值未通过完整校验时携精确错误在补丁步骤内重试", async () => {
+    const input = qualityInput();
+    const audit = vi.fn()
+      .mockResolvedValueOnce(errorReport)
+      .mockResolvedValueOnce(passReport);
+    const repair = vi.fn().mockResolvedValue({
+      operations: [{
+        path: "majorCharacters.0.situation",
+        action: "replace",
+        valueJson: JSON.stringify("仍在寻找旧王冠"),
+      }],
+    });
+    const validate = vi.fn()
+      .mockImplementationOnce(() => {
+        throw new Error("places.2.statusAtAnchor 必须是 accessible|hidden|sealed");
+      })
+      .mockImplementationOnce((deck) => deck);
+
+    const result = await enforceGenesisQuality(input, { audit, repair, validate });
+
+    expect(result.report.verdict).toBe("pass");
+    expect(repair).toHaveBeenCalledTimes(2);
+    expect(repair.mock.calls[1]![1].user).toContain("places.2.statusAtAnchor 必须是 accessible|hidden|sealed");
+    expect(validate).toHaveBeenCalledTimes(2);
+  });
+
   it("只应用初审列出的修复路径，丢弃完整文档重写造成的无关漂移", async () => {
     const original = completeCreatorDeck();
     original.worldName = "原始世界名";

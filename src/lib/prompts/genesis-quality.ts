@@ -12,6 +12,7 @@ export type SemanticRepairPromptInput = {
   lockedPaths?: string[];
   lorebookExcerpts?: string;
   materialConstraints?: string;
+  repairFeedback?: string;
 };
 
 export const GENESIS_SEMANTIC_REPAIR_SYSTEM = `You are a bounded semantic repair planner for a god-roleplay world generator.
@@ -33,6 +34,9 @@ export function semanticRepairPrompt(input: SemanticRepairPromptInput): string {
   }
   if (input.materialConstraints !== undefined && input.materialConstraints.trim().length > 0) {
     sections.push(`Material constraints (binding):\n${input.materialConstraints}`);
+  }
+  if (input.repairFeedback !== undefined && input.repairFeedback.trim().length > 0) {
+    sections.push(`Previous patch failed full deck validation. Correct the patch values without changing any unlisted path:\n${input.repairFeedback}`);
   }
 
   return sections.join("\n\n");

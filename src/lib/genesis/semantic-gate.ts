@@ -235,49 +235,61 @@ export async function enforceGenesisQuality(
 
   for (let round = 1; round <= 2; round += 1) {
     await input.onStage?.("semantic_repair");
-    const repairRequest = {
-      task: "genesis" as const,
-      userId: input.userId,
-      owner: input.owner,
-      system: GENESIS_SEMANTIC_REPAIR_SYSTEM,
-      user: semanticRepairPrompt({
-        mode: input.mode,
-        decree: input.decree,
-        intent: input.intent,
-        invalidDeck: currentDeck,
-        issues: currentReport.issues,
-        lockedPaths: input.lockedPaths,
-        lorebookExcerpts: input.lorebookExcerpts,
-        materialConstraints: input.materialConstraints,
-      }),
-      temperature: 0.1,
-      maxTokens: 8000,
-      maxAttempts: 2,
-      transportMaxAttempts: 1,
-      allowTransportFallback: false,
-      failOnTruncation: false,
-      cache: { namespace: `genesis-quality:v2:${input.mode}:round-${round}` },
-      maxInputBytes: GENESIS_MODEL_INPUT_MAX_BYTES,
-      maxOutputBytes: GENESIS_MODEL_OUTPUT_MAX_BYTES,
-    };
-    const repairedRaw = await deps.repair("narrative", {
-      ...repairRequest,
-      schema: GenesisSemanticRepairResultSchema,
-    });
-    const boundedRepair = applySemanticRepairs(
-      currentDeck,
-      GenesisSemanticRepairResultSchema.parse(repairedRaw),
-      currentReport.issues.map(({ path }) => path),
-    );
-    const restored = input.currentDeck === undefined
-      ? boundedRepair
-      : preserveLockedPaths(
-        boundedRepair,
-        input.currentDeck,
-        input.lockedPaths ?? [],
-        input.mode,
+    let repairedDeck: WorldDeck | null = null;
+    let repairFeedback: string | undefined;
+    for (let patchAttempt = 1; patchAttempt <= 2; patchAttempt += 1) {
+      const repairRequest = {
+        task: "genesis" as const,
+        userId: input.userId,
+        owner: input.owner,
+        system: GENESIS_SEMANTIC_REPAIR_SYSTEM,
+        user: semanticRepairPrompt({
+          mode: input.mode,
+          decree: input.decree,
+          intent: input.intent,
+          invalidDeck: currentDeck,
+          issues: currentReport.issues,
+          lockedPaths: input.lockedPaths,
+          lorebookExcerpts: input.lorebookExcerpts,
+          materialConstraints: input.materialConstraints,
+          repairFeedback,
+        }),
+        temperature: 0.1,
+        maxTokens: 8000,
+        maxAttempts: 2,
+        transportMaxAttempts: 1,
+        allowTransportFallback: false,
+        failOnTruncation: false,
+        cache: { namespace: `genesis-quality:v2:${input.mode}:round-${round}:patch-${patchAttempt}` },
+        maxInputBytes: GENESIS_MODEL_INPUT_MAX_BYTES,
+        maxOutputBytes: GENESIS_MODEL_OUTPUT_MAX_BYTES,
+      };
+      const repairedRaw = await deps.repair("narrative", {
+        ...repairRequest,
+        schema: GenesisSemanticRepairResultSchema,
+      });
+      const boundedRepair = applySemanticRepairs(
+        currentDeck,
+        GenesisSemanticRepairResultSchema.parse(repairedRaw),
+        currentReport.issues.map(({ path }) => path),
       );
-    const repairedDeck = deps.validate(restored, input.mode, input.materialSnapshot);
+      const restored = input.currentDeck === undefined
+        ? boundedRepair
+        : preserveLockedPaths(
+          boundedRepair,
+          input.currentDeck,
+          input.lockedPaths ?? [],
+          input.mode,
+        );
+      try {
+        repairedDeck = deps.validate(restored, input.mode, input.materialSnapshot);
+        break;
+      } catch (error) {
+        repairFeedback = error instanceof Error ? error.message : String(error);
+        if (patchAttempt === 2) throw error;
+      }
+    }
+    if (!repairedDeck) throw new Error("语义补丁未生成可校验世界");
     const nextAudit = await deps.audit(repairedDeck, auditOptions(input));
     finalReport = withMetrics(nextAudit, initialReport, true, (round + 1) as 2 | 3, startedAt);
 
