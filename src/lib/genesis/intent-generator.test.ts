@@ -62,6 +62,7 @@ describe("generateGenesisIntent", () => {
       maxAttempts: 1,
       transportMaxAttempts: 1,
       allowTransportFallback: false,
+      failOnTruncation: false,
     }));
     const request = complete.mock.calls[0]![1];
     expect(request.user).toContain("布耶纳村资料");
@@ -75,6 +76,7 @@ describe("generateGenesisIntent", () => {
     await expect(generateGenesisIntent(input, { complete })).resolves.toEqual(crossoverIntent);
     expect(complete).toHaveBeenCalledTimes(2);
     expect(complete.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(complete.mock.calls.every(([, options]) => options.failOnTruncation === false)).toBe(true);
   });
 
   it("模式不匹配的结果会占用一次尝试并重新提取", async () => {

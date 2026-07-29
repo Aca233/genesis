@@ -178,6 +178,53 @@ describe("semantic audit schemas and persisted compatibility", () => {
     expect(hasBlockingIssues(parsed!)).toBe(true);
   });
 
+  it("accepts unbounded TemporalAuditResult arrays and deterministically trims the new report", () => {
+    const evidenceRefs = Array.from({ length: 10 }, (_, index) => `ref-${index}`);
+    const issues = Array.from({ length: 17 }, (_, index) => ({
+      severity: "warning" as const,
+      path: `majorCharacters.${index}.background`,
+      type: "future_identity_leak" as const,
+      explanation: `旧报告问题 ${index}`,
+      evidenceRefs,
+    }));
+
+    const parsed = parseGenesisQualityReport({ verdict: "warnings", issues });
+
+    expect(parsed?.issues).toHaveLength(16);
+    expect(parsed?.issues[0]?.evidenceRefs).toEqual(evidenceRefs.slice(0, 8));
+    expect(parsed?.issues.every((item) => item.evidenceRefs.length <= 8)).toBe(true);
+    expect(parsed?.verdict).toBe("errors");
+  });
+
+  it("keeps an explicit legacy error inside the trimmed issue list", () => {
+    const warnings = Array.from({ length: 17 }, (_, index) => ({
+      severity: "warning" as const,
+      path: `places.${index}.brief`,
+      type: "continuity_mix" as const,
+      explanation: `低影响旧警告 ${index}`,
+      evidenceRefs: [],
+    }));
+    const blocking = {
+      severity: "error" as const,
+      path: "mainConflict",
+      type: "information_leak" as const,
+      explanation: "旧报告已明确标记为错误",
+      evidenceRefs: [],
+    };
+
+    const parsed = parseGenesisQualityReport({
+      verdict: "pass",
+      issues: [...warnings, blocking],
+    });
+
+    expect(parsed?.issues).toHaveLength(16);
+    expect(parsed?.issues).toContainEqual(expect.objectContaining({
+      severity: "error",
+      path: "mainConflict",
+    }));
+    expect(parsed?.verdict).toBe("errors");
+  });
+
   it("returns null for malformed historical JSON", () => {
     expect(parseGenesisQualityReport({ verdict: "warnings", issues: "broken" })).toBeNull();
     expect(parseGenesisQualityReport({
@@ -265,6 +312,7 @@ describe("auditGenesisSemantics", () => {
       maxAttempts: 1,
       transportMaxAttempts: 1,
       allowTransportFallback: false,
+      failOnTruncation: false,
     }));
     expect(complete.mock.calls[0]![1].user).toContain("鲁迪乌斯出生时仍是婴儿");
   });
@@ -278,6 +326,7 @@ describe("auditGenesisSemantics", () => {
     await expect(auditGenesisSemantics(badDeck, auditInput, { complete })).resolves.toEqual(report);
     expect(complete).toHaveBeenCalledTimes(2);
     expect(complete.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(complete.mock.calls.every(([, options]) => options.failOnTruncation === false)).toBe(true);
   });
 
   it("audits original worlds while excluding only canon-specific checks", async () => {

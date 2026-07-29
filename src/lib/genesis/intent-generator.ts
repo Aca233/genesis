@@ -32,6 +32,7 @@ export type IntentGeneratorDeps = {
       maxAttempts: number;
       transportMaxAttempts: number;
       allowTransportFallback: boolean;
+      failOnTruncation: boolean;
     },
   ) => Promise<unknown>;
 };
@@ -66,6 +67,7 @@ export async function generateGenesisIntent(
         maxAttempts: 1,
         transportMaxAttempts: 1,
         allowTransportFallback: false,
+        failOnTruncation: false,
       });
       const intent = GenesisIntentContractSchema.parse(result);
       assertGenesisIntentForMode(intent, input.mode);

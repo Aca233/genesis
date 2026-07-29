@@ -55,12 +55,12 @@ const LegacyGenesisSemanticIssueSchema = z.object({
   path: z.string().min(1),
   type: GenesisSemanticIssueTypeSchema,
   explanation: z.string().min(1),
-  evidenceRefs: z.array(z.string()).max(8),
+  evidenceRefs: z.array(z.string()),
 }).strict();
 
 const LegacyGenesisQualityReportSchema = z.object({
   verdict: z.enum(["pass", "warnings", "errors"]),
-  issues: z.array(LegacyGenesisSemanticIssueSchema).max(16),
+  issues: z.array(LegacyGenesisSemanticIssueSchema),
 }).strict();
 
 const ERROR_MINIMUM_TYPES = new Set<GenesisSemanticIssueType>([
@@ -98,6 +98,20 @@ function normalizeReport(report: GenesisQualityReport): GenesisQualityReport {
   };
 }
 
+function normalizeLegacyIssues(
+  issues: z.infer<typeof LegacyGenesisSemanticIssueSchema>[],
+): GenesisSemanticIssue[] {
+  const normalized = issues.map((item) => normalizeIssue({
+    ...item,
+    evidenceRefs: item.evidenceRefs.slice(0, 8),
+    repairInstruction: LEGACY_REPAIR_INSTRUCTION,
+  }));
+  return [
+    ...normalized.filter(({ severity }) => severity === "error"),
+    ...normalized.filter(({ severity }) => severity === "warning"),
+  ].slice(0, 16);
+}
+
 export function parseGenesisQualityReport(value: unknown): GenesisQualityReport | null {
   const current = GenesisQualityReportSchema.safeParse(value);
   if (current.success) return normalizeReport(current.data);
@@ -107,10 +121,7 @@ export function parseGenesisQualityReport(value: unknown): GenesisQualityReport 
 
   return normalizeReport({
     verdict: legacy.data.verdict,
-    issues: legacy.data.issues.map((item) => ({
-      ...item,
-      repairInstruction: LEGACY_REPAIR_INSTRUCTION,
-    })),
+    issues: normalizeLegacyIssues(legacy.data.issues),
   });
 }
 
@@ -186,6 +197,7 @@ export type SemanticAuditDeps = {
       maxAttempts: number;
       transportMaxAttempts: number;
       allowTransportFallback: boolean;
+      failOnTruncation: boolean;
     },
   ) => Promise<unknown>;
 };
@@ -228,6 +240,7 @@ export async function auditGenesisSemantics(
         maxAttempts: 1,
         transportMaxAttempts: 1,
         allowTransportFallback: false,
+        failOnTruncation: false,
       });
       const parsed = GenesisSemanticAuditResultSchema.parse(result);
       const issues = parsed.issues.map(normalizeIssue);

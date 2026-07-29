@@ -428,7 +428,7 @@ describe("输出上限续写接力", () => {
     expect(continuation.messages.at(-1).prefixStable).toBeUndefined();
   });
 
-  it("complete: 未要求完整输出时截断按原样返回,不追加请求", async () => {
+  it("complete: 显式禁用截断续写时只发起一次物理请求", async () => {
     mocks.stream.mockImplementationOnce(async function* () {
       yield { type: "text", text: "partial prose" };
       yield usageChunk(true);
@@ -438,6 +438,7 @@ describe("输出上限续写接力", () => {
     await expect(complete("narrative", {
       task: "narrative",
       userId: "test-user",
+      failOnTruncation: false,
       messages: [{ role: "user", content: "tell" }],
     }, { maxAttempts: 1, allowFallback: false })).resolves.toBe("partial prose");
     expect(mocks.stream).toHaveBeenCalledTimes(1);

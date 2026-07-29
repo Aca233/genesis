@@ -53,6 +53,8 @@ export async function completeStructured<T>(
     transportMaxAttempts?: number;
     /** Allow one non-streaming fallback request after streaming fails. */
     allowTransportFallback?: boolean;
+    /** Require gateway continuation for truncated output. Defaults to true. */
+    failOnTruncation?: boolean;
     /** Provider prompt-cache namespace for stable global/world messages. */
     cache?: { namespace: string };
     maxInputBytes?: number;
@@ -77,8 +79,7 @@ export async function completeStructured<T>(
       owner: opts.owner,
       temperature: opts.temperature,
       maxTokens: opts.maxTokens,
-      // 结构化输出必须完整:截断的 JSON 只会在校验层莫名失败
-      failOnTruncation: true,
+      failOnTruncation: opts.failOnTruncation ?? true,
       cache: opts.cache,
       messages: [
         { role: "system", content: opts.system, cacheScope: "global" },
