@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { completeCreatorDeck } from "@/lib/abilities/embark.test-fixtures";
+import { completeCreatorDeck, completeDeck } from "@/lib/abilities/embark.test-fixtures";
 import { isTransientLlmError } from "@/lib/llm/gateway";
 import type { GenesisMaterialSnapshot } from "@/lib/materials/types";
 import type { GenesisIntentContract } from "./intent";
@@ -255,6 +255,53 @@ describe("enforceGenesisQuality", () => {
     expect(repair).toHaveBeenCalledTimes(2);
     expect(repair.mock.calls[1]![1].user).toContain("places.2.statusAtAnchor 必须是 accessible|hidden|sealed");
     expect(validate).toHaveBeenCalledTimes(2);
+  });
+
+  it("整项无依据正史对象必须删除，不能用模型生成的不完整对象替换", async () => {
+    const original = completeDeck();
+    const unsupportedGodReport: GenesisSemanticAuditResult = {
+      verdict: "errors",
+      issues: [{
+        severity: "error",
+        path: "majorGods[0]",
+        type: "unsupported_canon_claim",
+        explanation: "该神明不存在于原作",
+        evidenceRefs: ["forbiddenExpansions"],
+        repairInstruction: "移除该虚构神明",
+      }],
+    };
+    const audit = vi.fn()
+      .mockResolvedValueOnce(unsupportedGodReport)
+      .mockResolvedValueOnce(passReport);
+    const repair = vi.fn().mockResolvedValue({
+      operations: [{
+        path: "majorGods[0]",
+        action: "replace",
+        valueJson: JSON.stringify({
+          name: "另一个虚构神明",
+          agenda: { stanceToPlayer: { level: "不明" } },
+          abilities: [],
+        }),
+      }],
+    });
+    const validate = vi.fn().mockImplementation((deck) => deck);
+
+    const result = await enforceGenesisQuality({
+      ...qualityInput(),
+      deck: original,
+      mode: "pantheon",
+    }, { audit, repair, validate });
+
+    expect(repair).toHaveBeenCalledTimes(1);
+    expect(repair.mock.calls[0]![1].user).toContain('Required remove paths (must use action="remove"):\n["majorGods[0]"]');
+    expect(validate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        majorGods: original.majorGods.slice(1),
+      }),
+      "pantheon",
+      null,
+    );
+    expect(result.deck.majorGods).toEqual(original.majorGods.slice(1));
   });
 
   it("两次补丁都无法通过完整校验时抛出可分类的补丁校验错误", async () => {
