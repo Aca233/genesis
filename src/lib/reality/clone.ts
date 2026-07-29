@@ -314,6 +314,7 @@ export async function cloneTimelineGraph(
         summary: chapter.summary,
         settleState: chapter.settleState,
         snapshot: remapRuntimeJson(chapter.snapshot, idMap, sourceIds, "章节快照"),
+        brief: remapRuntimeJson(chapter.brief, idMap, sourceIds, "章节约束"),
         createdAt: chapter.createdAt,
       },
     });

@@ -34,7 +34,21 @@ describe("genesis mode prompts", () => {
       const prompt = genesisSystem(mode);
       expect(prompt).toContain("CANON FUTURE EVENTS (将临之事)");
       expect(prompt).toContain("ordinal starting at 1, strictly increasing");
-      expect(prompt).toContain("epochConflict, canonEvents, style, theme");
+      expect(prompt).toContain("epochConflict, openingChapterBrief, canonEvents, style, theme");
+    }
+  });
+
+  it("两种模式都要求动态世界、因果压力、信息边界和首章桥接", () => {
+    for (const mode of ["pantheon", "creator"] as const) {
+      const prompt = genesisSystem(mode);
+      expect(prompt).toContain("LIVING WORLD CONTRACT");
+      expect(prompt).toContain("off-screen next move");
+      expect(prompt).toContain("objective, obstacle, trigger, and consequence");
+      expect(prompt).toContain("INFORMATION BOUNDARIES");
+      expect(prompt).toContain("openingChapterBrief");
+      expect(prompt).toContain("viewpointCharacterRef");
+      expect(prompt).toContain("advance exactly one small causal node");
+      expect(prompt).toContain("epochConflict, openingChapterBrief, canonEvents, style, theme");
     }
   });
 

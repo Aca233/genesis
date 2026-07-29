@@ -22,6 +22,7 @@ import {
   applyWorldActivityInTransaction,
   type WorldActivityApplyTx,
 } from "@/lib/world-activity/apply";
+import { lintNarrativeProse } from "@/lib/prose-lint";
 
 export type NarrationFinalizationTx = Omit<AbilityMutationTx, "message" | "ability">
   & WorldActivityApplyTx & {
@@ -286,6 +287,14 @@ export async function finalizeNarration(
     const followUp = settlement.required
       ? { kind: "settlement" as const, segmentId: input.chapterId }
       : { kind: "none" as const };
+    const proseLint = lintNarrativeProse(input.prose);
+    const privateMeta = {
+      ...effectiveMeta,
+      ...(proseLint.length ? { proseLint } : {}),
+      settlementRequired: settlement.required,
+      settlementReasons: settlement.reasons,
+      ...(input.requestMeta ? { generationRequest: input.requestMeta } : {}),
+    };
 
     const saved = await tx.message.create({
       data: {
@@ -296,12 +305,7 @@ export async function finalizeNarration(
         content: input.prose,
         scale: input.scale,
         variants: [{ content: input.prose, meta: effectiveMeta, chosen: true }] as Prisma.InputJsonValue,
-        meta: {
-          ...effectiveMeta,
-          settlementRequired: settlement.required,
-          settlementReasons: settlement.reasons,
-          ...(input.requestMeta ? { generationRequest: input.requestMeta } : {}),
-        } as unknown as Prisma.InputJsonValue,
+        meta: privateMeta as unknown as Prisma.InputJsonValue,
       },
     });
     checkCancelled();
@@ -326,11 +330,8 @@ export async function finalizeNarration(
       where: { id: saved.id },
       data: {
         meta: {
-          ...effectiveMeta,
+          ...privateMeta,
           activityApply,
-          settlementRequired: settlement.required,
-          settlementReasons: settlement.reasons,
-          ...(input.requestMeta ? { generationRequest: input.requestMeta } : {}),
         } as unknown as Prisma.InputJsonValue,
       },
     });

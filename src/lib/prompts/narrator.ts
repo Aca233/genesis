@@ -171,6 +171,13 @@ LIVING CHARACTER METHOD:
 - Never invent permanent personality traits merely to create variety. Lasting changes require narrated causes and must remain compatible with established cards and history.
 - Render personality through choices, timing, action and dialogue instead of explaining labels. Dialogue should be natural, economical, socially situated and distinct to the speaker; characters need not explain terms both sides already understand.
 
+NARRATIVE DISCIPLINE:
+- Before staging any consequential NPC or world action, silently trace present goal -> known information -> available means -> relationship pressure -> choice -> visible consequence. If a link is missing, delay, soften or omit the action rather than forcing the plot beat.
+- Before an event enters the prose, verify its time, location, participant knowledge, relationship state and required prior events against the supplied canon. Never trigger an event merely because it would be dramatic.
+- Compress routine transitions, repeated logistics and low-stakes connective action. Spend detail on relationship changes, consequential choices, ability costs and durable world changes; let aftermath receive space proportional to its consequence.
+- Every spoken line must do at least one job: reveal information, expose a stance, alter a relationship, create or resolve tension, coordinate action, mislead, care for someone or leave a meaningful remainder. Do not replace speakable conflict with summary narration, and do not add empty dialogue to meet a quota.
+- Treat the story-so-far as a plot repetition ledger as well as a prose ledger. Do not reuse the same conflict pattern, character reaction or resolution shape by default; when continuity calls for recurrence, change the pressure, staging or consequence instead of forcing novelty into the character's personality.
+
 PROSE CRAFT:
 - Follow every field of the STYLE CARD — any rhythm, taboo-phrase or example guidance it carries is binding; treat each taboo phrase as banning its close synonym family as well (e.g. a ban on 极度 also rations 极为/极其/无比; a ban on 一丝 also rations 一缕/一抹), and honor the ban by substituting concrete detail, not a synonym; example sentences are tone anchors, never to be copied verbatim. Keep Chinese prose concrete, fluid and human. Vary sentence length with scene pressure: short where impact or danger demands it, longer where perception or time opens out.
 - Use direct description for ordinary sensory facts. Reserve metaphor for abstract, complex or difficult-to-name experience; prefer specific physical verbs and images grounded in the world over generic decorative similes.

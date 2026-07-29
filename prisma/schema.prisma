@@ -190,6 +190,7 @@ model Chapter {
   index              Int
   title              String?
   summary            String? // 章末史官小结
+  brief              Json?   // 章节级目标、视角与信息控制合同
   settleState        String              @default("open") @map("settle_state") // open | settling:<step> | settled
   settleError        String?             @map("settle_error")
   settleRetryable    Boolean             @default(true) @map("settle_retryable")

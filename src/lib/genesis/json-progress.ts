@@ -13,6 +13,7 @@ export const GENESIS_TOP_LEVEL_KEYS = [
   "majorCharacters",
   "relationsAtAnchor",
   "epochConflict",
+  "openingChapterBrief",
   "canonEvents",
   "style",
   "theme",

@@ -101,6 +101,7 @@ const ChapterSchema = z
     summary: TextSchema.nullish(),
     settleState: ShortStringSchema.default("open"),
     snapshot: BoundedJsonSchema.optional(),
+    brief: BoundedJsonSchema.optional(),
     messages: z.array(MessageSchema).max(MAX_COLLECTION_ITEMS).default([]),
     createdAt: z.coerce.date().optional(),
   })
@@ -1214,6 +1215,7 @@ export const POST = withAuth(async (userId, request: Request) => {
           summary: ch.summary ?? null,
           settleState: ch.settleState,
           snapshot: remapArchivedJson(ch.snapshot, allIdMap),
+          brief: remapArchivedJson(ch.brief, allIdMap),
           createdAt: ch.createdAt,
         });
         for (const message of ch.messages) {

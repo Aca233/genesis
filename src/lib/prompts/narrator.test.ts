@@ -130,6 +130,19 @@ describe("narrator quality contract", () => {
     expect(prompt).toContain("Never invent permanent personality traits merely to create variety");
   });
 
+  it("checks causal action, scene emphasis, dialogue function, repetition and event prerequisites", () => {
+    for (const mode of ["pantheon", "creator"] as const) {
+      const prompt = narratorGlobalSystem(mode);
+      expect(prompt).toContain("NARRATIVE DISCIPLINE");
+      expect(prompt).toContain("present goal -> known information -> available means -> relationship pressure -> choice -> visible consequence");
+      expect(prompt).toContain("Compress routine transitions");
+      expect(prompt).toContain("relationship changes, consequential choices, ability costs and durable world changes");
+      expect(prompt).toContain("Every spoken line must do at least one job");
+      expect(prompt).toContain("conflict pattern, character reaction or resolution shape");
+      expect(prompt).toContain("time, location, participant knowledge, relationship state and required prior events");
+    }
+  });
+
   it("uses positive prose guidance and forbids visible planning", () => {
     const prompt = narratorGlobalSystem("pantheon");
     expect(prompt).toContain("PROSE CRAFT");
