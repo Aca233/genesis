@@ -51,6 +51,9 @@ describe("genesis mode prompts", () => {
     expect(system).toContain("hardLimits");
     expect(system).toContain("anchor-time asset test");
     expect(system).toContain("decree deletion test");
+    expect(system).toContain("If an IP has more than 5 qualifying true gods, the overflow becomes one-line minorGods");
+    expect(system).toContain("Original worlds target 4-9 major gods");
+    expect(system).toContain("If an original world has more than 9 qualifying true gods, the overflow becomes one-line minorGods");
   });
 
   it("creator 将玩家置于世界外并禁止 playerGod", () => {

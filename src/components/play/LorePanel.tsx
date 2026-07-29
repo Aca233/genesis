@@ -51,19 +51,35 @@ export function LorePanel({ world }: { world: WorldInfo }) {
       {/* 融合公理（仅多IP融合时有） */}
       {fusionAxiom && (
         <Section title="融合公理">
-          {(fusionAxiom.sourceIps?.length ?? 0) > 0 && (
+          {fusionAxiom.sourceIps.length > 0 && (
             <p className="text-xs text-ink-faint">
-              缝合诸界：{fusionAxiom.sourceIps!.join(" × ")}
+              缝合诸界：{fusionAxiom.sourceIps.join(" × ")}
             </p>
           )}
-          {(fusionAxiom.axioms?.length ?? 0) > 0 && (
-            <ol className="grid list-decimal gap-1 pl-5">
-              {fusionAxiom.axioms!.map((a, i) => (
-                <li key={i}>{a}</li>
+          <div>
+            <p className="text-xs text-ink-faint">已确立规则</p>
+            <ul className="grid list-disc gap-1 pl-5">
+              {fusionAxiom.establishedRules.map((rule, index) => (
+                <li key={index}>{rule}</li>
               ))}
-            </ol>
-          )}
-          <Item label="力量对标" text={fusionAxiom.powerMapping} />
+            </ul>
+          </div>
+          <div>
+            <p className="text-xs text-ink-faint">待验证问题</p>
+            <ul className="grid list-disc gap-1 pl-5">
+              {fusionAxiom.openQuestions.map((question, index) => (
+                <li key={index}>{question}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <p className="text-xs text-ink-faint">硬性限制</p>
+            <ul className="grid list-disc gap-1 pl-5">
+              {fusionAxiom.hardLimits.map((limit, index) => (
+                <li key={index}>{limit}</li>
+              ))}
+            </ul>
+          </div>
           <Item label="冲突裁决" text={fusionAxiom.conflictRule} />
         </Section>
       )}

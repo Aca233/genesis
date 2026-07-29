@@ -4,6 +4,7 @@ import { GenesisIntentContractSchema, type GenesisIntentContract } from "./inten
 import {
   GenesisIntentGenerationError,
   generateGenesisIntent,
+  type IntentGeneratorDeps,
 } from "./intent-generator";
 
 const crossoverIntent: GenesisIntentContract = {
@@ -44,7 +45,9 @@ const input = {
 
 describe("generateGenesisIntent", () => {
   it("通过 backstage/extract 生成并再次校验意图契约", async () => {
-    const complete = vi.fn(async () => crossoverIntent);
+    const complete = vi.fn<IntentGeneratorDeps["complete"]>(
+      async () => crossoverIntent,
+    );
 
     await expect(generateGenesisIntent(input, { complete })).resolves.toEqual(crossoverIntent);
 

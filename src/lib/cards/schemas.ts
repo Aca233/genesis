@@ -303,7 +303,7 @@ const LegacyFusionAxiomCardSchema = z.object({
   axioms: z.array(z.string()).min(1),
   powerMapping: z.string(),
   conflictRule: z.string(),
-});
+}).strict();
 
 export function normalizePersistedFusionAxiom(value: unknown): unknown {
   const current = FusionAxiomCardSchema.safeParse(value);
@@ -1045,7 +1045,7 @@ export function isLegacyWorldDeck(raw: unknown): boolean {
 function normalizePersistedPantheonDeck(raw: unknown): unknown {
   if (!isLooseRecord(raw)) return raw;
   const withMode = hasOwn(raw, "mode") ? raw : { mode: "pantheon", ...raw };
-  const withFusion = {
+  const withFusion: LooseRecord = {
     ...withMode,
     fusionAxiom: normalizePersistedFusionAxiom(withMode.fusionAxiom),
   };

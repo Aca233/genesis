@@ -214,10 +214,11 @@ export type Cosmology = {
 };
 
 export type FusionAxiom = {
-  sourceIps?: string[];
-  axioms?: string[];
-  powerMapping?: string;
-  conflictRule?: string;
+  sourceIps: string[];
+  establishedRules: string[];
+  openQuestions: string[];
+  hardLimits: string[];
+  conflictRule: string;
 };
 
 export type EpochConflict = {

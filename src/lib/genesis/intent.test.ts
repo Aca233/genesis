@@ -3,9 +3,10 @@ import {
   GenesisIntentContractSchema,
   assertGenesisIntentForMode,
   parseGenesisIntent,
+  type GenesisIntentContract,
 } from "./intent";
 
-const crossoverIntent = {
+const crossoverIntent: GenesisIntentContract = {
   sourceBasis: "multi_ip",
   sourceIps: ["无职转生", "钢铁侠"],
   explicitPremise: ["鲁迪乌斯由托尼·斯塔克转生"],
@@ -25,7 +26,7 @@ const crossoverIntent = {
   fusionBoundaries: ["工程知识只能提出假设，不能直接改写世界物理规律"],
   uncertaintyPolicy: "omit_or_generalize",
   corePressures: ["婴儿身体限制", "隐瞒成年意识"],
-} as const;
+};
 
 describe("GenesisIntentContractSchema", () => {
   it("接受经批准的多 IP 意图契约", () => {

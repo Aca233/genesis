@@ -288,6 +288,27 @@ describe("WorldDeck 模式判别联合", () => {
     expect(parsePersistedWorldDeck(legacyDeck).fusionAxiom).toEqual(canonicalFusion);
   });
 
+  it("拒绝混合 legacy 与 canonical 字段的融合公理", () => {
+    const mixedFusion = {
+      sourceIps: ["甲", "乙"],
+      axioms: ["旧公理"],
+      powerMapping: "旧力量对标",
+      establishedRules: ["新规则"],
+      openQuestions: ["新问题"],
+      hardLimits: ["新限制"],
+      conflictRule: "以甲为准",
+    };
+
+    expect(() => parsePersistedWorldDeck({
+      ...completeDeck(),
+      fusionAxiom: mixedFusion,
+    })).toThrow();
+
+    const legacyDeck = completeLegacyDeck();
+    legacyDeck.fusionAxiom = mixedFusion;
+    expect(() => parsePersistedWorldDeck(legacyDeck)).toThrow();
+  });
+
   it("按来源类型约束主神下限，同时保持无时间锚点旧卡组可读", () => {
     const gods = completeDeck().majorGods;
     const ipDeck = {

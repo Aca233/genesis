@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizePersistedAbility } from "@/lib/abilities/types";
 import {
+  FusionAxiomCardSchema,
+  normalizePersistedFusionAxiom,
+} from "@/lib/cards/schemas";
+import {
   projectAbilitiesForOmniscient,
   projectAbilitiesForOwner,
   projectAbilitiesForPlayer,
@@ -135,6 +139,11 @@ async function loadWorldState(userId: string, id: string) {
   }
 
   const mode = WorldModeSchema.parse(world.mode);
+  const fusionAxiom = world.fusionAxiom === null
+    ? null
+    : FusionAxiomCardSchema.parse(
+        normalizePersistedFusionAxiom(world.fusionAxiom),
+      );
   const observerState = observerStateFromPersistence(timeline.observerState);
   const viewer = realityViewer(mode, observerState);
 
@@ -325,7 +334,7 @@ async function loadWorldState(userId: string, id: string) {
       themeCard: world.themeCard,
       styleCard: world.styleCard,
       cosmology: world.cosmology,
-      fusionAxiom: world.fusionAxiom,
+      fusionAxiom,
       iconTheme: {
         version: navigation.theme.version,
         catalogVersion: navigation.theme.catalogVersion,
