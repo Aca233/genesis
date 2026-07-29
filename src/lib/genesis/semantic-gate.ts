@@ -56,7 +56,7 @@ type SemanticRepairRequest = {
   maxOutputBytes: number;
 };
 
-const MAX_SEMANTIC_REPAIR_ROUNDS = 4;
+const MAX_SEMANTIC_REPAIR_ROUNDS = 5;
 
 const JsonTextSchema = z.string().refine((value) => {
   try {
@@ -148,7 +148,7 @@ function withMetrics(
   report: GenesisSemanticAuditResult,
   initialReport: GenesisSemanticAuditResult,
   repaired: boolean,
-  auditPasses: 1 | 2 | 3 | 4 | 5,
+  auditPasses: 1 | 2 | 3 | 4 | 5 | 6,
   startedAt: number,
 ): GenesisQualityReport {
   return {
@@ -502,7 +502,7 @@ export async function enforceGenesisQuality(
     }
     if (!repairedDeck) throw new Error("语义补丁未生成可校验世界");
     const nextAudit = await deps.audit(repairedDeck, auditOptions(input));
-    finalReport = withMetrics(nextAudit, initialReport, true, (round + 1) as 2 | 3 | 4 | 5, startedAt);
+    finalReport = withMetrics(nextAudit, initialReport, true, (round + 1) as 2 | 3 | 4 | 5 | 6, startedAt);
 
     if (!hasBlockingIssues(nextAudit)) {
       return { deck: repairedDeck, report: finalReport };
