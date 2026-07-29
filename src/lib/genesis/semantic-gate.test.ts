@@ -11,6 +11,7 @@ import {
   enforceGenesisQuality,
   GenesisSemanticGateError,
   GenesisSemanticRepairResultSchema,
+  GenesisSemanticRepairValidationError,
 } from "./semantic-gate";
 
 const intent: GenesisIntentContract = {
@@ -254,6 +255,19 @@ describe("enforceGenesisQuality", () => {
     expect(repair).toHaveBeenCalledTimes(2);
     expect(repair.mock.calls[1]![1].user).toContain("places.2.statusAtAnchor 必须是 accessible|hidden|sealed");
     expect(validate).toHaveBeenCalledTimes(2);
+  });
+
+  it("两次补丁都无法通过完整校验时抛出可分类的补丁校验错误", async () => {
+    const input = qualityInput();
+    const audit = vi.fn().mockResolvedValue(errorReport);
+    const repair = vi.fn().mockResolvedValue({ operations: [] });
+    const validate = vi.fn().mockImplementation(() => {
+      throw new Error("势力引用 gv2:pantheon:faction:04 不存在");
+    });
+
+    await expect(enforceGenesisQuality(input, { audit, repair, validate }))
+      .rejects.toBeInstanceOf(GenesisSemanticRepairValidationError);
+    expect(repair).toHaveBeenCalledTimes(2);
   });
 
   it("只应用初审列出的修复路径，丢弃完整文档重写造成的无关漂移", async () => {

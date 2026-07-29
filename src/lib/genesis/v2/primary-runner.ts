@@ -17,7 +17,11 @@ import { validateGenesisDeck } from "../generate";
 import { generateGenesisIntent, GenesisIntentGenerationError } from "../intent-generator";
 import { parseGenesisIntent, type GenesisIntentContract } from "../intent";
 import { countGenesisSemanticIssues, recordGenesisQualityEvent } from "../quality-observability";
-import { enforceGenesisQuality, GenesisSemanticGateError } from "../semantic-gate";
+import {
+  enforceGenesisQuality,
+  GenesisSemanticGateError,
+  GenesisSemanticRepairValidationError,
+} from "../semantic-gate";
 import { resolveLorebookExcerpts, safeError } from "../task-runner";
 import {
   buildGenesisV2ReuseKey,
@@ -523,6 +527,7 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
     const retry = !terminalQualityFailure
       && !waitingForProvider
       && (error instanceof GenesisV2RecoverableStageError
+        || error instanceof GenesisSemanticRepairValidationError
         || error instanceof StructuredOutputValidationError
         || isTransientLlmError(error)
         || isRetryablePersistenceError(error))

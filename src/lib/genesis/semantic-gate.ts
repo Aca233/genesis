@@ -133,6 +133,14 @@ export class GenesisSemanticGateError extends Error {
   }
 }
 
+export class GenesisSemanticRepairValidationError extends Error {
+  override name = "GenesisSemanticRepairValidationError";
+
+  constructor(validationError: string) {
+    super(`语义补丁未通过完整世界校验：${validationError.slice(0, 1_000)}`);
+  }
+}
+
 function withMetrics(
   report: GenesisSemanticAuditResult,
   initialReport: GenesisSemanticAuditResult,
@@ -286,7 +294,7 @@ export async function enforceGenesisQuality(
         break;
       } catch (error) {
         repairFeedback = error instanceof Error ? error.message : String(error);
-        if (patchAttempt === 2) throw error;
+        if (patchAttempt === 2) throw new GenesisSemanticRepairValidationError(repairFeedback);
       }
     }
     if (!repairedDeck) throw new Error("语义补丁未生成可校验世界");
