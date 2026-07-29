@@ -350,6 +350,47 @@ describe("enforceGenesisQuality", () => {
     });
   });
 
+  it("势力成员关系补丁丢弃不存在的势力引用", async () => {
+    const original = completeDeck();
+    const membershipReport: GenesisSemanticAuditResult = {
+      verdict: "errors",
+      issues: [{
+        severity: "error",
+        path: "majorCharacters[3].factionMemberships",
+        type: "causal_disconnect",
+        explanation: "该人物不应提前加入未来势力",
+        evidenceRefs: ["futureOnly"],
+        repairInstruction: "移除不存在或尚未加入的势力成员关系",
+      }],
+    };
+    const audit = vi.fn()
+      .mockResolvedValueOnce(membershipReport)
+      .mockResolvedValueOnce(passReport);
+    const repair = vi.fn().mockResolvedValue({
+      operations: [{
+        path: "majorCharacters[3].factionMemberships",
+        action: "replace",
+        valueJson: JSON.stringify([{
+          factionRef: "gv2:pantheon:faction:04",
+          role: "未来成员",
+          isPrimary: true,
+        }]),
+      }],
+    });
+
+    const result = await enforceGenesisQuality({
+      ...qualityInput(),
+      deck: original,
+      mode: "pantheon",
+    }, {
+      audit,
+      repair,
+      validate: vi.fn().mockImplementation((deck) => deck),
+    });
+
+    expect(result.deck.majorCharacters[3]!.factionMemberships).toEqual([]);
+  });
+
   it("两次补丁都无法通过完整校验时抛出可分类的补丁校验错误", async () => {
     const input = qualityInput();
     const audit = vi.fn().mockResolvedValue(errorReport);

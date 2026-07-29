@@ -323,6 +323,32 @@ function hardenDirectArrayEntityReplacement(
   return mergeEntitySemanticFields(original, replacement);
 }
 
+function sanitizeReferenceCollectionReplacement(
+  target: unknown,
+  path: string,
+  replacement: unknown,
+): unknown {
+  if (!path.endsWith(".factionMemberships") || !Array.isArray(replacement)) {
+    return replacement;
+  }
+  if (target === null || typeof target !== "object") return replacement;
+  const factions = (target as Record<string, unknown>).factions;
+  if (!Array.isArray(factions)) return replacement;
+  const validFactionRefs = new Set(factions.flatMap((faction) => {
+    if (faction === null || typeof faction !== "object") return [];
+    const ref = (faction as Record<string, unknown>).ref;
+    return typeof ref === "string" ? [ref] : [];
+  }));
+  return replacement.filter((membership) => {
+    if (membership === null || typeof membership !== "object") return false;
+    const record = membership as Record<string, unknown>;
+    return typeof record.factionRef === "string"
+      && validFactionRefs.has(record.factionRef)
+      && typeof record.role === "string"
+      && typeof record.isPrimary === "boolean";
+  });
+}
+
 function writePath(target: unknown, segments: string[], replacement: unknown | typeof MISSING_PATH): void {
   const key = segments.at(-1);
   if (key === undefined) return;
@@ -368,7 +394,11 @@ function applySemanticRepairs(
       : hardenDirectArrayEntityReplacement(
         bounded,
         segments,
-        JSON.parse(operation.valueJson),
+        sanitizeReferenceCollectionReplacement(
+          bounded,
+          operation.path,
+          JSON.parse(operation.valueJson),
+        ),
       );
     writePath(bounded, segments, replacement);
   }
