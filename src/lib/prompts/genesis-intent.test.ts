@@ -16,7 +16,16 @@ describe("genesis intent prompts", () => {
 
     expect(prompt).toContain("exactly one narrative center");
     expect(prompt).toContain("external creator");
+    expect(prompt).toContain("narrativeFunction to external_author");
     expect(prompt).toContain("omit_or_generalize");
+  });
+
+  it("明示 sourceBasis 与 sourceIps 的基数映射", () => {
+    const prompt = genesisIntentSystem("pantheon");
+
+    expect(prompt).toContain("original requires exactly 0 sourceIps");
+    expect(prompt).toContain("single_ip requires exactly 1 sourceIps");
+    expect(prompt).toContain("multi_ip requires 2 to 6 sourceIps");
   });
 
   it("用户提示词包含模式、神谕与可选资料摘录", () => {

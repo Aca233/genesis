@@ -22,6 +22,20 @@ export const GenesisIntentContractSchema = z.object({
   uncertaintyPolicy: z.literal("omit_or_generalize"),
   corePressures: z.array(z.string().min(1)).min(1).max(8),
 }).strict().superRefine((intent, ctx) => {
+  const sourceCount = intent.sourceIps.length;
+  const sourceCountMatches = intent.sourceBasis === "original"
+    ? sourceCount === 0
+    : intent.sourceBasis === "single_ip"
+      ? sourceCount === 1
+      : sourceCount >= 2;
+  if (!sourceCountMatches) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["sourceIps"],
+      message: "sourceBasis 与 sourceIps 基数不一致",
+    });
+  }
+
   const future = new Set(intent.futureOnly.map((item) => item.trim()));
   intent.factsAtAnchor.forEach((item, index) => {
     if (future.has(item.trim())) {
@@ -57,5 +71,8 @@ export function assertGenesisIntentForMode(
 
   if (intent.playerRole.type !== "external_creator") {
     throw new Error("creator 模式要求 playerRole.type 为 external_creator");
+  }
+  if (intent.playerRole.narrativeFunction !== "external_author") {
+    throw new Error("creator 模式要求 playerRole.narrativeFunction 为 external_author");
   }
 }

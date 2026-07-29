@@ -34,6 +34,32 @@ describe("GenesisIntentContractSchema", () => {
     expect(parseGenesisIntent({ ...crossoverIntent, extra: true })).toBeNull();
   });
 
+  it.each([
+    ["original", []],
+    ["single_ip", ["无职转生"]],
+    ["multi_ip", ["无职转生", "钢铁侠"]],
+  ] as const)("接受 sourceBasis=%s 对应的 sourceIps 基数", (sourceBasis, sourceIps) => {
+    expect(GenesisIntentContractSchema.safeParse({
+      ...crossoverIntent,
+      sourceBasis,
+      sourceIps,
+    }).success).toBe(true);
+  });
+
+  it.each([
+    ["original", ["无职转生"]],
+    ["single_ip", []],
+    ["single_ip", ["无职转生", "钢铁侠"]],
+    ["multi_ip", []],
+    ["multi_ip", ["无职转生"]],
+  ] as const)("拒绝 sourceBasis=%s 与 sourceIps 基数不一致", (sourceBasis, sourceIps) => {
+    expect(GenesisIntentContractSchema.safeParse({
+      ...crossoverIntent,
+      sourceBasis,
+      sourceIps,
+    }).success).toBe(false);
+  });
+
   it("拒绝把 futureOnly 内容写成锚点事实", () => {
     expect(() => GenesisIntentContractSchema.parse({
       ...crossoverIntent,
@@ -65,4 +91,18 @@ describe("assertGenesisIntentForMode", () => {
       },
     }, "creator")).not.toThrow();
   });
+
+  it.each(["observer_patron", "limited_intervener"] as const)(
+    "creator 拒绝 narrativeFunction=%s",
+    (narrativeFunction) => {
+      expect(() => assertGenesisIntentForMode({
+        ...crossoverIntent,
+        playerRole: {
+          type: "external_creator",
+          narrativeFunction,
+          mustNotReplaceProtagonist: true,
+        },
+      }, "creator")).toThrow(/external_author/);
+    },
+  );
 });

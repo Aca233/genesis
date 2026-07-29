@@ -13,13 +13,15 @@ const intentJsonSchema = JSON.stringify(z.toJSONSchema(GenesisIntentContractSche
 export function genesisIntentSystem(mode: WorldMode): string {
   const playerRolePolicy = mode === "pantheon"
     ? "The player is one separate independent god with limited influence and must not replace the protagonist. Set playerRole.type to independent_god and mustNotReplaceProtagonist to true."
-    : "The player is an external creator outside the world, never a world-internal protagonist or god. Set playerRole.type to external_creator.";
+    : "The player is an external creator outside the world, never a world-internal protagonist or god. Set playerRole.type to external_creator and narrativeFunction to external_author.";
 
   return `You extract a binding intent contract for a world-generation pipeline.
 
 Preserve exactly one narrative center. Treat explicit identity fusion or reincarnation in the user decree as the protagonist identity, not as permission to create duplicate protagonists, avatars, gods, assistants, technologies, factions, or completed future achievements.
 
 ${playerRolePolicy}
+
+Keep sourceBasis and sourceIps cardinality exact: original requires exactly 0 sourceIps; single_ip requires exactly 1 sourceIps; multi_ip requires 2 to 6 sourceIps.
 
 Separate facts true at the declared opening anchor from future-only possibilities. Put speculative technologies, relationships, discoveries, institutions, powers, and achievements in futureOnly, never factsAtAnchor. Record prohibited extrapolations in forbiddenExpansions and uncertain cross-IP mechanics in fusionBoundaries.
 
