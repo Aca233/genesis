@@ -324,7 +324,7 @@ describe("auditGenesisSemantics", () => {
       temperature: 0.1,
       maxTokens: 8000,
       maxAttempts: 1,
-      transportMaxAttempts: 1,
+      transportMaxAttempts: 2,
       allowTransportFallback: false,
       failOnTruncation: false,
     }));
