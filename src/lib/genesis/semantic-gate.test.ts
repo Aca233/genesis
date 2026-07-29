@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { completeCreatorDeck } from "@/lib/abilities/embark.test-fixtures";
-import { CreatorWorldDeckSchema } from "@/lib/cards/schemas";
 import { isTransientLlmError } from "@/lib/llm/gateway";
 import type { GenesisMaterialSnapshot } from "@/lib/materials/types";
 import type { GenesisIntentContract } from "./intent";
@@ -11,6 +10,7 @@ import type {
 import {
   enforceGenesisQuality,
   GenesisSemanticGateError,
+  GenesisSemanticRepairResultSchema,
 } from "./semantic-gate";
 
 const intent: GenesisIntentContract = {
@@ -111,13 +111,25 @@ describe("enforceGenesisQuality", () => {
     const input = qualityInput();
     const currentDeck = completeCreatorDeck();
     currentDeck.worldName = "玩家锁定世界名";
-    const repairOutput = completeCreatorDeck();
-    repairOutput.worldName = "模型改写世界名";
+    const repairOutput = {
+      operations: [{
+        path: "worldName",
+        action: "replace" as const,
+        valueJson: JSON.stringify("模型改写世界名"),
+      }],
+    };
+    const lockedPathReport: GenesisSemanticAuditResult = {
+      verdict: "errors",
+      issues: [{
+        ...errorReport.issues[0]!,
+        path: "worldName",
+      }],
+    };
     const materialSnapshot = { selections: [], resolved: [] } as unknown as GenesisMaterialSnapshot;
     const audit = vi.fn()
       .mockImplementationOnce(async () => {
         events.push("audit:initial");
-        return errorReport;
+        return lockedPathReport;
       })
       .mockImplementationOnce(async (deck) => {
         events.push("audit:final");
@@ -131,7 +143,7 @@ describe("enforceGenesisQuality", () => {
         task: "genesis",
         userId: input.userId,
         owner,
-        schema: CreatorWorldDeckSchema,
+        schema: GenesisSemanticRepairResultSchema,
         maxAttempts: 1,
         transportMaxAttempts: 1,
         allowTransportFallback: false,
@@ -182,6 +194,120 @@ describe("enforceGenesisQuality", () => {
     });
   });
 
+  it("只应用初审列出的修复路径，丢弃完整文档重写造成的无关漂移", async () => {
+    const original = completeCreatorDeck();
+    original.worldName = "原始世界名";
+    original.cosmology.powerSystem = "原始且受支持的力量体系";
+    original.majorCharacters[0]!.situation = "旧王冠已经归还";
+
+    const bracketPathReport: GenesisSemanticAuditResult = {
+      verdict: "errors",
+      issues: [{
+        ...errorReport.issues[0]!,
+        path: "majorCharacters[0].situation",
+      }],
+    };
+    const audit = vi.fn()
+      .mockResolvedValueOnce(bracketPathReport)
+      .mockImplementationOnce(async (deck) => {
+        expect(deck.majorCharacters[0]!.situation).toBe("旧王冠仍处于失落状态");
+        expect(deck.worldName).toBe("原始世界名");
+        expect(deck.cosmology.powerSystem).toBe("原始且受支持的力量体系");
+        return passReport;
+      });
+    const validate = vi.fn().mockImplementation((deck) => deck);
+    const repair = vi.fn().mockImplementation(async (_slot, opts) => {
+      const patch = {
+        operations: [{
+          path: "majorCharacters[0].situation",
+          action: "replace",
+          valueJson: JSON.stringify("旧王冠仍处于失落状态"),
+        }],
+      };
+      expect(opts.schema.safeParse(patch).success).toBe(true);
+      return patch;
+    });
+
+    const result = await enforceGenesisQuality({
+      ...qualityInput(),
+      deck: original,
+    }, {
+      audit,
+      repair,
+      validate,
+    });
+
+    expect(validate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worldName: "原始世界名",
+        cosmology: expect.objectContaining({
+          powerSystem: "原始且受支持的力量体系",
+        }),
+        majorCharacters: expect.arrayContaining([
+          expect.objectContaining({ situation: "旧王冠仍处于失落状态" }),
+        ]),
+      }),
+      "creator",
+      null,
+    );
+    expect(result.deck.worldName).toBe("原始世界名");
+  });
+
+  it("首轮修复仍有阻断问题时继续第二轮有界修复", async () => {
+    const original = completeCreatorDeck();
+    original.majorCharacters[0]!.situation = "旧王冠已经归还";
+    original.cosmology.powerSystem = "错误力量体系";
+
+    const firstRepair = {
+      operations: [{
+        path: "majorCharacters.0.situation",
+        action: "replace" as const,
+        valueJson: JSON.stringify("旧王冠仍处于失落状态"),
+      }],
+    };
+    const residualReport: GenesisSemanticAuditResult = {
+      verdict: "errors",
+      issues: [{
+        severity: "error",
+        path: "cosmology.powerSystem",
+        type: "unsupported_canon_claim",
+        explanation: "力量体系仍含错误设定",
+        evidenceRefs: ["cosmology.powerSystem"],
+        repairInstruction: "恢复受支持的力量体系",
+      }],
+    };
+    const secondRepair = {
+      operations: [{
+        path: "cosmology.powerSystem",
+        action: "replace" as const,
+        valueJson: JSON.stringify("受支持的力量体系"),
+      }],
+    };
+
+    const audit = vi.fn()
+      .mockResolvedValueOnce(errorReport)
+      .mockResolvedValueOnce(residualReport)
+      .mockResolvedValueOnce(passReport);
+    const repair = vi.fn()
+      .mockResolvedValueOnce(firstRepair)
+      .mockResolvedValueOnce(secondRepair);
+
+    const result = await enforceGenesisQuality({
+      ...qualityInput(),
+      deck: original,
+    }, {
+      audit,
+      repair,
+      validate: vi.fn().mockImplementation((deck) => deck),
+    });
+
+    expect(repair).toHaveBeenCalledTimes(2);
+    expect(audit).toHaveBeenCalledTimes(3);
+    expect(result.deck.majorCharacters[0]!.situation).toBe("旧王冠仍处于失落状态");
+    expect(result.deck.cosmology.powerSystem).toBe("受支持的力量体系");
+    expect(result.report.meta).toMatchObject({ repaired: true, auditPasses: 3 });
+  });
+
   it("audit 调用失败时原样向上传播且不 repair", async () => {
     const auditFailure = new Error("audit transport failed");
     const repair = vi.fn();
@@ -194,16 +320,24 @@ describe("enforceGenesisQuality", () => {
     expect(repair).not.toHaveBeenCalled();
   });
 
-  it("复审仍有 error 时抛携带最终 report 的安全 terminal error", async () => {
+  it("两轮修复后的复审仍有 error 时抛携带最终 report 的安全 terminal error", async () => {
     const audit = vi.fn()
       .mockResolvedValueOnce(errorReport)
+      .mockResolvedValueOnce(errorReport)
       .mockResolvedValueOnce(errorReport);
+    const repair = vi.fn().mockResolvedValue({
+      operations: [{
+        path: "majorCharacters.0.situation",
+        action: "replace",
+        valueJson: JSON.stringify("旧王冠仍处于失落状态"),
+      }],
+    });
     let caught: unknown;
 
     try {
       await enforceGenesisQuality(qualityInput(), {
         audit,
-        repair: vi.fn().mockResolvedValue(completeCreatorDeck()),
+        repair,
         validate: vi.fn().mockImplementation((deck) => deck),
       });
     } catch (error) {
@@ -218,13 +352,14 @@ describe("enforceGenesisQuality", () => {
         initialErrorCount: 1,
         initialWarningCount: 0,
         repaired: true,
-        auditPasses: 2,
+        auditPasses: 3,
         durationMs: expect.any(Number),
       },
     });
     expect((caught as Error).message).toBe("创世语义修复后仍有阻断问题，已安全终止生成");
     expect((caught as Error).message).not.toContain("旧王冠已经归还");
     expect(isTransientLlmError(caught)).toBe(false);
-    expect(audit).toHaveBeenCalledTimes(2);
+    expect(repair).toHaveBeenCalledTimes(2);
+    expect(audit).toHaveBeenCalledTimes(3);
   });
 });

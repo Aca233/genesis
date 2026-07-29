@@ -152,6 +152,20 @@ describe("semantic audit schemas and persisted compatibility", () => {
     }).success).toBe(true);
   });
 
+  it("accepts the third audit pass produced by two bounded repair rounds", () => {
+    expect(GenesisQualityReportSchema.safeParse({
+      verdict: "pass",
+      issues: [],
+      meta: {
+        initialErrorCount: 2,
+        initialWarningCount: 0,
+        repaired: true,
+        auditPasses: 3,
+        durationMs: 3,
+      },
+    }).success).toBe(true);
+  });
+
   it("upgrades legacy warnings with repair instructions and normalized blocking severity", () => {
     const parsed = parseGenesisQualityReport({
       verdict: "warnings",

@@ -11,6 +11,7 @@ import {
 } from "./semantic-audit";
 import {
   enforceGenesisQuality,
+  GenesisSemanticRepairResultSchema,
   type GenesisQualityGateDeps,
 } from "./semantic-gate";
 
@@ -288,8 +289,32 @@ const rawInitialAudit: GenesisSemanticAuditResult = {
   ],
 };
 
+const residualPaths = [
+  "majorGods",
+  "minorGods",
+  "factions",
+  "majorCharacters",
+  "relationsAtAnchor",
+  "places",
+  "epochConflict",
+  "openingChapterBrief",
+  "fusionAxiom",
+] as const;
+
+const rawResidualAudit: GenesisSemanticAuditResult = {
+  verdict: "warnings",
+  issues: residualPaths.map((path) => ({
+    severity: "warning" as const,
+    path,
+    type: "premise_drift" as const,
+    explanation: `${path} 仍保留与冻结前提冲突的关联内容`,
+    evidenceRefs: [path],
+    repairInstruction: `仅修复 ${path} 中残留的锚点偏移`,
+  })),
+};
+
 describe("Tony-as-Rudeus semantic quality regression", () => {
-  it("repairs the exact malformed crossover deck once and deterministically validates the approved outcome", async () => {
+  it("repairs the exact malformed crossover deck across two bounded rounds", async () => {
     const badDeck = malformedDeck();
     const repairOutput = repairedDeck();
     expect(PantheonWorldDeckSchema.safeParse(badDeck).success).toBe(true);
@@ -297,6 +322,7 @@ describe("Tony-as-Rudeus semantic quality regression", () => {
 
     const complete = vi.fn<SemanticAuditDeps["complete"]>()
       .mockResolvedValueOnce(rawInitialAudit)
+      .mockResolvedValueOnce(rawResidualAudit)
       .mockResolvedValueOnce({ verdict: "pass", issues: [] });
     let auditPass = 0;
     let normalizedInitialAudit: GenesisSemanticAuditResult | undefined;
@@ -306,11 +332,29 @@ describe("Tony-as-Rudeus semantic quality regression", () => {
       if (auditPass === 1) normalizedInitialAudit = report;
       return report;
     });
+    let repairPass = 0;
     const repair = vi.fn<GenesisQualityGateDeps["repair"]>(async (slot, request) => {
       expect(slot).toBe("narrative");
-      expect(request.schema).toBe(PantheonWorldDeckSchema);
-      for (const type of issueTypes) expect(request.user).toContain(type);
-      return repairOutput;
+      expect(request.schema).toBe(GenesisSemanticRepairResultSchema);
+      const issues = repairPass === 0 ? rawInitialAudit.issues : rawResidualAudit.issues;
+      if (repairPass === 0) {
+        for (const type of issueTypes) expect(request.user).toContain(type);
+      }
+      repairPass += 1;
+      return {
+        operations: issues.map((issue) => {
+          const segments = issue.path.match(/[^.[\]]+/g) ?? [];
+          const value = segments.reduce<unknown>(
+            (current, segment) => current && typeof current === "object"
+              ? (current as Record<string, unknown>)[segment]
+              : undefined,
+            repairOutput,
+          );
+          return value === undefined
+            ? { path: issue.path, action: "remove" as const, valueJson: null }
+            : { path: issue.path, action: "replace" as const, valueJson: JSON.stringify(value) };
+        }),
+      };
     });
     const validate = vi.fn<GenesisQualityGateDeps["validate"]>((rawDeck, mode, snapshot) => {
       expect(rawDeck).toMatchObject({ worldName: badDeck.worldName });
@@ -335,13 +379,13 @@ describe("Tony-as-Rudeus semantic quality regression", () => {
       expect(issue.severity).toBe(issue.type === "causal_disconnect" ? "warning" : "error");
     }
 
-    expect(audit).toHaveBeenCalledTimes(2);
+    expect(audit).toHaveBeenCalledTimes(3);
     expect(audit.mock.calls[0]?.[0]).toEqual(badDeck);
-    expect(audit.mock.calls[1]?.[0]).toEqual(result.deck);
-    expect(complete).toHaveBeenCalledTimes(2);
-    expect(repair).toHaveBeenCalledTimes(1);
-    expect(validate).toHaveBeenCalledTimes(1);
-    expect(validate).toHaveBeenCalledWith(
+    expect(audit.mock.calls[2]?.[0]).toEqual(result.deck);
+    expect(complete).toHaveBeenCalledTimes(3);
+    expect(repair).toHaveBeenCalledTimes(2);
+    expect(validate).toHaveBeenCalledTimes(2);
+    expect(validate).toHaveBeenLastCalledWith(
       expect.objectContaining({ worldName: badDeck.worldName }),
       "pantheon",
       null,
@@ -353,7 +397,7 @@ describe("Tony-as-Rudeus semantic quality regression", () => {
         initialErrorCount: 6,
         initialWarningCount: 1,
         repaired: true,
-        auditPasses: 2,
+        auditPasses: 3,
       },
     });
     if (result.deck.mode !== "pantheon") {

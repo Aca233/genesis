@@ -41,7 +41,7 @@ const GenesisQualityMetaSchema = z.object({
   initialErrorCount: z.number().int().min(0),
   initialWarningCount: z.number().int().min(0),
   repaired: z.boolean(),
-  auditPasses: z.number().int().min(1).max(2),
+  auditPasses: z.number().int().min(1).max(3),
   durationMs: z.number().int().min(0),
 }).strict();
 

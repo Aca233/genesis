@@ -61,7 +61,7 @@ describe("semanticRepairPrompt", () => {
     expect(prompt).toContain("晨钟议会名称与摘要必须保持");
   });
 
-  it("要求只改问题路径和必要引用、保留稳定 ref 与锁定路径并返回完整卡组", () => {
+  it("要求只返回精确问题路径的局部操作而不重写完整卡组", () => {
     const prompt = semanticRepairPrompt({
       mode: "creator",
       decree: "从零开始",
@@ -71,11 +71,12 @@ describe("semanticRepairPrompt", () => {
       lockedPaths: ["worldName"],
     });
 
-    expect(prompt).toContain("only the listed issue paths and strictly necessary references");
+    expect(prompt).toContain("Each path must exactly match one listed issue path");
     const normalized = prompt.toLowerCase();
+    expect(normalized).toContain("return path-level operations only");
     expect(normalized).toContain("preserve all stable refs");
     expect(normalized).toContain("preserve every locked path");
     expect(normalized).toContain("remove or generalize unsupported details instead of inventing replacements");
-    expect(normalized).toContain("complete corrected world deck");
+    expect(normalized).toContain("never return the complete world deck");
   });
 });

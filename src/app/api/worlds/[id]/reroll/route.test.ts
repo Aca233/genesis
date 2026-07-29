@@ -338,14 +338,19 @@ describe("POST /api/worlds/[id]/reroll", () => {
     currentDeck.cosmology.origin = "玩家锁定的起源";
     const generated = structuredClone(currentDeck);
     generated.cosmology.origin = "首轮重掷改写";
-    const semanticRepair = structuredClone(currentDeck);
-    semanticRepair.cosmology.origin = "语义修复再次改写";
+    const semanticRepair = {
+      operations: [{
+        path: "cosmology.origin",
+        action: "replace",
+        valueJson: JSON.stringify("语义修复再次改写"),
+      }],
+    };
     const audit = vi.fn()
       .mockResolvedValueOnce({
         verdict: "errors",
         issues: [{
           severity: "error",
-          path: "openingChapterBrief.objective",
+          path: "cosmology.origin",
           type: "power_shortcut",
           explanation: "存在能力捷径",
           evidenceRefs: [],

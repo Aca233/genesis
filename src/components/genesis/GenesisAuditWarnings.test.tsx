@@ -59,4 +59,27 @@ describe("GenesisAuditWarnings", () => {
     expect(renderToStaticMarkup(<GenesisAuditWarnings report={null} />)).toBe("");
     expect(renderToStaticMarkup(<GenesisAuditWarnings report={errorReport} />)).toBe("");
   });
+
+  it("失败进度页可显式陈列 error 的路径、解释与修复建议", () => {
+    const errorReport: GenesisQualityReport = {
+      verdict: "errors",
+      issues: [{
+        severity: "error",
+        path: "relationsAtAnchor[3].memorial",
+        type: "death_conflict",
+        explanation: "存活人物被错误标记为追念关系。",
+        evidenceRefs: ["char_alive"],
+        repairInstruction: "移除 memorial 标记。",
+      }],
+    };
+
+    const html = renderToStaticMarkup(
+      <GenesisAuditWarnings report={errorReport} severity="error" />,
+    );
+
+    expect(html).toContain("阻断详情");
+    expect(html).toContain("存活人物被错误标记为追念关系。");
+    expect(html).toContain("relationsAtAnchor[3].memorial");
+    expect(html).toContain("移除 memorial 标记。");
+  });
 });

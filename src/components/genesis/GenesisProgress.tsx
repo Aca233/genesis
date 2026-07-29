@@ -13,6 +13,8 @@ import { acceptTaskSnapshot } from "@/lib/genesis/client-state";
 import type { WorldMode } from "@/lib/world-mode";
 import { PlayBackground } from "@/components/play/PlayBackground";
 import { OperationIcon } from "@/components/icons/OperationIcon";
+import { GenesisAuditWarnings } from "@/components/genesis/GenesisAuditWarnings";
+import type { GenesisQualityReport } from "@/lib/genesis/semantic-audit";
 
 /** 阶段序数镌记：未至之印以汉字序数浅刻 */
 const STAGE_NUMERALS = [
@@ -26,6 +28,7 @@ type Task = {
   stage: GenesisStageId;
   completedKeys: string[];
   error: string | null;
+  auditReport: GenesisQualityReport | null;
   worldId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -214,6 +217,7 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
             <div className="rounded-xl border border-cinnabar/40 bg-cinnabar/5 p-4">
               <p className="font-bold text-cinnabar">命运丝线在「{current.title}」阶段断裂</p>
               <p className="mt-2 break-words text-sm leading-6 text-ink-soft">{task?.error ?? pageError}</p>
+              <GenesisAuditWarnings report={task?.auditReport ?? null} severity="error" />
               <div className="mt-4 flex gap-3">
                 {task?.status === "failed" && (
                   <button onClick={retry} className="seal-button min-h-10! px-5! py-2! text-sm">
