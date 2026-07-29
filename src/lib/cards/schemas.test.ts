@@ -714,6 +714,48 @@ describe("时间锚点（temporalAnchor）与锚点状态", () => {
   });
 });
 
+describe("首章启动约束", () => {
+  it("接受结构化 openingChapterBrief 并校验视角人物 ref", () => {
+    const valid = WorldDeckSchema.safeParse({
+      ...completeDeck(),
+      openingChapterBrief: {
+        objective: "让见证者确认星海异象的来源",
+        viewpointCharacterRef: "character-1",
+        openingConstraint: "从一次失败的观测开始",
+        endingConstraint: "只推进一个因果节点",
+        readerKnows: ["诸神正在争夺信仰"],
+        viewpointKnows: ["旧塔昨夜出现异光"],
+        mustHide: ["旧神正在苏醒"],
+        hintOnly: ["异光与旧神有关"],
+        forbiddenDevelopments: ["旧神在首章完全苏醒"],
+      },
+    });
+    expect(valid.success).toBe(true);
+
+    const dangling = completeDeck() as ReturnType<typeof completeDeck> & {
+      openingChapterBrief: Record<string, unknown>;
+    };
+    dangling.openingChapterBrief = {
+      objective: "制造悬空视角",
+      viewpointCharacterRef: "character-missing",
+      openingConstraint: "从行动开始",
+      endingConstraint: "留下选择",
+      readerKnows: [],
+      viewpointKnows: [],
+      mustHide: [],
+      hintOnly: [],
+      forbiddenDevelopments: [],
+    };
+    const result = WorldDeckSchema.safeParse(dangling);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) =>
+        issue.path.join(".") === "openingChapterBrief.viewpointCharacterRef"
+      )).toBe(true);
+    }
+  });
+});
+
 function characterStateAtAnchorFixture() {
   return {
     identity: "晨钟议会的年轻执政官",

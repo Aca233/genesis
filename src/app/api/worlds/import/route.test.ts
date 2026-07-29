@@ -134,6 +134,11 @@ function versionTwoArchive() {
               summary: "晨光降临",
               settleState: "settled",
               snapshot: null,
+              brief: {
+                objective: "让曦决定是否敲响晨钟",
+                viewpointEntityId: "character-old",
+                hintOnly: ["晨神正在隐瞒代价"],
+              },
               messages: [
                 {
                   id: "message-old",
@@ -743,6 +748,11 @@ describe("存档导入", () => {
     expect(worldId).not.toBe("world-old");
     expect(timeline).toMatchObject({ worldId, id: expect.not.stringMatching(/-old$/) });
     expect(chapter).toMatchObject({ timelineId: timeline.id, id: expect.not.stringMatching(/-old$/) });
+    expect(chapter.brief).toEqual({
+      objective: "让曦决定是否敲响晨钟",
+      viewpointEntityId: character.id,
+      hintOnly: ["晨神正在隐瞒代价"],
+    });
     expect(message).toMatchObject({ chapterId: chapter.id, id: expect.not.stringMatching(/-old$/) });
     expect(character).toMatchObject({ raceId: race.id, id: expect.not.stringMatching(/-old$/) });
     expect(god).toMatchObject({ codexEntityId: character.id, id: expect.not.stringMatching(/-old$/) });

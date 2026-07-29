@@ -6,6 +6,7 @@ import { ObserverStateSchema, RealityStateSchema } from "@/lib/reality/schemas";
 import { narratorGlobalSystem, narratorTurnSystem, narratorWorldSystem, openingDirective } from "@/lib/prompts/narrator";
 import { buildAbilityContext } from "@/lib/abilities/context";
 import { buildWorldActivityContext } from "@/lib/world-activity/context";
+import { formatChapterBriefSystem } from "./chapter-brief";
 
 /**
  * Context Builder v1（docs/04 §2 组装顺序的 M1 裁剪版）：
@@ -565,6 +566,7 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<NarratorCon
       ? hiddenEntries.map((entry) => ({ id: entry.id, text: entry.text, godName: "godName" in entry ? entry.godName : "未知" }))
       : undefined,
   });
+  const chapterBriefBlock = formatChapterBriefSystem(chapter.brief);
   const realityBlock = reality
     ? `== ACTIVE REALITY STATE (authoritative over world cards) ==
 ${JSON.stringify(reality, null, 1)}`
@@ -656,6 +658,7 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
     { role: "system", content: worldSystem, cacheScope: "world" },
     { role: "system", content: turnSystem, cacheScope: "dynamic" },
   ];
+  if (chapterBriefBlock) messages.push({ role: "system", content: chapterBriefBlock, cacheScope: "dynamic" });
   if (realityBlock) messages.push({ role: "system", content: realityBlock, cacheScope: "dynamic" });
   if (observerBlock) messages.push({ role: "system", content: observerBlock, cacheScope: "dynamic" });
   if (creatorHiddenChronicle) messages.push({ role: "system", content: creatorHiddenChronicle, cacheScope: "dynamic" });

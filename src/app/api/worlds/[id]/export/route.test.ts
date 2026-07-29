@@ -54,6 +54,11 @@ describe("version 4 世界存档导出", () => {
           summary: null,
           settleState: "open",
           snapshot: null,
+          brief: {
+            objective: "揭示无声议会的一条线索",
+            viewpointEntityId: "entity-1",
+            mustHide: ["议会首领的身份"],
+          },
           messages: [{
             id: "message-1",
             chapterId: "chapter-1",
@@ -145,6 +150,11 @@ describe("version 4 世界存档导出", () => {
     expect(archive.world.timelines[0].worldActivities).toContainEqual(
       expect.objectContaining({ id: "world-activity-1", visibility: "hidden" }),
     );
+    expect(archive.world.timelines[0].chapters[0].brief).toEqual({
+      objective: "揭示无声议会的一条线索",
+      viewpointEntityId: "entity-1",
+      mustHide: ["议会首领的身份"],
+    });
     expect(archive.world.iconTheme).toEqual(expect.objectContaining({ primaryFamily: "tabler" }));
     expect(archive.world.timelines[0].iconAssignments).toEqual([
       expect.objectContaining({ subjectId: "world-event-1", token: "event.conflict" }),

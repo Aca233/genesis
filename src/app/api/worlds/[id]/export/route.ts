@@ -151,8 +151,21 @@ function projectVersionFourWorld(value: unknown) {
     timelines: versionThree.timelines.map((timelineValue) => {
       const timeline = record(timelineValue);
       const source = sourceTimelineById.get(timeline.id) ?? {};
+      const sourceChapters = Array.isArray(source.chapters) ? source.chapters : [];
+      const sourceChapterById = new Map(sourceChapters.map((chapterValue) => {
+        const chapter = record(chapterValue);
+        return [chapter.id, chapter] as const;
+      }));
+      const chapters = Array.isArray(timeline.chapters) ? timeline.chapters : [];
       return {
         ...timeline,
+        chapters: chapters.map((chapterValue) => {
+          const chapter = record(chapterValue);
+          return {
+            ...chapter,
+            brief: sourceChapterById.get(chapter.id)?.brief,
+          };
+        }),
         worldEvents: (Array.isArray(source.worldEvents) ? source.worldEvents : [])
           .map((event) => projectFields(event, WORLD_EVENT_KEYS)),
         worldActivities: (Array.isArray(source.worldActivities) ? source.worldActivities : [])

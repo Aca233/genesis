@@ -76,6 +76,15 @@ describe("TopLevelJsonProgressScanner", () => {
     expect(GENESIS_TOP_LEVEL_KEYS).toContain("canonEvents");
   });
 
+  it("openingChapterBrief 对象值完整闭合后才被报告并位于时代冲突之后", () => {
+    const scanner = new TopLevelJsonProgressScanner();
+
+    expect(scanner.push("{\"openingChapterBrief\":{\"objective\":\"开局\"")).toEqual([]);
+    expect(scanner.push("}")).toEqual(["openingChapterBrief"]);
+    expect(GENESIS_TOP_LEVEL_KEYS.indexOf("openingChapterBrief"))
+      .toBe(GENESIS_TOP_LEVEL_KEYS.indexOf("epochConflict") + 1);
+  });
+
   it("temporalAnchor 对象值完整闭合后才被报告，且紧随 worldName 排序", () => {
     const scanner = new TopLevelJsonProgressScanner();
 

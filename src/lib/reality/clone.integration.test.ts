@@ -122,6 +122,16 @@ async function fixture() {
       scenePresence: true,
     },
   });
+  await prisma.chapter.update({
+    where: { id: chapterTwo.id },
+    data: {
+      brief: {
+        objective: "让阿岚在观星会前作出选择",
+        viewpointEntityId: avatar.id,
+        mustHide: ["暮神正在操纵星图"],
+      },
+    },
+  });
   await prisma.entitySection.createMany({
     data: [
       { entityId: race.id, key: "customs", content: { rites: ["听石"] }, revealed: true },
@@ -561,6 +571,11 @@ describe("cloneTimelineGraph", () => {
       expect(result.maps.eventIds.size).toBe(2);
       expect(result.maps.activityIds.size).toBe(2);
       expect(result.maps.entityRelationIds.size).toBe(1);
+      expect(cloned.timeline.chapters[1]!.brief).toEqual({
+        objective: "让阿岚在观星会前作出选择",
+        viewpointEntityId: result.maps.entityIds.get(data.avatar.id),
+        mustHide: ["暮神正在操纵星图"],
+      });
       expect(cloned.timeline.chapters.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.gods.every((row) => row.timelineId === result.timelineId)).toBe(true);
       expect(cloned.timeline.entities.every((row) => row.timelineId === result.timelineId)).toBe(true);
