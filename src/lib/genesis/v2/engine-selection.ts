@@ -23,7 +23,7 @@ export function readGenesisV2PrimaryRollout(
     ? parsedPercent
     : 0;
   const userIds = new Set(
-    (environment.GENESIS_V2_PRIMARY_USER_IDS ?? "")
+    (primaryEnabled ? environment.GENESIS_V2_PRIMARY_USER_IDS ?? "" : "")
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean)

@@ -22,6 +22,7 @@ describe("POST /api/genesis/tasks", () => {
     delete process.env.GENESIS_V2_SHADOW_ENABLED;
     delete process.env.GENESIS_V2_PRIMARY_PERCENT;
     delete process.env.GENESIS_V2_PRIMARY_USER_IDS;
+    delete process.env.GENESIS_V2_PRIMARY_ENABLED;
   });
 
   it("持久化任务后立即以 202 返回 taskId", async () => {
@@ -143,6 +144,7 @@ describe("POST /api/genesis/tasks", () => {
   });
 
   it("V2 白名单用户创建冻结的主 DAG，且不再创建 legacy 作业", async () => {
+    process.env.GENESIS_V2_PRIMARY_ENABLED = "true";
     process.env.GENESIS_V2_PRIMARY_PERCENT = "0";
     process.env.GENESIS_V2_PRIMARY_USER_IDS = "test-user";
     mocks.create.mockResolvedValue({ id: "task-v2" });

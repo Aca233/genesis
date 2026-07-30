@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   taskFindFirst: vi.fn(),
   taskUpdateMany: vi.fn(),
   jobUpdateMany: vi.fn(),
+  jobUpsert: vi.fn(),
   outboxCreate: vi.fn(),
   transaction: vi.fn(),
   wake: vi.fn(),
@@ -14,7 +15,7 @@ const tx = {
     findFirst: mocks.taskFindFirst,
     updateMany: mocks.taskUpdateMany,
   },
-  genesisJob: { updateMany: mocks.jobUpdateMany },
+  genesisJob: { updateMany: mocks.jobUpdateMany, upsert: mocks.jobUpsert },
   genesisOutbox: { create: mocks.outboxCreate },
 };
 
@@ -35,6 +36,8 @@ describe("POST /api/genesis/tasks/[id]/retry", () => {
     vi.clearAllMocks();
     mocks.transaction.mockImplementation((callback) => callback(tx));
     mocks.taskFindFirst.mockResolvedValue({
+      userId: "test-user",
+      requestHash: "request-hash",
       aggregateVersion: 4,
       stage: "characters",
       engineVersion: "dag-v2",
@@ -49,10 +52,11 @@ describe("POST /api/genesis/tasks/[id]/retry", () => {
     });
     mocks.taskUpdateMany.mockResolvedValue({ count: 1 });
     mocks.jobUpdateMany.mockResolvedValue({ count: 1 });
+    mocks.jobUpsert.mockResolvedValue({});
     mocks.outboxCreate.mockResolvedValue({});
   });
 
-  it("V2 人工重试保留已结算用量，并补充一次受控阶段修复预算", async () => {
+  it("V2 人工重试切换到 legacy 并从头重新创世", async () => {
     const response = await POST(new Request("http://localhost/api/genesis/tasks/task-1/retry", {
       method: "POST",
     }), context);
@@ -62,20 +66,41 @@ describe("POST /api/genesis/tasks/[id]/retry", () => {
       data: expect.objectContaining({
         status: "queued",
         aggregateVersion: 5,
+        engineVersion: "legacy-v1",
+        stage: "oracle",
+        completedKeys: [],
+        shadowEnabled: false,
+        shadowStatus: "disabled",
         budgetMaxCalls: 320,
         budgetMaxInput: 30_000_000,
         budgetMaxOutput: 2_500_000,
       }),
     }));
     expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { genesisTaskId: "task-1", engineVersion: "dag-v2", status: "failed" },
-      data: expect.objectContaining({ status: "queued", attempt: 0 }),
+      where: { genesisTaskId: "task-1", engineVersion: "dag-v2" },
+      data: expect.objectContaining({ status: "superseded" }),
+    }));
+    expect(mocks.jobUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        userId: "test-user",
+        genesisTaskId: "task-1",
+        nodeKey: "legacy-world-deck",
+        engineVersion: "legacy-v1",
+        inputHash: "request-hash",
+      }),
+    }));
+    expect(mocks.outboxCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        payloadProjection: { status: "queued", stage: "oracle", engineVersion: "legacy-v1" },
+      }),
     }));
     expect(mocks.wake).toHaveBeenCalledOnce();
   });
 
   it("legacy 人工重试也补充预算，避免预算失败后原地再次失败", async () => {
     mocks.taskFindFirst.mockResolvedValue({
+      userId: "test-user",
+      requestHash: "request-hash",
       aggregateVersion: 2,
       stage: "semantic_repair",
       engineVersion: "legacy-v1",

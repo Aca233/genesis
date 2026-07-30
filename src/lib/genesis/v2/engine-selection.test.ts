@@ -17,11 +17,13 @@ describe("Genesis V2 primary engine selection", () => {
     })).toBe("legacy-v1");
     expect(readGenesisV2PrimaryRollout({
       GENESIS_V2_PRIMARY_PERCENT: "100",
-    }).percent).toBe(0);
+      GENESIS_V2_PRIMARY_USER_IDS: "user-1",
+    })).toEqual({ percent: 0, userIds: new Set() });
   });
 
-  it("routes explicit internal users to V2 even at zero percent", () => {
+  it("routes explicit internal users to V2 only when primary V2 is enabled", () => {
     const rollout = readGenesisV2PrimaryRollout({
+      GENESIS_V2_PRIMARY_ENABLED: "true",
       GENESIS_V2_PRIMARY_PERCENT: "0",
       GENESIS_V2_PRIMARY_USER_IDS: "user-2, user-1,user-2",
     });
