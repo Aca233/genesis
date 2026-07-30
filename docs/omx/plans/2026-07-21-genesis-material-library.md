@@ -1,6 +1,6 @@
 # 创世素材库（万象藏库）实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 建立自动收录、收藏/隐藏、不可变版本、依赖选择、独立能力分配和三级锁定约束的“万象藏库”，并把选定素材合并进现有的一次流式创世请求。
 

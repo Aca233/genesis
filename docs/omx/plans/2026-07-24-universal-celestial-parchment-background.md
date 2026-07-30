@@ -1,6 +1,6 @@
 # 通用星图古卷双主题背景实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 生成、加工并接入一组构图一致的日卷/烛光星图古卷背景，在统一完整核心流程氛围的同时维持长文本、卡片与表单可读性。
 
@@ -32,7 +32,7 @@
 - Create: `src/components/play/PlayBackground.test.tsx` — 背景层的结构与可访问性测试。
 - Modify: `src/app/play/[worldId]/page.tsx` — 只在主游玩页挂载背景层。
 - Modify: `src/app/globals.css` — 定义双主题背景资源、覆盖方式、透明度和窄屏降噪。
-- Modify: `.gitignore` — 忽略本地视觉讨论工具产生的 `/.superpowers/`。
+- Modify: `.gitignore` — 忽略本地视觉讨论工具产生的 `/.omx/`。
 
 ### Task 1: 生成并验收日卷母版
 
@@ -40,7 +40,7 @@
 - Create: `art/backgrounds/play-celestial-day-source.png`
 
 **Interfaces:**
-- Consumes: 已确认的视觉规格 `docs/superpowers/specs/2026-07-24-universal-celestial-parchment-background-design.md`。
+- Consumes: 已确认的视觉规格 `docs/omx/specs/2026-07-24-universal-celestial-parchment-background-design.md`。
 - Produces: 一张通过验收的 `3840×2160` RGB/RGBA PNG，供 Task 2 作为唯一参考图。
 
 - [ ] **Step 1: 用 gpt-image-2 生成日卷母版**
@@ -549,7 +549,7 @@ git commit -m "polish: finalize celestial play backgrounds"
 - Modify: `.gitignore`
 
 **Interfaces:**
-- Consumes: 本地 `.superpowers/brainstorm/` 视觉讨论文件。
+- Consumes: 本地 `.omx/plans/` 视觉讨论文件。
 - Produces: Git 不再把本地视觉辅助会话显示为未跟踪项目。
 
 - [ ] **Step 1: 写入忽略规则**
@@ -557,7 +557,7 @@ git commit -m "polish: finalize celestial play backgrounds"
 在 `.gitignore` 的 `# local agent/runtime state` 小节加入：
 
 ```gitignore
-/.superpowers/
+/.omx/
 ```
 
 - [ ] **Step 2: 确认忽略生效**
@@ -566,7 +566,7 @@ git commit -m "polish: finalize celestial play backgrounds"
 git status --short
 ```
 
-Expected: 输出中不再出现 `?? .superpowers/`。
+Expected: 输出中不再出现 `?? .omx/`。
 
 - [ ] **Step 3: 提交**
 

@@ -1,6 +1,6 @@
 # 创世模式联动背景实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 生成两张抽象世界模式氛围图，并把它们作为首页专用叠层接入现有日／烛星图背景，使“诸神共世”和“创世主”切换时产生稳定、可读、可降级的视觉反馈。
 
@@ -44,7 +44,7 @@
 - Create: `art/backgrounds/genesis-mode-pantheon-source.png`
 
 **Interfaces:**
-- Consumes: `docs/superpowers/specs/2026-07-25-genesis-mode-linked-background-design.md`；现有两张星图背景只作为风格与色温参考，不作为编辑目标。
+- Consumes: `docs/omx/specs/2026-07-25-genesis-mode-linked-background-design.md`；现有两张星图背景只作为风格与色温参考，不作为编辑目标。
 - Produces: 一张通过构图、安全区和内容检查的 `2048×1152` PNG，供 Task 2 作为构图编辑目标。
 
 - [ ] **Step 1: 在隔离 worktree 中准备生成参考**

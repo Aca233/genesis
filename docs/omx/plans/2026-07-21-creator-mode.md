@@ -1,6 +1,6 @@
 # Creator Mode Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add immutable 「诸神共世」 and 「创世主」 world modes, including creator-only omniscient observation, avatars, absolute reality rewrites, and a persistent reversible reality tree.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Next.js 16.2 App Router route handlers, React 19 client components, TypeScript 5, Zod 4, Prisma 7/PostgreSQL, Vitest 4, Tailwind CSS 4, existing SSE/LLM gateway.
 
-**Authoritative design:** `docs/superpowers/specs/2026-07-21-creator-mode-design.md`
+**Authoritative design:** `docs/omx/specs/2026-07-21-creator-mode-design.md`
 
 **Next.js guidance already checked:** `node_modules/next/dist/docs/01-app/01-getting-started/05-server-and-client-components.md` and `node_modules/next/dist/docs/01-app/01-getting-started/15-route-handlers.md`. Keep database access in route handlers/server libraries and interactive state in narrowly scoped client components.
 

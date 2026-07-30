@@ -1,6 +1,6 @@
 # Continuous World Flow Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将正式游玩改造成无玩家可见章节、单输入、自动轻量更新与自动世界整理的连续流程，并在创世演出期间生成可幂等恢复的开场正文。
 
@@ -1358,7 +1358,7 @@ Run:
 rg -n "结束本章|第一章|前章残页|翻章|续观|观测世界|改写现实|改写范围|章节结算|岁月流转" src docs
 ```
 
-Expected: `src/` 中只允许数据库兼容注释、内部类型名和历史测试说明；任何可渲染字符串或 Prompt 命中都必须删除。`docs/superpowers/specs/` 中的设计对比文本允许保留。
+Expected: `src/` 中只允许数据库兼容注释、内部类型名和历史测试说明；任何可渲染字符串或 Prompt 命中都必须删除。`docs/omx/specs/` 中的设计对比文本允许保留。
 
 - [ ] **Step 2: 更新产品、系统、LLM、视觉和路线文档**
 

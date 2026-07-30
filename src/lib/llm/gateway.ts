@@ -50,7 +50,7 @@ export async function resolveSlot(
 }
 
 function isNetworkError(message: string): boolean {
-  return /fetch failed|terminated|other side closed|aborted|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|socket|UND_ERR/i.test(message);
+  return /fetch failed|terminated|other side closed|stream disconnected before completion|idle timeout waiting for SSE|aborted|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|socket|UND_ERR/i.test(message);
 }
 
 function isRetryable(error: unknown): boolean {
@@ -421,7 +421,9 @@ export async function* stream(
           return;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          const resumable = req.failOnTruncation
+          const resumable = (req.failOnTruncation
+              || accumulated.length === 0
+              || isNetworkError(message))
             && (isRetryable(error) || message === "流式响应为空")
             && networkRetries < STREAM_NETWORK_RETRIES
             && !options?.signal?.aborted;

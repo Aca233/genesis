@@ -341,12 +341,17 @@ describe("creator unified narration contract", () => {
     expect(prompt).toContain("clearly witnessed");
   });
 
-  it("uses a world tableau opening without descent or a fabricated player-god hook", () => {
+  it("opens creator worlds inside a concrete scene without observer framing", () => {
     const creator = openingDirective("creator");
     const pantheon = openingDirective("pantheon");
 
     expect(creator).toContain("present era");
+    expect(creator).toContain("specific place and time");
     expect(creator).toContain("world-internal tension");
+    expect(creator).toContain("META suggestions only");
+    expect(creator).toContain("unsupported deaths");
+    expect(creator).not.toContain("broad tableau");
+    expect(creator).not.toContain("offer observation/focus choices");
     expect(creator).not.toContain("Chapter One");
     expect(creator).toContain("no descent");
     expect(creator).not.toContain("player god's starting situation");

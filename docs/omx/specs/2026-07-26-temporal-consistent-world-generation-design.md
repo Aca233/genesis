@@ -333,7 +333,7 @@ IP 世界**无条件**执行（它是散文级未来泄漏的唯一探测器）�
 
 ## 14. 与世界导演运行时的边界（新增章节，替代初稿 §11/§15 的运行时部分）
 
-已批准的世界导演设计（`docs/superpowers/specs/2026-07-24-world-director-agent-design.md` + 6 份阶段计划）拥有运行时：时之仪推进、NarrationContract 知识边界、确定性内核校验 + ≤2 轮修复、`builder.ts` 的 L0/L1/L2 分层替换。本设计**不在现行 META/settlement 链上实现任何推进机制**（那是注定报废的工作），改为向导演内核输出五项需求：
+已批准的世界导演设计（`docs/omx/specs/2026-07-24-world-director-agent-design.md` + 6 份阶段计划）拥有运行时：时之仪推进、NarrationContract 知识边界、确定性内核校验 + ≤2 轮修复、`builder.ts` 的 L0/L1/L2 分层替换。本设计**不在现行 META/settlement 链上实现任何推进机制**（那是注定报废的工作），改为向导演内核输出五项需求：
 
 1. 时之仪推进时评估 future 档 `CanonEvent` 的 `prerequisites/blockers`（§8.4 闭合条件用内核确定性规则,`custom` 条件交内核的 AI 判定并要求依据）,维护 `pending→eligible→altered/cancelled/occurred` 状态机;
 2. 候选事件正常发生时落为 `WorldEvent`（带 `canonImpact/affectedCanonEventRefs`）并回写 `occurred`;条件失效的事件可延后/变形/取消,同一社会矛盾可产生新事件但必须有新原因与参与者,不复刻已取消事件;

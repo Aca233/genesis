@@ -1,6 +1,6 @@
 # World Director Phase 3: Agent Protocol, Provider Capabilities, and Search Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 构建缓存优先、最多四次调用的单 Agent 工具循环，并兼容原生 Tool Calling、Structured Output、纯文本 Agent Frame 和受控外部搜索。
 

@@ -1,6 +1,6 @@
 # World Director Phase 4: Durable Runtime, Narration, and Atomic Commit Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将 Agent 规划、正文契约、段落暂显、证据审计和权威世界写入连成可恢复的持久 Run，同时提供不影响正式游戏的 shadow mode。
 
