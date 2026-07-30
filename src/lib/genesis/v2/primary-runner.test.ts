@@ -4,6 +4,7 @@ import type { WorldDeck } from "@/lib/cards/schemas";
 import { LlmCircuitOpenError } from "@/lib/llm/permits";
 import { StructuredOutputValidationError } from "@/lib/llm/structured";
 import type { GenesisIntentContract } from "../intent";
+import { GenesisSemanticAuditError } from "../semantic-audit";
 import {
   GenesisSemanticGateError,
   GenesisSemanticRepairValidationError,
@@ -435,6 +436,39 @@ describe("Genesis V2 primary runner", () => {
     expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: "running", error: null }),
     }));
+    expect(mocks.wakeScheduler).toHaveBeenCalledOnce();
+  });
+
+  it("语义审计结构化输出耗尽时自动重排人物节点，而不是终止任务", async () => {
+    const deck = completeDeck();
+    const outputs = splitDeck(deck);
+    configureJob("characters");
+    mocks.acceptedCount.mockResolvedValue(3);
+    mocks.completeStructured.mockResolvedValue(outputs.characters);
+    mocks.artifactFindMany.mockResolvedValue([
+      { stageKey: "pantheon_domain", outputHash: "p", content: outputs.pantheon_domain },
+      { stageKey: "civilizations", outputHash: "c", content: outputs.civilizations },
+      { stageKey: "eras", outputHash: "e", content: outputs.eras },
+    ]);
+    mocks.artifactFindFirst.mockResolvedValue({ content: outputs.blueprint, outputHash: "b" });
+    mocks.enforceQuality.mockRejectedValue(new GenesisSemanticAuditError(
+      new StructuredOutputValidationError(2, "issues 超过上限"),
+    ));
+
+    await runGenesisV2PrimaryJob("job-characters");
+
+    expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "queued",
+        error: "创世语义审计失败，请稍后重试",
+      }),
+    }));
+    expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "running", error: null }),
+    }));
+    expect(mocks.outboxCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ eventType: "v2_stage_requeued" }),
+    });
     expect(mocks.wakeScheduler).toHaveBeenCalledOnce();
   });
 

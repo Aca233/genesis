@@ -17,6 +17,7 @@ import { validateGenesisDeck } from "../generate";
 import { generateGenesisIntent, GenesisIntentGenerationError } from "../intent-generator";
 import { parseGenesisIntent, type GenesisIntentContract } from "../intent";
 import { countGenesisSemanticIssues, recordGenesisQualityEvent } from "../quality-observability";
+import { GenesisSemanticAuditError } from "../semantic-audit";
 import {
   enforceGenesisQuality,
   GenesisSemanticGateError,
@@ -533,6 +534,7 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
     const retry = !terminalQualityFailure
       && !waitingForProvider
       && (error instanceof GenesisV2RecoverableStageError
+        || error instanceof GenesisSemanticAuditError
         || error instanceof GenesisSemanticRepairValidationError
         || error instanceof StructuredOutputValidationError
         || isTransientLlmError(error)

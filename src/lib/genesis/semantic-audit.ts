@@ -237,10 +237,10 @@ export async function auditGenesisSemantics(
         schema: GenesisSemanticAuditResultSchema,
         temperature: 0.1,
         maxTokens: 8000,
-        maxAttempts: 1,
+        maxAttempts: 2,
         transportMaxAttempts: 2,
         allowTransportFallback: true,
-        failOnTruncation: false,
+        failOnTruncation: true,
       });
       const parsed = GenesisSemanticAuditResultSchema.parse(result);
       const issues = parsed.issues.map(normalizeIssue);

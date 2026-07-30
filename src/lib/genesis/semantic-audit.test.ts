@@ -323,10 +323,10 @@ describe("auditGenesisSemantics", () => {
       schema: GenesisSemanticAuditResultSchema,
       temperature: 0.1,
       maxTokens: 8000,
-      maxAttempts: 1,
+      maxAttempts: 2,
       transportMaxAttempts: 2,
       allowTransportFallback: true,
-      failOnTruncation: false,
+      failOnTruncation: true,
     }));
     expect(complete.mock.calls[0]![1].user).toContain("鲁迪乌斯出生时仍是婴儿");
   });
@@ -340,7 +340,7 @@ describe("auditGenesisSemantics", () => {
     await expect(auditGenesisSemantics(badDeck, auditInput, { complete })).resolves.toEqual(report);
     expect(complete).toHaveBeenCalledTimes(2);
     expect(complete.mock.calls.length).toBeLessThanOrEqual(2);
-    expect(complete.mock.calls.every(([, options]) => options.failOnTruncation === false)).toBe(true);
+    expect(complete.mock.calls.every(([, options]) => options.failOnTruncation === true)).toBe(true);
   });
 
   it("audits original worlds while excluding only canon-specific checks", async () => {
