@@ -7,6 +7,7 @@ import type { WorldDeck } from "@/lib/cards/schemas";
 import {
   assembleGenesisV2WorldDeck,
   getGenesisV2StageOutputSchema,
+  sanitizeGenesisV2CharactersTemporalOutput,
   type GenesisV2StageOutputs,
 } from "./stage-output";
 
@@ -88,5 +89,79 @@ describe("Genesis V2 stage output contracts", () => {
     const outputs = splitDeck(completeDeck());
 
     expect(() => assembleGenesisV2WorldDeck(outputs, "creator")).toThrow(/模式不匹配/);
+  });
+
+  it("removes future abilities from active characters only while preserving the schema minimum", () => {
+    const characters = splitDeck(completeDeck()).characters;
+    const character = characters.majorCharacters[0]!;
+    const extraFutureAbility = {
+      ...character.abilities[0]!,
+      ref: "character-future-ability",
+      name: "未来能力",
+      timing: "future" as const,
+    };
+    const output = {
+      ...characters,
+      majorCharacters: [
+        {
+          ...character,
+          abilities: [
+            ...character.abilities.slice(0, 2),
+            extraFutureAbility,
+          ],
+          racialOverrides: character.racialOverrides.map((ability) => ({
+            ...ability,
+            timing: "future" as const,
+          })),
+        },
+        ...characters.majorCharacters.slice(1),
+      ],
+    };
+
+    const sanitized = sanitizeGenesisV2CharactersTemporalOutput(output);
+
+    expect(sanitized.majorCharacters[0]!.abilities).toHaveLength(2);
+    expect(sanitized.majorCharacters[0]!.abilities).not.toContainEqual(extraFutureAbility);
+    expect(sanitized.majorCharacters[0]!.racialOverrides).toEqual([]);
+  });
+
+  it("rejects active characters without two at-anchor abilities before stage assembly", () => {
+    const characters = splitDeck(completeDeck()).characters;
+    const character = characters.majorCharacters[0]!;
+    const output = {
+      ...characters,
+      majorCharacters: [
+        {
+          ...character,
+          abilities: character.abilities.slice(0, 2).map((ability, index) => ({
+            ...ability,
+            timing: index === 0 ? "future" as const : ability.timing,
+          })),
+        },
+        ...characters.majorCharacters.slice(1),
+      ],
+    };
+
+    expect(() => getGenesisV2StageOutputSchema("characters", "pantheon").parse(output))
+      .toThrow(/至少有 2 个 timing=at_anchor/);
+  });
+
+  it("keeps at most four anchor relations per active character", () => {
+    const characters = splitDeck(completeDeck()).characters;
+    const sourceRef = characters.majorCharacters[0]!.ref;
+    const targetRefs = characters.majorCharacters.slice(1).map(({ ref }) => ref);
+    const output = {
+      ...characters,
+      relationsAtAnchor: Array.from({ length: 5 }, (_, index) => ({
+        sourceRef,
+        targetRef: targetRefs[index % targetRefs.length]!,
+        status: "ally" as const,
+        publicDescription: "测试关系",
+      })),
+    };
+
+    const sanitized = sanitizeGenesisV2CharactersTemporalOutput(output);
+
+    expect(sanitized.relationsAtAnchor).toHaveLength(4);
   });
 });

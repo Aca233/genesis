@@ -32,6 +32,7 @@ import type { DeterministicPreflightResult } from "./preflight";
 import {
   assembleGenesisV2WorldDeck,
   getGenesisV2StageOutputSchema,
+  sanitizeGenesisV2CharactersTemporalOutput,
   type GenesisV2StageOutputs,
 } from "./stage-output";
 import { getGenesisV2StageContract, type GenesisV2StageId } from "./stage-registry";
@@ -283,7 +284,7 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
       leaseExpiresAt: job.leaseExpiresAt.toISOString(),
       budgetScope: "primary" as const,
     };
-    const content = await completeStructured("backstage", {
+    const generatedContent = await completeStructured("backstage", {
       task: "genesis",
       userId: job.task.userId,
       owner,
@@ -292,11 +293,16 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
       user: bundle.blocks.dynamicTail,
       schema: getGenesisV2StageOutputSchema(stageId, mode),
       maxAttempts: 2,
-      transportMaxAttempts: 1,
-      allowTransportFallback: false,
+      transportMaxAttempts: 2,
+      allowTransportFallback: true,
       maxTokens: preflight.budgetPlan.stages.find((budget) => budget.stage === stageId)?.maxOutputTokens,
       cache: { namespace: bundle.routingNamespace },
     }) as Record<string, unknown>;
+    const content = stageId === "characters"
+      ? sanitizeGenesisV2CharactersTemporalOutput(
+        generatedContent as GenesisV2StageOutputs["characters"],
+      )
+      : generatedContent;
     const validation = validateGenesisV2ShadowOutput({ stageId, output: content, structuralManifest: preflight.structuralManifest });
     if (!validation.valid) {
       throw new GenesisV2RecoverableStageError(`Genesis V2 阶段硬门失败：${validation.issues.join(",")}`);

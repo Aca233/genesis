@@ -79,7 +79,20 @@ export const GenesisV2CharactersOutputSchema = z.object({
   mode: WorldModeLiteralSchema,
   majorCharacters: z.array(MajorCharacterCardSchema).min(4).max(12),
   relationsAtAnchor: z.array(RelationAtAnchorSchema).optional(),
-}).strict();
+}).strict().superRefine((output, ctx) => {
+  output.majorCharacters.forEach((character, index) => {
+    if ((character.statusAtAnchor ?? "active") !== "active") return;
+    const heldAbilityCount = character.abilities.filter(
+      ({ timing }) => (timing ?? "at_anchor") === "at_anchor",
+    ).length;
+    if (heldAbilityCount >= 2) return;
+    ctx.addIssue({
+      code: "custom",
+      path: ["majorCharacters", index, "abilities"],
+      message: "active 人物必须至少有 2 个 timing=at_anchor 的个人技能；future/lost 能力不计入当前持有技能",
+    });
+  });
+});
 
 export type GenesisV2StageOutputs = {
   blueprint: z.infer<typeof GenesisV2BlueprintOutputSchema>;
@@ -90,6 +103,45 @@ export type GenesisV2StageOutputs = {
   eras: z.infer<typeof GenesisV2ErasOutputSchema>;
   characters: z.infer<typeof GenesisV2CharactersOutputSchema>;
 };
+
+const MIN_CHARACTER_ABILITIES = 2;
+const MAX_RELATIONS_PER_ACTIVE_CHARACTER = 4;
+
+export function sanitizeGenesisV2CharactersTemporalOutput(
+  rawOutput: GenesisV2StageOutputs["characters"],
+): GenesisV2StageOutputs["characters"] {
+  const output = GenesisV2CharactersOutputSchema.parse(rawOutput);
+  const activeCharacterRefs = new Set(output.majorCharacters.flatMap((character) =>
+    (character.statusAtAnchor ?? "active") === "active" ? [character.ref] : [],
+  ));
+  const relationCounts = new Map<string, number>();
+  const relationsAtAnchor = output.relationsAtAnchor?.filter((relation) => {
+    if (!activeCharacterRefs.has(relation.sourceRef)) return true;
+    const count = relationCounts.get(relation.sourceRef) ?? 0;
+    relationCounts.set(relation.sourceRef, count + 1);
+    return count < MAX_RELATIONS_PER_ACTIVE_CHARACTER;
+  });
+  return {
+    ...output,
+    ...(relationsAtAnchor === undefined ? {} : { relationsAtAnchor }),
+    majorCharacters: output.majorCharacters.map((character) => {
+      if ((character.statusAtAnchor ?? "active") !== "active") return character;
+
+      let removableAbilities = Math.max(0, character.abilities.length - MIN_CHARACTER_ABILITIES);
+      const abilities = character.abilities.filter((ability) => {
+        if (ability.timing !== "future" || removableAbilities === 0) return true;
+        removableAbilities -= 1;
+        return false;
+      });
+      const racialOverrides = character.racialOverrides.filter(({ timing }) => timing !== "future");
+      if (
+        abilities.length === character.abilities.length
+        && racialOverrides.length === character.racialOverrides.length
+      ) return character;
+      return { ...character, abilities, racialOverrides };
+    }),
+  };
+}
 
 export function getGenesisV2StageOutputSchema(
   stageId: GenesisV2StageId,

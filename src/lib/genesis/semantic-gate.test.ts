@@ -181,8 +181,8 @@ describe("enforceGenesisQuality", () => {
         owner,
         schema: GenesisSemanticRepairResultSchema,
         maxAttempts: 2,
-        transportMaxAttempts: 1,
-        allowTransportFallback: false,
+        transportMaxAttempts: 2,
+        allowTransportFallback: true,
         failOnTruncation: false,
       });
       expect(opts.user).toContain("晨钟议会名称不可修改");
@@ -350,6 +350,50 @@ describe("enforceGenesisQuality", () => {
     });
   });
 
+  it("整个神明集合补丁仍保留每个既有神明的能力结构", async () => {
+    const original = completeDeck();
+    const report: GenesisSemanticAuditResult = {
+      verdict: "errors",
+      issues: [{
+        severity: "error",
+        path: "majorGods",
+        type: "ontology_mismatch",
+        explanation: "神明描述需要回到锚点时刻",
+        evidenceRefs: ["factsAtAnchor"],
+        repairInstruction: "修正神明语义描述",
+      }],
+    };
+    const audit = vi.fn()
+      .mockResolvedValueOnce(report)
+      .mockResolvedValueOnce(passReport);
+    const repair = vi.fn().mockResolvedValue({
+      operations: [{
+        path: "majorGods",
+        action: "replace",
+        valueJson: JSON.stringify(original.majorGods.map((god) => ({
+          ref: god.ref,
+          name: god.name,
+          persona: `${god.persona}（锚点修正版）`,
+          abilities: [],
+        }))),
+      }],
+    });
+
+    const result = await enforceGenesisQuality({
+      ...qualityInput(),
+      deck: original,
+      mode: "pantheon",
+    }, {
+      audit,
+      repair,
+      validate: vi.fn().mockImplementation((deck) => deck),
+    });
+
+    expect(result.deck.majorGods.map(({ abilities }) => abilities))
+      .toEqual(original.majorGods.map(({ abilities }) => abilities));
+    expect(result.deck.majorGods[0]!.persona).toContain("锚点修正版");
+  });
+
   it("势力成员关系补丁丢弃不存在的势力引用", async () => {
     const original = completeDeck();
     const membershipReport: GenesisSemanticAuditResult = {
@@ -389,6 +433,59 @@ describe("enforceGenesisQuality", () => {
     });
 
     expect(result.deck.majorCharacters[3]!.factionMemberships).toEqual([]);
+  });
+
+  it.each([
+    ["factions[1].keyCharacterRefs[0].ref", "unsupported_canon_claim"],
+    ["majorCharacters[3].factionMemberships[0].factionRef", "causal_disconnect"],
+    ["relationsAtAnchor[0].targetRef", "continuity_mix"],
+  ] as const)("引用叶子问题 %s 强制删除整个关系项", async (path, type) => {
+    const original = completeDeck();
+    if (path.startsWith("relationsAtAnchor")) {
+      original.relationsAtAnchor = [{
+        sourceRef: original.majorCharacters[0]!.ref,
+        targetRef: original.majorCharacters[1]!.ref,
+        status: "ally",
+        publicDescription: "锚点时仍保持盟友关系",
+      }];
+    }
+    const report: GenesisSemanticAuditResult = {
+      verdict: "errors",
+      issues: [{
+        severity: "error",
+        path,
+        type,
+        explanation: "该引用在锚点时刻不成立",
+        evidenceRefs: ["futureOnly"],
+        repairInstruction: "移除错误引用",
+      }],
+    };
+    const audit = vi.fn()
+      .mockResolvedValueOnce(report)
+      .mockResolvedValueOnce(passReport);
+    const repair = vi.fn().mockResolvedValue({
+      operations: [{ path, action: "replace", valueJson: JSON.stringify("") }],
+    });
+
+    const result = await enforceGenesisQuality({
+      ...qualityInput(),
+      deck: original,
+      mode: "pantheon",
+    }, {
+      audit,
+      repair,
+      validate: vi.fn().mockImplementation((deck) => deck),
+    });
+
+    const expectedPath = path.replace(/\.(?:ref|factionRef|sourceRef|targetRef)$/, "");
+    expect(repair.mock.calls[0]![1].user).toContain(JSON.stringify(expectedPath));
+    if (path.startsWith("factions")) {
+      expect(result.deck.factions[1]!.keyCharacterRefs).toEqual([]);
+    } else if (path.startsWith("majorCharacters")) {
+      expect(result.deck.majorCharacters[3]!.factionMemberships).toEqual([]);
+    } else {
+      expect(result.deck.relationsAtAnchor).toEqual(original.relationsAtAnchor?.slice(1));
+    }
   });
 
   it("两次补丁都无法通过完整校验时抛出可分类的补丁校验错误", async () => {
@@ -533,7 +630,7 @@ describe("enforceGenesisQuality", () => {
     expect(repair).not.toHaveBeenCalled();
   });
 
-  it("五轮修复后的复审仍有 error 时抛携带最终 report 的安全 terminal error", async () => {
+  it("十六轮修复后的复审仍有 error 时抛携带最终 report 的安全 terminal error", async () => {
     const audit = vi.fn().mockResolvedValue(errorReport);
     const repair = vi.fn().mockResolvedValue({
       operations: [{
@@ -562,14 +659,14 @@ describe("enforceGenesisQuality", () => {
         initialErrorCount: 1,
         initialWarningCount: 0,
         repaired: true,
-        auditPasses: 6,
+        auditPasses: 17,
         durationMs: expect.any(Number),
       },
     });
     expect((caught as Error).message).toBe("创世语义修复后仍有阻断问题，已安全终止生成");
     expect((caught as Error).message).not.toContain("旧王冠已经归还");
     expect(isTransientLlmError(caught)).toBe(false);
-    expect(repair).toHaveBeenCalledTimes(5);
-    expect(audit).toHaveBeenCalledTimes(6);
+    expect(repair).toHaveBeenCalledTimes(16);
+    expect(audit).toHaveBeenCalledTimes(17);
   });
 });

@@ -56,7 +56,7 @@ type SemanticRepairRequest = {
   maxOutputBytes: number;
 };
 
-const MAX_SEMANTIC_REPAIR_ROUNDS = 5;
+const MAX_SEMANTIC_REPAIR_ROUNDS = 16;
 
 const JsonTextSchema = z.string().refine((value) => {
   try {
@@ -148,7 +148,7 @@ function withMetrics(
   report: GenesisSemanticAuditResult,
   initialReport: GenesisSemanticAuditResult,
   repaired: boolean,
-  auditPasses: 1 | 2 | 3 | 4 | 5 | 6,
+  auditPasses: number,
   startedAt: number,
 ): GenesisQualityReport {
   return {
@@ -220,6 +220,39 @@ function canonicalizeDirectArrayIssuePath(
   return { ...issue, path };
 }
 
+const REMOVABLE_REFERENCE_ISSUE_TYPES = new Set<GenesisSemanticIssue["type"]>([
+  "anchor_state_leak",
+  "ontology_mismatch",
+  "causal_disconnect",
+  "continuity_mix",
+  "unsupported_canon_claim",
+]);
+
+function canonicalizeReferenceLeafIssuePath(
+  deck: WorldDeck,
+  issue: GenesisSemanticIssue,
+): GenesisSemanticIssue {
+  if (issue.severity !== "error" || !REMOVABLE_REFERENCE_ISSUE_TYPES.has(issue.type)) {
+    return issue;
+  }
+  const segments = pathSegments(issue.path);
+  const field = segments.at(-1);
+  const index = segments.at(-2);
+  const collection = segments.at(-3);
+  const isRemovableReference = (collection === "keyCharacterRefs" && field === "ref")
+    || (collection === "factionMemberships" && field === "factionRef")
+    || (collection === "relationsAtAnchor" && (field === "sourceRef" || field === "targetRef"));
+  if (!isRemovableReference || index === undefined || !/^\d+$/.test(index)) return issue;
+
+  const entrySegments = segments.slice(0, -1);
+  const entry = readPath(deck, entrySegments);
+  if (entry === MISSING_PATH) return issue;
+  return {
+    ...issue,
+    path: issue.path.replace(/\.(?:ref|factionRef|sourceRef|targetRef)$/, ""),
+  };
+}
+
 function requiredUnsupportedRemovalPaths(
   deck: WorldDeck,
   issues: GenesisSemanticIssue[],
@@ -231,6 +264,29 @@ function requiredUnsupportedRemovalPaths(
     if (key === undefined || !/^\d+$/.test(key)) return [];
     const parent = readPath(deck, segments.slice(0, -1));
     return Array.isArray(parent) && Number(key) < parent.length ? [issue.path] : [];
+  });
+}
+
+function requiredReferenceRemovalPaths(
+  deck: WorldDeck,
+  issues: GenesisSemanticIssue[],
+): string[] {
+  return issues.flatMap((issue) => {
+    if (issue.severity !== "error" || !REMOVABLE_REFERENCE_ISSUE_TYPES.has(issue.type)) return [];
+    const segments = pathSegments(issue.path);
+    const index = segments.at(-1);
+    const collection = segments.at(-2);
+    if (
+      index === undefined
+      || !/^\d+$/.test(index)
+      || (
+        collection !== "keyCharacterRefs"
+        && collection !== "factionMemberships"
+        && collection !== "relationsAtAnchor"
+      )
+    ) return [];
+    const parent = readPath(deck, segments.slice(0, -1));
+    return Array.isArray(parent) && Number(index) < parent.length ? [issue.path] : [];
   });
 }
 
@@ -323,6 +379,32 @@ function hardenDirectArrayEntityReplacement(
   return mergeEntitySemanticFields(original, replacement);
 }
 
+const TOP_LEVEL_ENTITY_COLLECTIONS = new Set([
+  "majorGods",
+  "majorCharacters",
+  "factions",
+  "races",
+  "places",
+]);
+
+function hardenEntityCollectionReplacement(
+  target: unknown,
+  path: string,
+  replacement: unknown,
+): unknown {
+  if (!TOP_LEVEL_ENTITY_COLLECTIONS.has(path) || !Array.isArray(replacement)) return replacement;
+  const original = readPath(target, pathSegments(path));
+  if (!Array.isArray(original)) return replacement;
+
+  return replacement.map((entity, index) => {
+    const replacementTokens = new Set(semanticIdentityTokens(entity));
+    const matched = original.find((candidate) =>
+      semanticIdentityTokens(candidate).some((token) => replacementTokens.has(token)),
+    ) ?? original[index];
+    return matched === undefined ? entity : mergeEntitySemanticFields(matched, entity);
+  });
+}
+
 function sanitizeReferenceCollectionReplacement(
   target: unknown,
   path: string,
@@ -394,10 +476,14 @@ function applySemanticRepairs(
       : hardenDirectArrayEntityReplacement(
         bounded,
         segments,
-        sanitizeReferenceCollectionReplacement(
+        hardenEntityCollectionReplacement(
           bounded,
           operation.path,
-          JSON.parse(operation.valueJson),
+          sanitizeReferenceCollectionReplacement(
+            bounded,
+            operation.path,
+            JSON.parse(operation.valueJson),
+          ),
         ),
       );
     writePath(bounded, segments, replacement);
@@ -429,13 +515,21 @@ export async function enforceGenesisQuality(
     let repairedDeck: WorldDeck | null = null;
     let repairFeedback: string | undefined;
     const repairIssues = currentReport.issues.map((issue) =>
-      canonicalizeDirectArrayIssuePath(currentDeck, issue),
+      canonicalizeReferenceLeafIssuePath(
+        currentDeck,
+        canonicalizeDirectArrayIssuePath(currentDeck, issue),
+      ),
     );
     const issueValues = repairIssues.map(({ path }) => {
       const value = readPath(currentDeck, pathSegments(path));
       return { path, value: value === MISSING_PATH ? null : value };
     });
-    const requiredRemovePaths = requiredUnsupportedRemovalPaths(currentDeck, repairIssues);
+    const requiredRemovePaths = [
+      ...new Set([
+        ...requiredUnsupportedRemovalPaths(currentDeck, repairIssues),
+        ...requiredReferenceRemovalPaths(currentDeck, repairIssues),
+      ]),
+    ];
     for (let patchAttempt = 1; patchAttempt <= 2; patchAttempt += 1) {
       const repairRequest = {
         task: "genesis" as const,
@@ -458,8 +552,8 @@ export async function enforceGenesisQuality(
         temperature: 0.1,
         maxTokens: 8000,
         maxAttempts: 2,
-        transportMaxAttempts: 1,
-        allowTransportFallback: false,
+        transportMaxAttempts: 2,
+        allowTransportFallback: true,
         failOnTruncation: false,
         cache: { namespace: `genesis-quality:v2:${input.mode}:round-${round}:patch-${patchAttempt}` },
         maxInputBytes: GENESIS_MODEL_INPUT_MAX_BYTES,
@@ -502,7 +596,7 @@ export async function enforceGenesisQuality(
     }
     if (!repairedDeck) throw new Error("语义补丁未生成可校验世界");
     const nextAudit = await deps.audit(repairedDeck, auditOptions(input));
-    finalReport = withMetrics(nextAudit, initialReport, true, (round + 1) as 2 | 3 | 4 | 5 | 6, startedAt);
+    finalReport = withMetrics(nextAudit, initialReport, true, round + 1, startedAt);
 
     if (!hasBlockingIssues(nextAudit)) {
       return { deck: repairedDeck, report: finalReport };
