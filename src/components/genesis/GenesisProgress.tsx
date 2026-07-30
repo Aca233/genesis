@@ -39,6 +39,13 @@ type Task = {
 
 type Connection = "connecting" | "live" | "reconnecting";
 
+export function genesisConnectionLabel(taskStatus: string | undefined, connection: Connection): string {
+  if (taskStatus === "waiting_for_provider") return "模型服务暂不可用，后台自动重试";
+  if (connection === "live") return "模型仍在回应";
+  if (connection === "connecting") return "正在建立连接";
+  return "连接中断，正在恢复";
+}
+
 export function GenesisProgress({ taskId }: { taskId: string }) {
   const router = useRouter();
   const [task, setTask] = useState<Task | null>(null);
@@ -66,7 +73,6 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
       latestTask.current = next;
       setTask(next);
       setPageError(null);
-      if (next.status === "waiting_for_provider") setConnection("reconnecting");
       if (next.status === "completed" && next.worldId && !redirected.current) {
         redirected.current = true;
         router.replace(`/genesis/${next.worldId}`);
@@ -200,8 +206,8 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
           <div className="rounded-xl border border-line bg-paper-sunken/60 p-4 text-sm shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--ink)_8%,transparent)]">
             <div className="flex items-center justify-between gap-4">
               <span className="flex items-center gap-2 text-ink-soft">
-                <span className={`h-2.5 w-2.5 rounded-full ${connection === "live" ? "animate-pulse bg-gilt" : connection === "connecting" ? "animate-pulse bg-ink-faint" : "bg-cinnabar"}`} />
-                {connection === "live" ? "模型仍在回应" : connection === "connecting" ? "正在建立连接" : "连接中断，正在恢复"}
+                <span className={`h-2.5 w-2.5 rounded-full ${task?.status === "waiting_for_provider" || connection === "live" ? "animate-pulse bg-gilt" : connection === "connecting" ? "animate-pulse bg-ink-faint" : "bg-cinnabar"}`} />
+                {genesisConnectionLabel(task?.status, connection)}
               </span>
               <span className="tabular-nums text-ink-faint">{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</span>
             </div>
