@@ -12,7 +12,7 @@ import {
 } from "./task-runner";
 import { CreatorWorldDeckSchema, PantheonWorldDeckSchema } from "@/lib/cards/schemas";
 import { completeDeck } from "@/lib/abilities/embark.test-fixtures";
-import { LlmBudgetError } from "@/lib/llm/permits";
+import { LlmBudgetError, LlmCapacityError } from "@/lib/llm/permits";
 import {
   LORE_INDEX_UNAVAILABLE_NOTICE,
   lorebookExcerpts,
@@ -493,6 +493,20 @@ describe("genesis task runner", () => {
     }));
     expect(harness.taskUpdateMany).not.toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: "waiting_for_provider" }),
+    }));
+  });
+
+  it("公平队列等待超时保持 queued，不写入终局错误", async () => {
+    const harness = createRunnerHarness({ intentContract: crossoverIntent });
+    harness.generateDeck.mockRejectedValue(new LlmCapacityError());
+
+    await runGenesisTask("task-1", harness.deps as never);
+
+    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "queued", error: null }),
+    }));
+    expect(harness.taskUpdateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "failed" }),
     }));
   });
 

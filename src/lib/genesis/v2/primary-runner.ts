@@ -7,7 +7,7 @@ import {
   StructuredOutputValidationError,
 } from "@/lib/llm/structured";
 import { isTransientLlmError } from "@/lib/llm/gateway";
-import { LlmCircuitOpenError } from "@/lib/llm/permits";
+import { LlmCapacityError, LlmCircuitOpenError } from "@/lib/llm/permits";
 import { classifyTransportFailure } from "@/lib/llm/transport";
 import { parseStWorldbook } from "@/lib/lorebook/st-import";
 import { materialConstraintsPrompt } from "@/lib/materials/prompt";
@@ -531,16 +531,17 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
       || (transportFailure.terminalEvidence === "terminal_unknown"
         && transportFailure.stableErrorCode !== "UNKNOWN_ERROR")
     );
+    const capacityWait = error instanceof LlmCapacityError;
     const retry = !terminalQualityFailure
       && !waitingForProvider
-      && (error instanceof GenesisV2RecoverableStageError
-        || error instanceof GenesisSemanticAuditError
-        || error instanceof GenesisSemanticRepairValidationError
-        || error instanceof StructuredOutputValidationError
-        || isTransientLlmError(error)
-        || isRetryablePersistenceError(error))
-      && job.attempt < MAX_JOB_ATTEMPTS;
-    const retryFeedback = retry ? safeError(error) : null;
+      && (capacityWait || ((error instanceof GenesisV2RecoverableStageError
+          || error instanceof GenesisSemanticAuditError
+          || error instanceof GenesisSemanticRepairValidationError
+          || error instanceof StructuredOutputValidationError
+          || isTransientLlmError(error)
+          || isRetryablePersistenceError(error))
+        && job.attempt < MAX_JOB_ATTEMPTS));
+    const retryFeedback = retry && !capacityWait ? safeError(error) : null;
     const terminalError = retry || waitingForProvider ? null : safeError(error);
     await prisma.$transaction(async (tx) => {
       const activeTask = await tx.genesisTask.findFirst({

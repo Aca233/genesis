@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { completeDeck } from "@/lib/abilities/embark.test-fixtures";
 import type { WorldDeck } from "@/lib/cards/schemas";
-import { LlmCircuitOpenError } from "@/lib/llm/permits";
+import { LlmCapacityError, LlmCircuitOpenError } from "@/lib/llm/permits";
 import { StructuredOutputValidationError } from "@/lib/llm/structured";
 import type { GenesisIntentContract } from "../intent";
 import { GenesisSemanticAuditError } from "../semantic-audit";
@@ -487,6 +487,24 @@ describe("Genesis V2 primary runner", () => {
     expect(mocks.outboxCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({ eventType: "task_waiting_for_provider" }),
     });
+  });
+
+  it("公平队列等待超时只重排当前节点，不终止创世或注入错误反馈", async () => {
+    configureJob("blueprint");
+    mocks.completeStructured.mockRejectedValue(new LlmCapacityError());
+
+    await runGenesisV2PrimaryJob("job-blueprint");
+
+    expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "queued", error: null }),
+    }));
+    expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "running", error: null }),
+    }));
+    expect(mocks.outboxCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ eventType: "v2_stage_requeued" }),
+    });
+    expect(mocks.wakeScheduler).toHaveBeenCalledOnce();
   });
 
   it("语义门终止时持久化审计详情，且不创建世界", async () => {
