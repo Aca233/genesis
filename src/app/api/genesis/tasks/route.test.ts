@@ -42,15 +42,12 @@ describe("POST /api/genesis/tasks", () => {
         budgetMaxCalls: 320,
         budgetMaxInput: 30_000_000,
         budgetMaxOutput: 2_500_000,
-        engineVersion: "dag-v2",
+        engineVersion: "legacy-v1",
         jobs: {
-          create: expect.arrayContaining([
-            expect.objectContaining({ nodeKey: "v2:blueprint", engineVersion: "dag-v2" }),
-            expect.objectContaining({ nodeKey: "v2:pantheon_domain", engineVersion: "dag-v2" }),
-            expect.objectContaining({ nodeKey: "v2:civilizations", engineVersion: "dag-v2" }),
-            expect.objectContaining({ nodeKey: "v2:eras", engineVersion: "dag-v2" }),
-            expect.objectContaining({ nodeKey: "v2:characters", engineVersion: "dag-v2" }),
-          ]),
+          create: [expect.objectContaining({
+            nodeKey: "legacy-world-deck",
+            engineVersion: "legacy-v1",
+          })],
         },
         outboxEvents: { create: expect.objectContaining({ aggregateVersion: 1 }) },
       }),

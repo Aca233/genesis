@@ -77,7 +77,7 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     expect(messages[1]).toMatchObject({ role: "system", cacheScope: "world" });
   });
 
-  it("injects a populated chapter brief as a dynamic binding block", async () => {
+  it("keeps chapter brief data out of the July 24 narrator prompt", async () => {
     mockChapter({
       brief: {
         objective: "守住北港直到援军抵达",
@@ -93,10 +93,16 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     });
     const brief = messages.find((message) => message.content.includes("CHAPTER BRIEF"));
 
-    expect(brief).toMatchObject({ role: "system", cacheScope: "dynamic" });
-    expect(brief?.content).toContain("Objective: 守住北港直到援军抵达");
-    expect(brief?.content).toContain("Must remain hidden:\n- 潮神已经倒戈");
-    expect(brief?.content).toContain("Hint only:\n- 海堤下传来空洞回声");
+    expect(brief).toBeUndefined();
+  });
+
+  it("uses the short July 24 continue directive by default", async () => {
+    const messages = await buildNarratorContext({
+      worldId: "world-1", chapterId: "chapter-1", scale: "scene", mode: "continue",
+    });
+
+    expect(messages.at(-1)?.content).toContain("继续叙事，顺势推进。");
+    expect(messages.at(-1)?.content).not.toContain("换一个切入视点或感官开场");
   });
 
   it("pantheon 征兆只租借注入（至多 2 条），不在构建时标记消费", async () => {
@@ -379,7 +385,7 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     expect(messages.allowedEventIds).toEqual(["event-focus"]);
   });
 
-  it("离席 ≥ 12h 后 continue 重入：注入 RE-ENTRY 块并复用租借征兆，位于 user 前最后一条 system", async () => {
+  it("离席 ≥ 12h 后也不向正文注入后加的 RE-ENTRY 导演块", async () => {
     mockChapter({
       messages: [{
         role: "narrator", content: "林霁站在潮神庙前",
@@ -395,14 +401,8 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
       worldId: "world-1", chapterId: "chapter-1", scale: "scene", mode: "continue",
     });
 
-    const last = messages.at(-1);
-    const reentry = messages.at(-2);
-    expect(last?.role).toBe("user");
-    expect(reentry?.role).toBe("system");
-    expect(reentry?.content).toContain("RE-ENTRY AFTER ABSENCE");
-    expect(reentry?.content).toContain("约 13 小时");
-    expect(reentry?.content).toContain("潮水连续三夜倒流");
-    expect(reentry?.content).toContain("灯塔火光转为青色");
+    expect(messages.at(-1)?.role).toBe("user");
+    expect(messages.some((message) => message.content.includes("RE-ENTRY AFTER ABSENCE"))).toBe(false);
   });
 
   it("离席不足 12h 不注入重入块", async () => {
@@ -441,7 +441,7 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     expect(messages.some((m) => m.content.includes("RE-ENTRY AFTER ABSENCE"))).toBe(false);
   });
 
-  it("creator 离席重入：线索使用活跃事件标题", async () => {
+  it("creator 离席后也不注入 RE-ENTRY 导演块", async () => {
     const deck = completeCreatorDeck();
     vi.clearAllMocks();
     mocks.prisma.world.findUnique.mockResolvedValue({
@@ -481,11 +481,10 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
       worldId: "world-1", chapterId: "chapter-1", playerInput: "观察神庙",
       scale: "scene", mode: "say",
     });
-    const reentry = messages.find((m) => m.content.includes("RE-ENTRY AFTER ABSENCE"));
-    expect(reentry?.content).toContain("- 潮港阴谋");
+    expect(messages.some((message) => message.content.includes("RE-ENTRY AFTER ABSENCE"))).toBe(false);
   });
 
-  it("线索为空时重入块要求虚构一条与 CURRENT WORLD ACTIVITY 一致的幕后发展", async () => {
+  it("线索为空且离席时也不要求虚构幕后发展", async () => {
     mockChapter({
       messages: [{
         role: "narrator", content: "林霁站在潮神庙前",
@@ -496,10 +495,7 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     const messages = await buildNarratorContext({
       worldId: "world-1", chapterId: "chapter-1", scale: "scene", mode: "continue",
     });
-    const reentry = messages.find((m) => m.content.includes("RE-ENTRY AFTER ABSENCE"));
-    expect(reentry?.content).toContain(
-      "No specific thread is supplied — invent one small, concrete offstage development consistent with CURRENT WORLD ACTIVITY.",
-    );
+    expect(messages.some((message) => message.content.includes("RE-ENTRY AFTER ABSENCE"))).toBe(false);
   });
 
   it("era_digest 存在时注入 ERA DIGESTS 常驻总纲，其余条目列于 RECENT & RELATED ENTRIES", async () => {

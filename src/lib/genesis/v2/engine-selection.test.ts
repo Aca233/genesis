@@ -5,16 +5,16 @@ import {
 } from "./engine-selection";
 
 describe("Genesis V2 primary engine selection", () => {
-  it("defaults every new task to V2", () => {
+  it("defaults new tasks to the July 24 legacy generator", () => {
     expect(readGenesisV2PrimaryRollout({})).toEqual({
-      percent: 100,
+      percent: 0,
       userIds: new Set(),
     });
     expect(selectGenesisEngine({
       userId: "user-1",
       requestHash: "request-1",
       rollout: readGenesisV2PrimaryRollout({}),
-    })).toBe("dag-v2");
+    })).toBe("legacy-v1");
   });
 
   it("routes explicit internal users to V2 even at zero percent", () => {
@@ -36,7 +36,7 @@ describe("Genesis V2 primary engine selection", () => {
     expect(second).toBe(first);
   });
 
-  it("supports explicit legacy rollback and normalizes unsafe percent values to V2", () => {
+  it("supports explicit V2 rollout and normalizes unsafe percent values to legacy", () => {
     expect(selectGenesisEngine({
       userId: "user-1",
       requestHash: "request-1",
@@ -47,8 +47,8 @@ describe("Genesis V2 primary engine selection", () => {
       requestHash: "request-1",
       rollout: readGenesisV2PrimaryRollout({ GENESIS_V2_PRIMARY_PERCENT: "100" }),
     })).toBe("dag-v2");
-    expect(readGenesisV2PrimaryRollout({ GENESIS_V2_PRIMARY_PERCENT: "101" }).percent).toBe(100);
-    expect(readGenesisV2PrimaryRollout({ GENESIS_V2_PRIMARY_PERCENT: "not-a-number" }).percent).toBe(100);
-    expect(readGenesisV2PrimaryRollout({ GENESIS_V2_PRIMARY_PERCENT: "" }).percent).toBe(100);
+    expect(readGenesisV2PrimaryRollout({ GENESIS_V2_PRIMARY_PERCENT: "101" }).percent).toBe(0);
+    expect(readGenesisV2PrimaryRollout({ GENESIS_V2_PRIMARY_PERCENT: "not-a-number" }).percent).toBe(0);
+    expect(readGenesisV2PrimaryRollout({ GENESIS_V2_PRIMARY_PERCENT: "" }).percent).toBe(0);
   });
 });

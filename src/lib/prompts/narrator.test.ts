@@ -130,16 +130,12 @@ describe("narrator quality contract", () => {
     expect(prompt).toContain("Never invent permanent personality traits merely to create variety");
   });
 
-  it("checks causal action, scene emphasis, dialogue function, repetition and event prerequisites", () => {
+  it("keeps the July 24 living-character guidance without the later narrative checklist", () => {
     for (const mode of ["pantheon", "creator"] as const) {
       const prompt = narratorGlobalSystem(mode);
-      expect(prompt).toContain("NARRATIVE DISCIPLINE");
-      expect(prompt).toContain("present goal -> known information -> available means -> relationship pressure -> choice -> visible consequence");
-      expect(prompt).toContain("Compress routine transitions");
-      expect(prompt).toContain("relationship changes, consequential choices, ability costs and durable world changes");
-      expect(prompt).toContain("Every spoken line must do at least one job");
-      expect(prompt).toContain("conflict pattern, character reaction or resolution shape");
-      expect(prompt).toContain("time, location, participant knowledge, relationship state and required prior events");
+      expect(prompt).not.toContain("NARRATIVE DISCIPLINE");
+      expect(prompt).not.toContain("present goal -> known information -> available means -> relationship pressure -> choice -> visible consequence");
+      expect(prompt).not.toContain("Every spoken line must do at least one job");
     }
   });
 
@@ -245,7 +241,7 @@ describe("narrator quality contract", () => {
 });
 
 
-describe("narrator discipline pack", () => {
+describe("July 24 narrator writing profile", () => {
   it("declares supplied context blocks as binding canon over the prose window", () => {
     const prompt = narratorGlobalSystem("pantheon");
     expect(prompt).toContain("CODEX CARDS, CHRONICLE, LOREBOOK and ACTIVE REALITY STATE blocks are established canon");
@@ -255,27 +251,26 @@ describe("narrator discipline pack", () => {
     expect(narratorGlobalSystem("creator")).toContain("consistency with supplied codex and chronicle facts");
   });
 
-  it("uses the story-so-far window as a repetition ledger and rations stock beats", () => {
+  it("does not turn the story window into a repetition or stock-phrase checklist", () => {
     const prompt = narratorGlobalSystem("pantheon");
-    expect(prompt).toContain("repetition ledger");
-    expect(prompt).toContain("Enter each reply from a fresh angle");
-    expect(prompt).toContain("Ration stock beats");
-    expect(prompt).toContain("一丝/一抹/一缕");
-    expect(prompt).toContain("眼中闪过/嘴角勾起/空气仿佛凝固");
-    expect(prompt).toContain("write its physical consequence, not a sound-effect line");
+    expect(prompt).not.toContain("repetition ledger");
+    expect(prompt).not.toContain("Enter each reply from a fresh angle");
+    expect(prompt).not.toContain("Ration stock beats");
+    expect(prompt).not.toContain("一丝/一抹/一缕");
+    expect(prompt).not.toContain("眼中闪过/嘴角勾起/空气仿佛凝固");
   });
 
-  it("gives every scale an explicit length band", () => {
+  it("keeps scale guidance without later fixed length quotas", () => {
     expect(narratorTurnSystem({ mode: "pantheon", scale: "moment" }))
-      .toContain("Target 150-450 Chinese characters");
+      .not.toContain("Target 150-450 Chinese characters");
     expect(narratorTurnSystem({ mode: "pantheon", scale: "scene" }))
-      .toContain("Target 500-1200 Chinese characters; at most one --- divider");
+      .not.toContain("Target 500-1200 Chinese characters");
     expect(narratorTurnSystem({ mode: "pantheon", scale: "years" }))
-      .toContain("with at most 2 close-up vignettes");
+      .not.toContain("with at most 2 close-up vignettes");
     expect(narratorTurnSystem({ mode: "pantheon", scale: "era" }))
-      .toContain("Target 800-1800 Chinese characters");
+      .not.toContain("Target 800-1800 Chinese characters");
     expect(narratorTurnSystem({ mode: "pantheon", scale: "epoch" }))
-      .toContain("no scene-level dialogue except quoted historical fragments");
+      .not.toContain("no scene-level dialogue except quoted historical fragments");
   });
 
   it("locks year labels to the established era format", () => {
@@ -287,20 +282,20 @@ describe("narrator discipline pack", () => {
     expect(prompt).toContain("exactly the established era format supplied above");
   });
 
-  it("demands suggestion diversity and binds every style-card field", () => {
+  it("keeps positive style guidance without synonym-family policing", () => {
     const prompt = narratorGlobalSystem("pantheon");
     expect(prompt).toContain("meaningfully different in kind (bold vs cautious, action vs inquiry, different targets)");
-    expect(prompt).toContain("Follow every field of the STYLE CARD");
-    expect(prompt).toContain("banning its close synonym family");
-    expect(prompt).toContain("example sentences are tone anchors, never to be copied verbatim");
+    expect(prompt).toContain("Follow the STYLE CARD while keeping Chinese prose concrete, fluid and human");
+    expect(prompt).not.toContain("banning its close synonym family");
+    expect(prompt).not.toContain("example sentences are tone anchors, never to be copied verbatim");
   });
 
-  it("keeps openings scenic instead of deck inventories in both modes", () => {
+  it("does not impose later deck-inventory or opening-length quotas", () => {
     for (const mode of ["pantheon", "creator"] as const) {
       const directive = openingDirective(mode);
-      expect(directive).toContain("Do not inventory the world deck");
-      expect(directive).toContain("naming at most three gods or factions");
-      expect(directive).toContain("Target 800-1500 Chinese characters");
+      expect(directive).not.toContain("Do not inventory the world deck");
+      expect(directive).not.toContain("naming at most three gods or factions");
+      expect(directive).not.toContain("Target 800-1500 Chinese characters");
     }
   });
 });
@@ -341,22 +336,23 @@ describe("creator unified narration contract", () => {
     expect(prompt).toContain("clearly witnessed");
   });
 
-  it("opens creator worlds inside a concrete scene without observer framing", () => {
+  it("opens creator worlds with the July 24 broad tableau", () => {
     const creator = openingDirective("creator");
     const pantheon = openingDirective("pantheon");
 
     expect(creator).toContain("present era");
-    expect(creator).toContain("specific place and time");
+    expect(creator).toContain("broad tableau");
     expect(creator).toContain("world-internal tension");
-    expect(creator).toContain("META suggestions only");
-    expect(creator).toContain("unsupported deaths");
-    expect(creator).not.toContain("broad tableau");
-    expect(creator).not.toContain("offer observation/focus choices");
+    expect(creator).toContain("offer observation/focus choices");
+    expect(creator).not.toContain("specific place and time");
+    expect(creator).not.toContain("unsupported deaths");
     expect(creator).not.toContain("Chapter One");
     expect(creator).toContain("no descent");
     expect(creator).not.toContain("player god's starting situation");
     expect(pantheon).toContain("genesis / descent set-piece");
     expect(pantheon).toContain("player god's starting situation");
+    expect(pantheon).not.toContain("Do not inventory the world deck");
+    expect(pantheon).not.toContain("Target 800-1500 Chinese characters");
   });
 
   it("keeps second person external in creator mode", () => {

@@ -14,19 +14,11 @@ import { CreatorWorldDeckSchema, PantheonWorldDeckSchema } from "@/lib/cards/sch
 import { completeDeck } from "@/lib/abilities/embark.test-fixtures";
 import { LlmBudgetError, LlmCapacityError } from "@/lib/llm/permits";
 import {
-  LORE_INDEX_UNAVAILABLE_NOTICE,
   lorebookExcerpts,
   type ParsedLorebookEntry,
 } from "@/lib/lorebook/st-import";
-import { LORE_GENESIS_BUDGET_CHARS, selectLoreForGenesis } from "@/lib/lore-index/selection";
-import type { LoreIndexRow } from "@/lib/lore-index/schemas";
 import type { GenesisIntentContract } from "./intent";
-import { GenesisIntentGenerationError } from "./intent-generator";
-import {
-  GenesisSemanticAuditError,
-  type GenesisQualityReport,
-} from "./semantic-audit";
-import { GenesisSemanticGateError } from "./semantic-gate";
+import type { GenesisQualityReport } from "./semantic-audit";
 
 function task(overrides: Record<string, unknown> = {}) {
   return {
@@ -85,25 +77,6 @@ const repairedReport: GenesisQualityReport = {
     repaired: true,
     auditPasses: 2,
     durationMs: 87,
-  },
-};
-
-const rejectedReport: GenesisQualityReport = {
-  verdict: "errors",
-  issues: [{
-    severity: "error",
-    path: "openingChapterBrief.objective",
-    type: "power_shortcut",
-    explanation: "正文不应进入观测事件",
-    evidenceRefs: [],
-    repairInstruction: "移除开局成品能力",
-  }],
-  meta: {
-    initialErrorCount: 1,
-    initialWarningCount: 0,
-    repaired: true,
-    auditPasses: 2,
-    durationMs: 42,
   },
 };
 
@@ -202,78 +175,28 @@ function loreEntry(keys: string[], content: string, enabled = true): ParsedLoreb
   return { keys, content, enabled, stExtra: {} };
 }
 
-function loreRow(
-  sourceKey: string,
-  category: LoreIndexRow["category"],
-  title: string,
-  priority: number,
-  excerpt: string,
-): LoreIndexRow {
-  return {
-    sourceKey,
-    title,
-    keywords: [title],
-    category,
-    temporalHints: { eraGuess: "", relativeToMainline: "unknown" },
-    priority,
-    excerpt,
-  };
-}
-
-describe("resolveLorebookExcerpts（§11 T4b 创世注入切换）", () => {
+describe("resolveLorebookExcerpts（7 月 24 日上传序）", () => {
   const entries = [
     loreEntry(["轶闻"], "边角轶闻内容，上传序第一。"),
     loreEntry(["编年史"], "主线前十年大事记，上传序第二。"),
   ];
 
-  it("分类成功：用类别预算选择（8000 字符）替代原始上传序截取", async () => {
-    const rows = [
-      loreRow("k-anec", "other", "边角轶闻", 10, "边角轶闻摘录"),
-      loreRow("k-tl", "timeline", "主线编年史", 90, "主线前十年大事记摘录"),
-    ];
-    const classify = vi.fn(async () => rows);
-    const select = vi.fn(selectLoreForGenesis);
+  it("按上传顺序直接摘录，不运行后加的 AI 分类与重排", async () => {
+    const result = await resolveLorebookExcerpts(entries);
 
-    const result = await resolveLorebookExcerpts(entries, "test-user", { classify, select });
-
-    expect(classify).toHaveBeenCalledWith(entries, "backstage", { userId: "test-user" });
-    expect(select).toHaveBeenCalledWith(rows, LORE_GENESIS_BUDGET_CHARS);
-    expect(LORE_GENESIS_BUDGET_CHARS).toBe(8000);
-    expect(result).toBe(selectLoreForGenesis(rows, LORE_GENESIS_BUDGET_CHARS).excerpt);
-    // 注入顺序由预算选择器决定（timeline 先于 other），不再是上传顺序
-    expect(result).toBe("[timeline|主线编年史]\n主线前十年大事记摘录\n---\n[other|边角轶闻]\n边角轶闻摘录");
-    expect(result).not.toContain(LORE_INDEX_UNAVAILABLE_NOTICE);
-  });
-
-  it("分类失败：回退摘录与既有 lorebookExcerpts 逐字节一致，仅前置一行说明", async () => {
-    const classify = vi.fn(async () => null);
-    const select = vi.fn(selectLoreForGenesis);
-
-    const result = await resolveLorebookExcerpts(entries, "test-user", { classify, select });
-
-    expect(select).not.toHaveBeenCalled();
-    expect(result).toBe(`资料索引不可用，按原始顺序注入\n${lorebookExcerpts(entries)}`);
+    expect(result).toBe(lorebookExcerpts(entries));
     expect(result).toBe(
-      "资料索引不可用，按原始顺序注入\n" +
-        "[keys: 轶闻]\n边角轶闻内容，上传序第一。\n---\n[keys: 编年史]\n主线前十年大事记，上传序第二。",
+      "[keys: 轶闻]\n边角轶闻内容，上传序第一。\n---\n[keys: 编年史]\n主线前十年大事记，上传序第二。",
     );
   });
 
-  it("无世界书条目：不触发分类，返回 undefined", async () => {
-    const classify = vi.fn(async () => null);
-    const select = vi.fn(selectLoreForGenesis);
-
-    await expect(resolveLorebookExcerpts([], "test-user", { classify, select })).resolves.toBeUndefined();
-    expect(classify).not.toHaveBeenCalled();
+  it("无世界书条目返回 undefined", async () => {
+    await expect(resolveLorebookExcerpts([])).resolves.toBeUndefined();
   });
 
-  it("分类成功但无可用行：返回 undefined（与原路径对空摘录的语义一致）", async () => {
-    const classify = vi.fn(async () => [] as LoreIndexRow[]);
-    const select = vi.fn(selectLoreForGenesis);
-
-    await expect(
-      resolveLorebookExcerpts([loreEntry(["禁"], "全部禁用", false)], "test-user", { classify, select }),
-    ).resolves.toBeUndefined();
+  it("无可用行返回 undefined", async () => {
+    await expect(resolveLorebookExcerpts([loreEntry(["禁"], "全部禁用", false)]))
+      .resolves.toBeUndefined();
   });
 });
 
@@ -344,138 +267,34 @@ describe("genesis task runner", () => {
     expect(() => toGenesisTaskDto(task({ mode: "absolute" }) as never)).toThrow();
   });
 
-  it("先持久化冻结 intent，再生成完整 deck，并把同一 owner 传给 intent 与质量门", async () => {
+  it("legacy 主路径直接生成并持久化 deck，不运行后加的 intent 与语义重写", async () => {
     const harness = createRunnerHarness();
 
     await runGenesisTask("task-1", harness.deps as never);
 
-    const llmOwner = {
-      kind: "genesis_job",
-      id: "job-1",
-      genesisTaskId: "task-1",
-      genesisJobId: "job-1",
-      leaseEpoch: 4,
-      leaseExpiresAt: "2026-07-29T10:01:00.000Z",
-      budgetScope: "primary",
-    };
-    expect(harness.generateIntent).toHaveBeenCalledTimes(1);
-    expect(harness.generateIntent).toHaveBeenCalledWith(expect.objectContaining({
-      mode: "pantheon",
-      decree: "无职转生，但是鲁迪是托尼斯塔克转生",
-      userId: "user-1",
-      owner: llmOwner,
-    }));
-    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        stage: "intent",
-        intentContract: crossoverIntent,
-      }),
-    }));
-    expect(harness.order.indexOf("intent_persisted"))
-      .toBeLessThan(harness.order.indexOf("deck_generation"));
-    expect(harness.buildRequest).toHaveBeenCalledWith(expect.objectContaining({
-      intentContract: crossoverIntent,
-    }));
-    expect(harness.qualityGate).toHaveBeenCalledTimes(1);
-    expect(harness.qualityGate).toHaveBeenCalledWith(expect.objectContaining({
-      deck: completeDeck(),
-      intent: crossoverIntent,
-      owner: llmOwner,
-    }));
-    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ auditReport: repairedReport }),
+    expect(harness.generateIntent).not.toHaveBeenCalled();
+    expect(harness.qualityGate).not.toHaveBeenCalled();
+    expect(harness.buildRequest).toHaveBeenCalledWith(expect.not.objectContaining({
+      intentContract: expect.anything(),
     }));
     expect(harness.worldCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        draftDeck: harness.repairedDeck,
-        genesisIntent: crossoverIntent,
+        draftDeck: completeDeck(),
       }),
     }));
-    expect(harness.recordQualityEvent).toHaveBeenCalledWith(expect.objectContaining({
-      kind: "intent_generated",
-      taskId: "task-1",
-    }));
-    expect(harness.recordQualityEvent).toHaveBeenCalledWith({
-      kind: "semantic_gate_completed",
-      taskId: "task-1",
-      initialErrorCount: 2,
-      initialWarningCount: 1,
-      repaired: true,
-      auditPasses: 2,
-      durationMs: 87,
-      issueCounts: {},
-    });
+    expect(harness.worldCreate.mock.calls[0]?.[0]?.data.genesisIntent).toBeUndefined();
+    expect(harness.recordQualityEvent).not.toHaveBeenCalled();
   });
 
-  it("lease takeover 复用有效 intent，不再次生成", async () => {
-    const harness = createRunnerHarness({ intentContract: crossoverIntent });
-
-    await runGenesisTask("task-1", harness.deps as never);
-
-    expect(harness.generateIntent).not.toHaveBeenCalled();
-    expect(harness.buildRequest).toHaveBeenCalledWith(expect.objectContaining({
-      intentContract: crossoverIntent,
-    }));
-    expect(harness.worldCreate).toHaveBeenCalledTimes(1);
-  });
-
-  it("lease takeover 拒绝与任务模式不匹配的非空 intent，直接 failed 且不重生或创建 world", async () => {
+  it("legacy 恢复时忽略任务中遗留的 intent，不让它改变或阻断卡组", async () => {
     const harness = createRunnerHarness({ intentContract: creatorIntent });
 
     await runGenesisTask("task-1", harness.deps as never);
 
     expect(harness.generateIntent).not.toHaveBeenCalled();
-    expect(harness.buildRequest).not.toHaveBeenCalled();
-    expect(harness.generateDeck).not.toHaveBeenCalled();
-    expect(harness.worldCreate).not.toHaveBeenCalled();
-    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        status: "failed",
-        error: "已冻结的创世意图契约与任务模式不匹配",
-      }),
-    }));
-    expect(harness.taskUpdateMany).not.toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ status: "waiting_for_provider" }),
-    }));
-  });
-
-  it("非空损坏 intent 直接失败，不重新生成且不创建 world", async () => {
-    const harness = createRunnerHarness({
-      intentContract: { sourceBasis: "broken", sourceIps: ["泄漏正文"] },
-    });
-
-    await runGenesisTask("task-1", harness.deps as never);
-
-    expect(harness.generateIntent).not.toHaveBeenCalled();
-    expect(harness.generateDeck).not.toHaveBeenCalled();
-    expect(harness.worldCreate).not.toHaveBeenCalled();
-    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        status: "failed",
-        error: "已冻结的创世意图契约已损坏",
-      }),
-    }));
-    expect(harness.taskUpdateMany).not.toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ status: "waiting_for_provider" }),
-    }));
-  });
-
-  it("intent 生成耗尽直接 failed，不落 world 且记录无正文失败事件", async () => {
-    const harness = createRunnerHarness({
-      intentError: new GenesisIntentGenerationError(new Error("provider terminal unknown")),
-    });
-
-    await runGenesisTask("task-1", harness.deps as never);
-
-    expect(harness.worldCreate).not.toHaveBeenCalled();
     expect(harness.qualityGate).not.toHaveBeenCalled();
-    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ status: "failed" }),
-    }));
-    expect(harness.recordQualityEvent).toHaveBeenCalledWith(expect.objectContaining({
-      kind: "intent_failed",
-      taskId: "task-1",
-    }));
+    expect(harness.generateDeck).toHaveBeenCalledTimes(1);
+    expect(harness.worldCreate).toHaveBeenCalledTimes(1);
   });
 
   it("预算耗尽直接 failed，不进入 provider 探测循环", async () => {
@@ -510,48 +329,16 @@ describe("genesis task runner", () => {
     }));
   });
 
-  it.each([
-    ["audit exhaustion", new GenesisSemanticAuditError(new Error("provider terminal unknown"))],
-    ["residual semantic errors", new GenesisSemanticGateError(rejectedReport)],
-  ])("%s 直接 failed，不进入 waiting_for_provider 且不落 world", async (_label, error) => {
+  it("后加语义门即使配置为失败也不再改写或阻断 legacy 卡组", async () => {
     const harness = createRunnerHarness({
       intentContract: crossoverIntent,
-      qualityError: error,
+      qualityError: new Error("semantic gate must not run"),
     });
 
     await runGenesisTask("task-1", harness.deps as never);
 
-    expect(harness.worldCreate).not.toHaveBeenCalled();
-    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ status: "failed" }),
-    }));
-    expect(harness.taskUpdateMany).not.toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ status: "waiting_for_provider" }),
-    }));
-  });
-
-  it("semantic gate 拒绝时持久化最终报告并仅记录问题类型计数", async () => {
-    const harness = createRunnerHarness({
-      intentContract: crossoverIntent,
-      qualityError: new GenesisSemanticGateError(rejectedReport),
-    });
-
-    await runGenesisTask("task-1", harness.deps as never);
-
-    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        status: "failed",
-        auditReport: rejectedReport,
-      }),
-    }));
-    expect(harness.recordQualityEvent).toHaveBeenCalledWith({
-      kind: "semantic_gate_rejected",
-      taskId: "task-1",
-      errorCount: 1,
-      issueCounts: { power_shortcut: 1 },
-    });
-    expect(JSON.stringify(harness.recordQualityEvent.mock.calls))
-      .not.toContain("正文不应进入观测事件");
+    expect(harness.qualityGate).not.toHaveBeenCalled();
+    expect(harness.worldCreate).toHaveBeenCalledTimes(1);
   });
 
   it("长时间修补期间只由当前 lease token 续租并刷新心跳", async () => {
@@ -624,7 +411,7 @@ describe("genesis task runner", () => {
     expect(creator.mode).toBe("creator");
     expect(creator.system).toContain('mode="creator"');
     expect(creator.user).toContain('mode="creator"');
-    expect(creator.user).toContain(creatorIntent.narrativeCenter.identity);
+    expect(creator.user).not.toContain(creatorIntent.narrativeCenter.identity);
     expect(creator.schema).toBe(CreatorWorldDeckSchema);
 
     const pantheon = buildGenesisRequest({
@@ -669,7 +456,7 @@ describe("genesis task runner", () => {
       maxInputBytes: 262144,
       maxOutputBytes: 2097152,
     });
-    expect(request.user).toContain(crossoverIntent.narrativeCenter.identity);
+    expect(request.user).not.toContain(crossoverIntent.narrativeCenter.identity);
   });
 
   it("创世初稿使用短轮输出上限，由续写接力完成整套卡组", () => {

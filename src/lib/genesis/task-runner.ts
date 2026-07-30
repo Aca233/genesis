@@ -12,9 +12,7 @@ import {
   type WorldDeck,
 } from "@/lib/cards/schemas";
 import { genesisRepairPrompt, genesisSystem, genesisUserPrompt } from "@/lib/prompts/genesis";
-import { fallbackLorebookExcerpts, parseStWorldbook } from "@/lib/lorebook/st-import";
-import { classifyLoreEntries } from "@/lib/lore-index/classifier";
-import { LORE_GENESIS_BUDGET_CHARS, selectLoreForGenesis } from "@/lib/lore-index/selection";
+import { lorebookExcerpts, parseStWorldbook } from "@/lib/lorebook/st-import";
 import { generateGenesisDeck } from "./generate";
 import {
   GenesisSemanticAuditError,
@@ -22,16 +20,9 @@ import {
   type GenesisQualityReport,
 } from "./semantic-audit";
 import { generateGenesisIntent, GenesisIntentGenerationError } from "./intent-generator";
-import {
-  assertGenesisIntentForMode,
-  parseGenesisIntent,
-  type GenesisIntentContract,
-} from "./intent";
+import type { GenesisIntentContract } from "./intent";
 import { enforceGenesisQuality, GenesisSemanticGateError } from "./semantic-gate";
-import {
-  countGenesisSemanticIssues,
-  recordGenesisQualityEvent,
-} from "./quality-observability";
+import { recordGenesisQualityEvent } from "./quality-observability";
 import { GenesisMaterialSnapshotSchema, type GenesisMaterialSnapshot } from "@/lib/materials/types";
 import { materialConstraintsPrompt } from "@/lib/materials/prompt";
 import { deriveStreamingStage, furthestStage, mergeCompletedKeys } from "./stages";
@@ -103,7 +94,7 @@ export function toGenesisTaskDto(task: VersionedPublicTask): GenesisTaskDto {
 type GenesisRequestInput = {
   mode: WorldMode;
   decree: string;
-  intentContract: GenesisIntentContract;
+  intentContract?: GenesisIntentContract;
   lorebookExcerpts?: string;
   materialConstraints?: string;
 };
@@ -185,33 +176,12 @@ export function buildGenesisRepairRequest(
     : { ...shared, schema: CreatorWorldDeckSchema };
 }
 
-type ResolveLoreExcerptsDeps = {
-  classify: typeof classifyLoreEntries;
-  select: typeof selectLoreForGenesis;
-};
-
-/**
- * 创世注入切换（时间一致设计稿 §11，T4b）：
- *
- * 1. 任务携带世界书 → 触发 classifyLoreEntries（backstage 槽位，幂等，
- *    已索引条目按 sourceKey 跨创世复用）；
- * 2. 分类成功 → 用 selectLoreForGenesis 的类别预算选择（≈8000 字符）
- *    替代原始上传序截取；
- * 3. 分类失败/缺席 → 回退到与既有 lorebookExcerpts 逐字节一致的原始摘录，
- *    仅前置一行「资料索引不可用，按原始顺序注入」（不阻断创世）。
- */
 export async function resolveLorebookExcerpts(
   entries: ReturnType<typeof parseStWorldbook>,
-  userId: string,
-  deps: ResolveLoreExcerptsDeps = { classify: classifyLoreEntries, select: selectLoreForGenesis },
+  _userId?: string,
 ): Promise<string | undefined> {
-  if (!entries.length) return undefined;
-  const indexRows = await deps.classify(entries, "backstage", { userId });
-  if (indexRows !== null) {
-    const { excerpt } = deps.select(indexRows, LORE_GENESIS_BUDGET_CHARS);
-    return excerpt || undefined;
-  }
-  return fallbackLorebookExcerpts(entries) || undefined;
+  void _userId;
+  return lorebookExcerpts(entries) || undefined;
 }
 
 type ClaimTx = {
@@ -459,63 +429,16 @@ export async function runGenesisTask(
 
   try {
     parsedEntries = task.lorebook ? parseStWorldbook(task.lorebook) : [];
-    excerpts = await deps.resolveLorebook(parsedEntries, task.userId);
+    excerpts = await deps.resolveLorebook(parsedEntries);
     const materialSnapshot: GenesisMaterialSnapshot | null = task.materialSelection == null
       ? null
       : GenesisMaterialSnapshotSchema.parse(task.materialSelection);
     const mode = WorldModeSchema.parse(task.mode);
     const materialText = materialConstraintsPrompt(materialSnapshot, mode);
-    let intent = task.intentContract === null
-      ? null
-      : parseGenesisIntent(task.intentContract);
-
-    if (task.intentContract !== null && intent === null) {
-      throw new GenesisPersistedIntentError();
-    }
-    if (task.intentContract !== null && intent !== null) {
-      try {
-        assertGenesisIntentForMode(intent, mode);
-      } catch {
-        throw new GenesisPersistedIntentError("已冻结的创世意图契约与任务模式不匹配");
-      }
-    }
-
-    if (intent === null) {
-      persistedStage = furthestStage(persistedStage, "intent");
-      await updateOwnedTask({ stage: persistedStage }, "stage_changed");
-      const intentStartedAt = Date.now();
-      try {
-        intent = await deps.generateIntent({
-          mode,
-          decree: task.decree,
-          userId: task.userId,
-          lorebookExcerpts: excerpts,
-          owner: llmOwner,
-        });
-        deps.recordQualityEvent({
-          kind: "intent_generated",
-          taskId,
-          durationMs: Math.max(0, Date.now() - intentStartedAt),
-        });
-      } catch (error) {
-        deps.recordQualityEvent({
-          kind: "intent_failed",
-          taskId,
-          durationMs: Math.max(0, Date.now() - intentStartedAt),
-        });
-        throw error;
-      }
-      await updateOwnedTask({
-        stage: persistedStage,
-        intentContract: intent as unknown as Prisma.InputJsonValue,
-        leaseExpiresAt: new Date(Date.now() + LEASE_MS),
-      });
-    }
-
     const genesisRequest = deps.buildRequest({
       mode,
       decree: task.decree,
-      intentContract: intent,
+      intentContract: undefined,
       lorebookExcerpts: excerpts,
       materialConstraints: materialText,
     });
@@ -554,7 +477,7 @@ export async function runGenesisTask(
           userId: task.userId,
           owner: llmOwner,
           decree: task.decree,
-          intentContract: intent,
+          intentContract: undefined,
           lorebookExcerpts: excerpts,
           invalidOutput: input.invalidOutput,
           validationError: input.validationError,
@@ -612,62 +535,12 @@ export async function runGenesisTask(
       },
     });
 
-    let quality: Awaited<ReturnType<typeof enforceGenesisQuality>>;
-    try {
-      quality = await deps.qualityGate({
-        deck,
-        mode,
-        decree: task.decree,
-        intent,
-        userId: task.userId,
-        lorebookExcerpts: excerpts,
-        materialSnapshot,
-        materialConstraints: materialText,
-        owner: llmOwner,
-        onStage: async (stage) => {
-          const nextStage = furthestStage(persistedStage, stage);
-          const visibleChanged = nextStage !== persistedStage;
-          persistedStage = nextStage;
-          await updateOwnedTask({
-            stage: persistedStage,
-            ...(stage === "semantic_repair" ? { status: "repairing" } : {}),
-            leaseExpiresAt: new Date(Date.now() + LEASE_MS),
-          }, visibleChanged ? "stage_changed" : undefined);
-        },
-      });
-    } catch (error) {
-      if (error instanceof GenesisSemanticGateError) {
-        deps.recordQualityEvent({
-          kind: "semantic_gate_rejected",
-          taskId,
-          errorCount: error.report.issues.filter(({ severity }) => severity === "error").length,
-          issueCounts: countGenesisSemanticIssues(error.report.issues),
-        });
-      }
-      throw error;
-    }
-
-    const qualityMeta = quality.report.meta;
-    deps.recordQualityEvent({
-      kind: "semantic_gate_completed",
-      taskId,
-      initialErrorCount: qualityMeta?.initialErrorCount
-        ?? quality.report.issues.filter(({ severity }) => severity === "error").length,
-      initialWarningCount: qualityMeta?.initialWarningCount
-        ?? quality.report.issues.filter(({ severity }) => severity === "warning").length,
-      repaired: qualityMeta?.repaired ?? false,
-      auditPasses: qualityMeta?.auditPasses ?? 1,
-      durationMs: qualityMeta?.durationMs ?? 0,
-      issueCounts: countGenesisSemanticIssues(quality.report.issues),
-    });
-
     persistedStage = furthestStage(persistedStage, "saving");
     await updateOwnedTask({
       stage: persistedStage,
       status: "running",
       rawOutput: latestRaw,
       rawExpiresAt: latestRaw ? new Date(Date.now() + GENESIS_RAW_TTL_MS) : null,
-      auditReport: quality.report as unknown as Prisma.InputJsonValue,
       leaseExpiresAt: new Date(Date.now() + LEASE_MS),
     }, "stage_changed");
     clearInterval(leaseHeartbeat);
@@ -675,8 +548,8 @@ export async function runGenesisTask(
       deps.db as unknown as PersistWorldDb,
       task,
       leaseToken,
-      quality.deck,
-      intent,
+      deck,
+      null,
       parsedEntries,
     );
   } catch (error) {
@@ -780,7 +653,7 @@ export async function persistWorld(
   task: GenesisTask,
   leaseToken: string,
   deck: WorldDeck,
-  intent: GenesisIntentContract,
+  intent: GenesisIntentContract | null,
   parsedEntries: ReturnType<typeof parseStWorldbook>,
 ) {
   const mode = WorldModeSchema.parse(task.mode);
@@ -800,7 +673,9 @@ export async function persistWorld(
         userId: task.userId,
         name: deck.worldName,
         genesisInput: task.decree,
-        genesisIntent: intent as unknown as Prisma.InputJsonValue,
+        genesisIntent: intent
+          ? (intent as unknown as Prisma.InputJsonValue)
+          : undefined,
         mode,
         status: "draft",
         draftDeck: deck as unknown as Prisma.InputJsonValue,

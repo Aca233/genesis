@@ -6,7 +6,6 @@ import { ObserverStateSchema, RealityStateSchema } from "@/lib/reality/schemas";
 import { narratorGlobalSystem, narratorTurnSystem, narratorWorldSystem, openingDirective } from "@/lib/prompts/narrator";
 import { buildAbilityContext } from "@/lib/abilities/context";
 import { buildWorldActivityContext } from "@/lib/world-activity/context";
-import { formatChapterBriefSystem } from "./chapter-brief";
 
 /**
  * Context Builder v1（docs/04 §2 组装顺序的 M1 裁剪版）：
@@ -566,7 +565,6 @@ export async function buildNarratorContext(opts: BuildOpts): Promise<NarratorCon
       ? hiddenEntries.map((entry) => ({ id: entry.id, text: entry.text, godName: "godName" in entry ? entry.godName : "未知" }))
       : undefined,
   });
-  const chapterBriefBlock = formatChapterBriefSystem(chapter.brief);
   const realityBlock = reality
     ? `== ACTIVE REALITY STATE (authoritative over world cards) ==
 ${JSON.stringify(reality, null, 1)}`
@@ -612,31 +610,6 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
     ? `CURRENT WORLD ACTIVITY\n${JSON.stringify(worldActivityContext)}`
     : null;
 
-  // ── 离席重入（服务端派生，自限性）──
-  // 自限性：重入后生成的第一条叙事落库即带新鲜 createdAt，下一轮判定自动失效——
-  // 无客户端状态、无标记位；隐藏征兆原文也永不出服务端（这正是采用服务端派生、
-  // 而非提案中前端指令变体的原因）。
-  // pantheon 线索复用本轮 consumeOmens 已租借的 1-2 条征兆原文：不重复取数，
-  // 两阶段消费契约不变（finalize 在叙事成功落库后才标记 omens.ids）；此块只改变
-  // 本轮「如何」搬演这些征兆（作为停顿期间已推进的幕后发展），narratorTurnSystem
-  // 的标准织入指令依旧生效。creator 线索使用活跃事件标题。
-  const lastMessageAt = [...prevTail, ...chapter.messages].reduce<Date | null>(
-    (latest, message) =>
-      latest === null || message.createdAt > latest ? message.createdAt : latest,
-    null,
-  );
-  const reentryBlock = opts.mode !== "opening"
-    && lastMessageAt
-    && Date.now() - lastMessageAt.getTime() >= REENTRY_ABSENCE_MS
-    ? buildReentryBlock({
-        mode,
-        absenceMs: Date.now() - lastMessageAt.getTime(),
-        threads: mode === "pantheon"
-          ? omens.texts
-          : worldActivityContext.events.slice(0, 2).map((event) => event.title),
-      })
-    : null;
-
   // ── 正文窗口 + 本轮输入，拼成单条 user（防中转站丢多轮） ──
   const windowText = proseWindow(windowMessages, mode);
   const parts: string[] = [];
@@ -647,7 +620,7 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
     parts.push(`${mode === "creator" ? "【创世主意图】" : "【玩家神谕】"}${opts.playerInput ?? ""}`);
   } else if (opts.mode === "continue") {
     parts.push(
-      `(幕后导演提示，不作为剧情输入): ${opts.directive?.trim() || "继续叙事，顺势推进；换一个切入视点或感官开场，不沿用上一轮的开头句式、收束句式与标志性比喻。"}`,
+      `(幕后导演提示，不作为剧情输入): ${opts.directive?.trim() || "继续叙事，顺势推进。"}`,
     );
   } else {
     parts.push(openingDirective(mode));
@@ -658,7 +631,6 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
     { role: "system", content: worldSystem, cacheScope: "world" },
     { role: "system", content: turnSystem, cacheScope: "dynamic" },
   ];
-  if (chapterBriefBlock) messages.push({ role: "system", content: chapterBriefBlock, cacheScope: "dynamic" });
   if (realityBlock) messages.push({ role: "system", content: realityBlock, cacheScope: "dynamic" });
   if (observerBlock) messages.push({ role: "system", content: observerBlock, cacheScope: "dynamic" });
   if (creatorHiddenChronicle) messages.push({ role: "system", content: creatorHiddenChronicle, cacheScope: "dynamic" });
@@ -668,8 +640,6 @@ ${hiddenEntries.map((entry) => `[${entry.id}] ${entry.text}`).join("\n")}`
   if (lore) messages.push({ role: "system", content: lore, cacheScope: "dynamic" });
   if (previouslyBlock) messages.push({ role: "system", content: previouslyBlock, cacheScope: "dynamic" });
   if (chronicle) messages.push({ role: "system", content: chronicle, cacheScope: "dynamic" });
-  // 离席重入块固定为 user 前的最后一条 system，确保导演指令压轴生效
-  if (reentryBlock) messages.push({ role: "system", content: reentryBlock, cacheScope: "dynamic" });
   messages.push({ role: "user", content: parts.join("\n\n"), cacheScope: "dynamic" });
   return Object.assign(messages, {
     allowedEventIds: [...worldActivityContext.actionableEventIds],

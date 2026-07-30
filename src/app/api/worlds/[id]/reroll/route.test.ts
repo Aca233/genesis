@@ -156,7 +156,7 @@ describe("POST /api/worlds/[id]/reroll", () => {
     expect(mocks.completeStructured).toHaveBeenCalledWith("narrative", expect.objectContaining({
       schema: CreatorWorldDeckSchema,
       system: expect.stringContaining('mode="creator"'),
-      user: expect.stringContaining(creatorIntent.narrativeCenter.identity),
+      user: expect.not.stringContaining(creatorIntent.narrativeCenter.identity),
       cache: { namespace: "reroll:v1:creator" },
     }));
     expect(mocks.genesisTaskUpdateMany).toHaveBeenCalledWith({
@@ -330,7 +330,7 @@ describe("POST /api/worlds/[id]/reroll", () => {
       currentDeck,
     });
     const rerollPrompt = (mocks.completeStructured.mock.calls[0]![1] as { user: string }).user;
-    expect(rerollPrompt).toContain(crossoverIntent.narrativeCenter.identity);
+    expect(rerollPrompt).not.toContain(crossoverIntent.narrativeCenter.identity);
   });
 
   it("质量门语义修复后重新应用玩家锁定路径", async () => {
@@ -545,7 +545,7 @@ describe("POST /api/worlds/[id]/reroll", () => {
     }));
     const repairCall = mocks.completeStructured.mock.calls[1]![1] as { user: string };
     expect(repairCall.user).toContain("玩家锁定的起源");
-    expect(repairCall.user).toContain(creatorIntent.narrativeCenter.identity);
+    expect(repairCall.user).not.toContain(creatorIntent.narrativeCenter.identity);
     expect(mocks.updateMany).not.toHaveBeenCalled();
   });
 
