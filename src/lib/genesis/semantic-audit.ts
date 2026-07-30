@@ -41,7 +41,7 @@ const GenesisQualityMetaSchema = z.object({
   initialErrorCount: z.number().int().min(0),
   initialWarningCount: z.number().int().min(0),
   repaired: z.boolean(),
-  auditPasses: z.number().int().min(1).max(3),
+  auditPasses: z.number().int().min(1).max(17),
   durationMs: z.number().int().min(0),
 }).strict();
 
@@ -238,8 +238,8 @@ export async function auditGenesisSemantics(
         temperature: 0.1,
         maxTokens: 8000,
         maxAttempts: 1,
-        transportMaxAttempts: 1,
-        allowTransportFallback: false,
+        transportMaxAttempts: 2,
+        allowTransportFallback: true,
         failOnTruncation: false,
       });
       const parsed = GenesisSemanticAuditResultSchema.parse(result);

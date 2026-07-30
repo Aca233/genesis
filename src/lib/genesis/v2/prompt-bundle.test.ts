@@ -141,4 +141,19 @@ describe("Genesis V2 Prompt Bundle compiler", () => {
     expect(retry.hashes.bundleHash).not.toBe(first.hashes.bundleHash);
     expect(retry.blocks.dynamicTail).toContain("MISSING_REQUIRED_SLOT:god:storm");
   });
+
+  it("injects the exact blueprint JSON Schema and nested temporal-anchor rules", () => {
+    const bundle = compileGenesisV2PromptBundle({
+      ...commonInput,
+      stageId: "blueprint",
+      acceptedDependencies: [],
+      dynamic: { ...commonInput.dynamic, nodeKey: "task-1:blueprint" },
+    });
+
+    expect(bundle.compilerVersion).toBe("genesis-v2/prompt-bundle/v2");
+    expect(bundle.blocks.stageWave).toContain("outputJsonSchema");
+    expect(bundle.blocks.stageWave).toContain("temporalAnchor");
+    expect(bundle.blocks.stageWave).toContain("anchorOrdinal");
+    expect(bundle.blocks.stageWave).toContain("never flatten anchor fields");
+  });
 });

@@ -9,6 +9,16 @@ import type { CompletionRequest, LlmTask, SlotName } from "./types";
 
 const STRUCTURED_RETRIES = 2;
 
+export class StructuredOutputValidationError extends Error {
+  override name = "StructuredOutputValidationError";
+  readonly validationError: string;
+
+  constructor(maxAttempts: number, validationError: string) {
+    super(`结构化输出在 ${maxAttempts} 次尝试后仍未通过校验：${validationError.slice(0, 500)}`);
+    this.validationError = validationError;
+  }
+}
+
 /** 从模型输出中提取 JSON（容忍 ```json 围栏、前后废话） */
 export function extractJson(text: string): unknown {
   // 1. 直接解析
@@ -109,5 +119,5 @@ export async function completeStructured<T>(
     }
   }
 
-  throw new Error(`结构化输出在 ${maxAttempts} 次尝试后仍未通过校验：${lastError.slice(0, 500)}`);
+  throw new StructuredOutputValidationError(maxAttempts, lastError);
 }

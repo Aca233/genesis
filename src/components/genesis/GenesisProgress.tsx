@@ -23,6 +23,7 @@ const STAGE_NUMERALS = [
 
 type Task = {
   id: string;
+  engineVersion: string;
   mode: WorldMode;
   status: GenesisTaskStatus;
   stage: GenesisStageId;
@@ -206,6 +207,9 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
             </div>
             <p className="mt-2 text-ink-faint">
               {heartbeatAge < 3 ? "刚刚收到新的生成痕迹" : `${heartbeatAge} 秒前收到生成痕迹`}
+            </p>
+            <p className="mt-1 text-xs text-ink-faint">
+              生成引擎：{task?.engineVersion === "dag-v2" ? "V2 分阶段主引擎" : "Legacy 稳定引擎"}
             </p>
           </div>
 

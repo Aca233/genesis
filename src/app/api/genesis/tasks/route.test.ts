@@ -20,6 +20,8 @@ describe("POST /api/genesis/tasks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.GENESIS_V2_SHADOW_ENABLED;
+    delete process.env.GENESIS_V2_PRIMARY_PERCENT;
+    delete process.env.GENESIS_V2_PRIMARY_USER_IDS;
   });
 
   it("持久化任务后立即以 202 返回 taskId", async () => {
@@ -127,6 +129,37 @@ describe("POST /api/genesis/tasks", () => {
         nodeKey: "shadow:characters",
         dependencyKeys: ["shadow:pantheon_domain", "shadow:civilizations", "shadow:eras"],
       }),
+    ]));
+  });
+
+  it("V2 白名单用户创建冻结的主 DAG，且不再创建 legacy 作业", async () => {
+    process.env.GENESIS_V2_PRIMARY_USER_IDS = "test-user";
+    mocks.create.mockResolvedValue({ id: "task-v2" });
+
+    const response = await POST(new Request("http://localhost/api/genesis/tasks", {
+      method: "POST",
+      body: JSON.stringify({ decree: "创造受潮汐支配的星海" }),
+    }));
+
+    expect(response.status).toBe(202);
+    const data = mocks.create.mock.calls[0]![0].data;
+    expect(data).toMatchObject({
+      engineVersion: "dag-v2",
+      shadowEnabled: false,
+      shadowStatus: "disabled",
+      preflightHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(data.jobs.create).toHaveLength(5);
+    expect(data.jobs.create).toEqual(expect.arrayContaining([
+      expect.objectContaining({ nodeKey: "v2:blueprint", engineVersion: "dag-v2" }),
+      expect.objectContaining({
+        nodeKey: "v2:characters",
+        engineVersion: "dag-v2",
+        dependencyKeys: ["v2:pantheon_domain", "v2:civilizations", "v2:eras"],
+      }),
+    ]));
+    expect(data.jobs.create).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ nodeKey: "legacy-world-deck" }),
     ]));
   });
 

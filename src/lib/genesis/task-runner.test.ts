@@ -297,6 +297,7 @@ describe("genesis task runner", () => {
 
     expect(dto).toEqual({
       id: "task-1",
+      engineVersion: "legacy-v1",
       mode: "pantheon",
       status: "running",
       stage: "gods",

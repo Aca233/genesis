@@ -3,6 +3,12 @@ import { prisma } from "@/lib/db";
 import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
 import { withAuth } from "@/lib/auth/route";
 
+const V2_RETRY_BUDGET_ALLOWANCE = {
+  calls: 12,
+  inputTokens: 500_000,
+  outputTokens: 96_000,
+} as const;
+
 export const POST = withAuth(async (
   userId,
   _request: Request,
@@ -12,7 +18,7 @@ export const POST = withAuth(async (
   const retried = await prisma.$transaction(async (tx) => {
     const current = await tx.genesisTask.findFirst({
       where: { id, userId, status: "failed" },
-      select: { aggregateVersion: true, stage: true },
+      select: { aggregateVersion: true, stage: true, engineVersion: true },
     });
     if (!current) return false;
     const aggregateVersion = current.aggregateVersion + 1;
@@ -27,11 +33,18 @@ export const POST = withAuth(async (
         leaseExpiresAt: null,
         attempt: 0,
         aggregateVersion,
+        ...(current.engineVersion === "dag-v2" ? {
+          budgetMaxCalls: { increment: V2_RETRY_BUDGET_ALLOWANCE.calls },
+          budgetMaxInput: { increment: V2_RETRY_BUDGET_ALLOWANCE.inputTokens },
+          budgetMaxOutput: { increment: V2_RETRY_BUDGET_ALLOWANCE.outputTokens },
+        } : {}),
       },
     });
     if (updated.count !== 1) return false;
     const job = await tx.genesisJob.updateMany({
-      where: { genesisTaskId: id, nodeKey: "legacy-world-deck" },
+      where: current.engineVersion === "dag-v2"
+        ? { genesisTaskId: id, engineVersion: "dag-v2", status: "failed" }
+        : { genesisTaskId: id, nodeKey: "legacy-world-deck" },
       data: {
         status: "queued",
         error: null,
@@ -41,7 +54,7 @@ export const POST = withAuth(async (
         attempt: 0,
       },
     });
-    if (job.count !== 1) throw new Error("创世任务缺少持久作业");
+    if (job.count < 1) throw new Error("创世任务缺少可重试的持久作业");
     await tx.genesisOutbox.create({
       data: {
         taskId: id,

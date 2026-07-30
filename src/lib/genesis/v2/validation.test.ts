@@ -64,4 +64,23 @@ describe("Genesis V2 shadow hard validation", () => {
       issues: ["RACE_ABILITY_SLOTS_TOO_SMALL:race:tide"],
     });
   });
+
+  it("强类型阶段输出必须精确覆盖本阶段注册 ref", () => {
+    expect(validateGenesisV2ShadowOutput({
+      stageId: "civilizations",
+      structuralManifest: manifest,
+      output: {
+        mode: "pantheon",
+        races: [{ ref: "race:invented", abilities: [] }],
+        factions: [],
+        places: [],
+      },
+    })).toEqual({
+      valid: false,
+      issues: [
+        "MISSING_REGISTERED_REF:race:tide",
+        "UNREGISTERED_REF:race:invented",
+      ],
+    });
+  });
 });

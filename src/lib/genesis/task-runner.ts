@@ -56,6 +56,7 @@ const GENESIS_ROUND_MAX_TOKENS = 4096;
 
 export type GenesisTaskDto = {
   id: string;
+  engineVersion: string;
   mode: WorldMode;
   status: GenesisTaskStatus;
   stage: GenesisStageId;
@@ -73,7 +74,7 @@ export type GenesisTaskDto = {
 type PublicTask = Pick<
   GenesisTask,
   "id" | "mode" | "status" | "stage" | "completedKeys" | "error" | "worldId" | "createdAt" | "updatedAt"
-> & Partial<Pick<GenesisTask, "auditReport">>;
+> & Partial<Pick<GenesisTask, "auditReport" | "engineVersion">>;
 type VersionedPublicTask = PublicTask & Partial<Pick<GenesisTask, "aggregateVersion">>;
 
 export function toGenesisTaskDto(task: VersionedPublicTask): GenesisTaskDto {
@@ -81,6 +82,7 @@ export function toGenesisTaskDto(task: VersionedPublicTask): GenesisTaskDto {
   const auditReport = parseGenesisQualityReport(task.auditReport);
   const projection = {
     id: task.id,
+    engineVersion: task.engineVersion ?? "legacy-v1",
     mode: WorldModeSchema.parse(task.mode),
     status: task.status as GenesisTaskStatus,
     stage: task.stage as GenesisStageId,

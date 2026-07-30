@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
-import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { completeStructured } from "@/lib/llm/structured";
+import { WorldModeSchema } from "@/lib/world-mode";
 import {
   buildGenesisV2ReuseKey,
   hashGenesisV2ArtifactContent,
@@ -10,14 +10,17 @@ import {
 import { compileGenesisV2PromptBundle } from "./prompt-bundle";
 import type { DeterministicPreflightResult } from "./preflight";
 import {
+  assembleGenesisV2WorldDeck,
+  getGenesisV2StageOutputSchema,
+  type GenesisV2StageOutputs,
+} from "./stage-output";
+import {
   getGenesisV2StageContract,
   type GenesisV2StageId,
 } from "./stage-registry";
 import { validateGenesisV2ShadowOutput } from "./validation";
 
 const SHADOW_LEASE_MS = 60_000;
-const ShadowOutputSchema = z.record(z.string(), z.unknown());
-
 type ClaimedShadowJob = {
   id: string;
   genesisTaskId: string;
@@ -31,6 +34,7 @@ type ClaimedShadowJob = {
     userId: string;
     mode: string;
     decree: string;
+    intentContract: unknown;
     shadowPreflight: unknown;
     shadowPreflightHash: string | null;
   };
@@ -60,6 +64,7 @@ export async function claimGenesisShadowJob(jobId: string, now = new Date()): Pr
             userId: true,
             mode: true,
             decree: true,
+            intentContract: true,
             status: true,
             shadowEnabled: true,
             shadowPreflight: true,
@@ -114,6 +119,7 @@ export async function claimGenesisShadowJob(jobId: string, now = new Date()): Pr
             userId: true,
             mode: true,
             decree: true,
+            intentContract: true,
             shadowPreflight: true,
             shadowPreflightHash: true,
           },
@@ -138,6 +144,7 @@ export async function runGenesisShadowJob(jobId: string): Promise<void> {
   heartbeat.unref();
   try {
     const preflight = parseFrozenPreflight(job.task.shadowPreflight);
+    const mode = WorldModeSchema.parse(job.task.mode);
     if (preflight.preflightHash !== job.task.shadowPreflightHash) {
       throw new Error("Genesis V2 shadow 预检哈希不匹配");
     }
@@ -160,15 +167,16 @@ export async function runGenesisShadowJob(jobId: string): Promise<void> {
             status: { in: ["accepted", "sealed"] },
             visibility: "shadow",
           },
-          select: { content: true },
+          select: { content: true, outputHash: true },
         });
     const bundle = compileGenesisV2PromptBundle({
       stageId,
       engineVersion: "dag-v2-shadow",
       globalContractVersion: "genesis-v2/core/v1",
-      mode: job.task.mode,
+      mode,
       normalizedDecree: job.task.decree.trim(),
       rawUserIntentHash: preflight.preflightHash,
+      intentContract: job.task.intentContract,
       manifestHash: preflight.structuralManifest.manifestHash,
       structuralManifestSummary: preflight.structuralManifest,
       canonBrief: (blueprint?.content as Record<string, unknown> | null)?.canonBrief ?? null,
@@ -210,13 +218,13 @@ export async function runGenesisShadowJob(jobId: string): Promise<void> {
         bundle.blocks.worldStage,
       ],
       user: bundle.blocks.dynamicTail,
-      schema: ShadowOutputSchema,
+      schema: getGenesisV2StageOutputSchema(stageId, mode),
       maxAttempts: 1,
       transportMaxAttempts: 1,
       allowTransportFallback: false,
       maxTokens: preflight.budgetPlan.stages.find((budget) => budget.stage === stageId)?.maxOutputTokens,
       cache: { namespace: bundle.routingNamespace },
-    });
+    }) as Record<string, unknown>;
     const validation = validateGenesisV2ShadowOutput({
       stageId,
       output: content,
@@ -233,6 +241,31 @@ export async function runGenesisShadowJob(jobId: string): Promise<void> {
       inputHash: bundle.hashes.bundleHash,
       dependencyHashes,
     });
+    const dependencyContent = new Map(
+      dependencies.map((dependency) => [dependency.stageKey, dependency.content]),
+    );
+    const playableCore = stageId === "characters"
+      ? assembleGenesisV2WorldDeck({
+          blueprint: blueprint?.content as GenesisV2StageOutputs["blueprint"],
+          pantheon_domain: dependencyContent.get("pantheon_domain") as GenesisV2StageOutputs["pantheon_domain"],
+          civilizations: dependencyContent.get("civilizations") as GenesisV2StageOutputs["civilizations"],
+          eras: dependencyContent.get("eras") as GenesisV2StageOutputs["eras"],
+          characters: content as GenesisV2StageOutputs["characters"],
+        }, mode)
+      : null;
+    const playableCoreOutputHash = playableCore
+      ? hashGenesisV2ArtifactContent(playableCore)
+      : null;
+    const playableCoreDependencyHashes = playableCore
+      ? [blueprint?.outputHash, ...dependencyHashes, outputHash]
+          .filter((hash): hash is string => Boolean(hash))
+      : [];
+    const playableCoreInputHash = playableCore
+      ? hashGenesisV2ArtifactContent({
+          kind: "playable_core",
+          dependencyHashes: playableCoreDependencyHashes,
+        })
+      : null;
     await prisma.$transaction(async (tx) => {
       const owned = await tx.genesisJob.findFirst({
         where: { id: job.id, leaseToken: job.leaseToken, leaseEpoch: job.leaseEpoch, status: "running" },
@@ -264,6 +297,33 @@ export async function runGenesisShadowJob(jobId: string): Promise<void> {
           acceptedAt: new Date(),
         },
       });
+      if (playableCore && playableCoreOutputHash && playableCoreInputHash) {
+        await tx.genesisArtifact.updateMany({
+          where: {
+            genesisTaskId: job.genesisTaskId,
+            stageKey: "playable_core",
+            status: { in: ["accepted", "sealed"] },
+          },
+          data: { status: "superseded", supersededAt: new Date() },
+        });
+        await tx.genesisArtifact.create({
+          data: {
+            genesisTaskId: job.genesisTaskId,
+            genesisJobId: job.id,
+            stageKey: "playable_core",
+            version: job.attempt,
+            status: "sealed",
+            visibility: "shadow",
+            inputHash: playableCoreInputHash,
+            outputHash: playableCoreOutputHash,
+            reuseKey: `genesis-v2:playable-core:${playableCoreInputHash}`,
+            dependencyHashes: playableCoreDependencyHashes,
+            content: playableCore as unknown as Prisma.InputJsonValue,
+            validation: { valid: true, issues: [] },
+            acceptedAt: new Date(),
+          },
+        });
+      }
       await tx.genesisJob.update({
         where: { id: job.id },
         data: {
