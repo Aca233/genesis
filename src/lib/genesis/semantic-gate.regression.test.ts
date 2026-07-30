@@ -390,7 +390,14 @@ describe("Tony-as-Rudeus semantic quality regression", () => {
       "pantheon",
       null,
     );
-    expect(result.deck).toEqual({ ...repairOutput, worldName: badDeck.worldName });
+    expect(result.deck).toEqual({
+      ...repairOutput,
+      worldName: badDeck.worldName,
+      places: repairOutput.places.map((place, index) => index === 0
+        ? { ...place, kind: badDeck.places[0]!.kind }
+        : place),
+    });
+    expect(result.deck.places[0]!.kind).toBe("城市");
     expect(result.report).toMatchObject({
       verdict: "pass",
       meta: {
