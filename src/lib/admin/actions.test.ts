@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/genesis/scheduler", () => ({ wakeGenesisScheduler: vi.fn() }));
-vi.mock("@/lib/reality/task-runner", () => ({ ensureRealityRewriteRunning: vi.fn(), retryRealityRewrite: vi.fn() }));
+const taskRunners = vi.hoisted(() => ({
+  ensureRealityRewriteRunning: vi.fn(),
+  retryRealityRewrite: vi.fn(),
+}));
+
+vi.mock("@/lib/reality/task-runner", () => ({
+  ensureRealityRewriteRunning: taskRunners.ensureRealityRewriteRunning,
+  retryRealityRewrite: taskRunners.retryRealityRewrite,
+}));
 
 import { mutateAdminTask, mutateAdminUser } from "./actions";
 
@@ -53,7 +61,48 @@ describe("mutateAdminTask", () => {
 
   it("does not pretend narrative jobs are safely retryable from the admin panel", async () => {
     const create = vi.fn().mockResolvedValue({});
-    await expect(mutateAdminTask({ actorUserId: "admin-1", requestIp: null }, { kind: "narrative", taskId: "generation-1", action: "retry", reason: "重试" }, { adminAuditLog: { create } } as never)).rejects.toThrow("叙事任务只能由原世界请求重试");
+    await expect(mutateAdminTask({ actorUserId: "admin-1", requestIp: null }, { kind: "narrative", taskId: "generation-1", action: "retry", reason: "重试" }, { generationRequest: { findUnique: vi.fn().mockResolvedValue({ id: "generation-1", status: "failed", leaseExpiresAt: null, chapter: { timeline: { world: { id: "world-1", name: "星海" } } } }) }, adminAuditLog: { create } } as never)).rejects.toThrow("任务当前不可执行此操作");
     expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ action: "retry-task", success: false, targetType: "narrative-task" }) });
+  });
+
+
+  it("fails closed before executing a disallowed genesis action", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const db = {
+      genesisTask: {
+        findUnique: vi.fn().mockResolvedValue({ id: "genesis-1", userId: "user-1", status: "completed", stage: "complete", leaseExpiresAt: null }),
+        updateMany,
+      },
+      adminAuditLog: { create: vi.fn().mockResolvedValue({}) },
+    };
+
+    await expect(mutateAdminTask(
+      { actorUserId: "admin-1", requestIp: null },
+      { kind: "genesis", taskId: "genesis-1", action: "cancel", reason: "状态核验" },
+      db as never,
+    )).rejects.toThrow("任务当前不可执行此操作");
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before invoking rewrite retry/recovery for terminal tasks with residual leases", async () => {
+    taskRunners.retryRealityRewrite.mockReset();
+    const db = {
+      realityRewrite: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "rewrite-1",
+          status: "cancelled",
+          leaseExpiresAt: new Date("2000-07-29T00:00:00.000Z"),
+          world: { userId: "user-1", name: "星海" },
+        }),
+      },
+      adminAuditLog: { create: vi.fn().mockResolvedValue({}) },
+    };
+
+    await expect(mutateAdminTask(
+      { actorUserId: "admin-1", requestIp: null },
+      { kind: "rewrite", taskId: "rewrite-1", action: "recover", reason: "状态核验" },
+      db as never,
+    )).rejects.toThrow("任务当前不可执行此操作");
+    expect(taskRunners.retryRealityRewrite).not.toHaveBeenCalled();
   });
 });

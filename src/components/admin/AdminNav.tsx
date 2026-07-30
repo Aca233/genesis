@@ -3,24 +3,48 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const links = [
-  { href: "/admin", label: "运行总览", code: "01", description: "态势与待办" },
-  { href: "/admin/users", label: "用户卷宗", code: "02", description: "身份与会话" },
-  { href: "/admin/worlds", label: "世界目录", code: "03", description: "状态与归属" },
-  { href: "/admin/tasks", label: "任务仪轨", code: "04", description: "队列与恢复" },
-  { href: "/admin/llm", label: "模型观测", code: "05", description: "质量与消耗" },
-  { href: "/admin/audit", label: "管理审计", code: "06", description: "操作与追责" },
-] as const;
+type AdminNavProps = {
+  attentionCount: number | null;
+};
 
-export function AdminNav() {
+export function AdminNav({ attentionCount }: AdminNavProps) {
   const pathname = usePathname();
+  const groups = [
+    {
+      label: "处置",
+      links: [
+        { href: "/admin", label: "任务工作台", description: "需要处理", count: attentionCount },
+        { href: "/admin/tasks", label: "全部任务", description: "历史与筛选" },
+      ],
+    },
+    {
+      label: "对象",
+      links: [
+        { href: "/admin/users", label: "用户", description: "身份与会话" },
+        { href: "/admin/worlds", label: "世界", description: "状态与归属" },
+      ],
+    },
+    {
+      label: "观测",
+      links: [
+        { href: "/admin/llm", label: "模型调用", description: "质量与消耗" },
+        { href: "/admin/audit", label: "管理审计", description: "操作与追责" },
+      ],
+    },
+  ] as const;
+
   return <nav aria-label="管理面板" className="admin-nav">
-    {links.map((item) => {
-      const active = item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href);
-      return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={"admin-nav__item " + (active ? "is-active" : "")}>
-        <span className="admin-nav__code">{item.code}</span>
-        <span><strong>{item.label}</strong><small>{item.description}</small></span>
-      </Link>;
-    })}
+    {groups.map((group) => <section key={group.label} className="admin-nav__group">
+      <h2 className="admin-nav__heading">{group.label}</h2>
+      <div className="admin-nav__links">
+        {group.links.map((item) => {
+          const active = item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href);
+          return <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={"admin-nav__item " + (active ? "is-active" : "")}>
+            <span className="admin-nav__body"><strong>{item.label}</strong><small>{item.description}</small></span>
+            {"count" in item && typeof item.count === "number" && <span className="admin-nav__count" aria-label={`${item.count} 项需要处理`}>{item.count}</span>}
+          </Link>;
+        })}
+      </div>
+    </section>)}
   </nav>;
 }

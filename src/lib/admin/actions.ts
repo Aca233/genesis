@@ -4,9 +4,14 @@ import { prisma } from "@/lib/db";
 import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
 import { ensureRealityRewriteRunning, retryRealityRewrite } from "@/lib/reality/task-runner";
 import { assertAdminConfirmation, assertAdminMutationAllowed, redactAdminError } from "./security";
+import { canAdminTaskAction, type AdminTaskAction, type AdminTaskKind } from "./task-attention";
 
 export type AdminActionContext = { actorUserId: string; requestIp: string | null };
 type AdminDb = typeof prisma;
+
+function assertAdminTaskActionAllowed(task: { kind: AdminTaskKind; status: string; leaseExpiresAt: Date | null }, action: AdminTaskAction, now: Date) {
+  if (!canAdminTaskAction(task, action, now)) throw new Error("任务当前不可执行此操作");
+}
 
 async function audit(db: AdminDb, ctx: AdminActionContext, input: { action: string; targetType: string; targetId: string; targetLabel: string; reason: string; success: boolean; metadata?: Prisma.InputJsonValue }) {
   await db.adminAuditLog.create({ data: { actorUserId: ctx.actorUserId, requestIp: ctx.requestIp, ...input } });
@@ -66,14 +71,16 @@ export async function mutateAdminWorld(ctx: AdminActionContext, input: { worldId
 
 export async function mutateAdminTask(ctx: AdminActionContext, input: { kind: "genesis" | "narrative" | "rewrite"; taskId: string; action: "cancel" | "retry" | "recover"; reason: string }, db: AdminDb = prisma) {
   if (!input.reason.trim()) throw new Error("必须填写操作原因");
+  const now = new Date();
   let targetType = `${input.kind}-task`;
   let targetLabel = input.taskId;
   try {
   if (input.kind === "genesis") {
-    const task = await db.genesisTask.findUnique({ where: { id: input.taskId }, select: { id: true, userId: true, status: true, stage: true, aggregateVersion: true } });
+    const task = await db.genesisTask.findUnique({ where: { id: input.taskId }, select: { id: true, userId: true, status: true, stage: true, leaseExpiresAt: true, aggregateVersion: true } });
     if (!task) throw new Error("任务不存在");
     targetType = "genesis-task";
     targetLabel = task.stage;
+    assertAdminTaskActionAllowed({ kind: "genesis", status: task.status, leaseExpiresAt: task.leaseExpiresAt }, input.action, now);
     const nextStatus = input.action === "cancel" ? "cancelled" : "queued";
     const aggregateVersion = task.aggregateVersion + 1;
     const changed = await db.$transaction(async (tx) => {
@@ -127,19 +134,20 @@ export async function mutateAdminTask(ctx: AdminActionContext, input: { kind: "g
     if (input.action !== "cancel") wakeGenesisScheduler();
     await audit(db, ctx, { action: `${input.action}-task`, targetType: "genesis-task", targetId: task.id, targetLabel: task.stage, reason: input.reason.trim(), success: true });
   } else if (input.kind === "narrative") {
-    if (input.action !== "cancel") throw new Error("叙事任务只能由原世界请求重试");
-    const task = await db.generationRequest.findUnique({ where: { id: input.taskId }, select: { id: true, status: true, chapter: { select: { timeline: { select: { world: { select: { id: true, name: true } } } } } } } });
+    const task = await db.generationRequest.findUnique({ where: { id: input.taskId }, select: { id: true, status: true, leaseExpiresAt: true, chapter: { select: { timeline: { select: { world: { select: { id: true, name: true } } } } } } } });
     if (!task) throw new Error("任务不存在");
     targetType = "narrative-task";
     targetLabel = task.chapter.timeline.world.name;
+    assertAdminTaskActionAllowed({ kind: "narrative", status: task.status, leaseExpiresAt: task.leaseExpiresAt }, input.action, now);
     const result = await db.generationRequest.updateMany({ where: { id: task.id, status: "pending" }, data: { status: "cancelled", retryable: true, safeError: "管理员已取消", leaseExpiresAt: null, stageUpdatedAt: new Date() } });
     if (result.count !== 1) throw new Error("任务当前不可取消");
     await audit(db, ctx, { action: "cancel-task", targetType: "narrative-task", targetId: task.id, targetLabel: task.chapter.timeline.world.name, reason: input.reason.trim(), success: true });
   } else {
-    const task = await db.realityRewrite.findUnique({ where: { id: input.taskId }, select: { id: true, status: true, world: { select: { userId: true, name: true } } } });
+    const task = await db.realityRewrite.findUnique({ where: { id: input.taskId }, select: { id: true, status: true, leaseExpiresAt: true, world: { select: { userId: true, name: true } } } });
     if (!task) throw new Error("任务不存在");
     targetType = "rewrite-task";
     targetLabel = task.world.name;
+    assertAdminTaskActionAllowed({ kind: "rewrite", status: task.status, leaseExpiresAt: task.leaseExpiresAt }, input.action, now);
     if (input.action === "cancel") { const result = await db.realityRewrite.updateMany({ where: { id: task.id, status: { in: ["planning", "applying", "narrating"] } }, data: { status: "cancelled", leaseToken: null, leaseExpiresAt: null, error: "管理员已取消" } }); if (result.count !== 1) throw new Error("任务当前不可取消"); }
     else { const current = await retryRealityRewrite(db, task.world.userId, task.id); if (current.status !== "completed") ensureRealityRewriteRunning(current.id); }
     await audit(db, ctx, { action: `${input.action}-task`, targetType: "rewrite-task", targetId: task.id, targetLabel: task.world.name, reason: input.reason.trim(), success: true });

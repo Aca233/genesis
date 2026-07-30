@@ -23,6 +23,20 @@ export async function loadAdminDashboard(db: AdminDb = prisma) {
   const databaseProbe = db.$queryRawUnsafe<Array<{ ok: number }>>("SELECT 1 AS ok")
     .then(() => ({ ok: true, latencyMs: Math.max(1, Math.round(performance.now() - probeStarted)) }))
     .catch(() => ({ ok: false, latencyMs: null }));
+  const recentAuditQuery = db.adminAuditLog.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 6,
+    select: {
+      id: true, action: true, targetType: true, targetId: true, targetLabel: true,
+      reason: true, success: true, requestIp: true, createdAt: true,
+      actor: { select: { id: true, name: true, email: true } },
+    },
+  })
+    .then((items) => ({ state: "ready" as const, items }))
+    .catch((error) => {
+      console.error("[admin.dashboard] audit query failed", error);
+      return { state: "unavailable" as const, items: [] as const };
+    });
 
   const [
     users, userRows7d, activeSessions, activeUserRows, bannedUsers, adminUsers, recentUsers,
@@ -60,7 +74,7 @@ export async function loadAdminDashboard(db: AdminDb = prisma) {
     db.realityRewrite.findMany({ where: { status: "failed" }, orderBy: { updatedAt: "desc" }, take: 4, select: { id: true, scope: true, error: true, updatedAt: true, world: { select: { id: true, name: true, user: { select: { id: true, name: true } } } } } }),
     db.llmCall.aggregate({ where: { createdAt: { gte: since24h } }, _count: { _all: true }, _avg: { durationMs: true }, _sum: { inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheWriteTokens: true, dynamicTokens: true, toolResultTokens: true } }),
     db.llmCall.findMany({ where: { createdAt: { gte: since24h } }, orderBy: { createdAt: "desc" }, take: 5_000, select: { id: true, task: true, provider: true, model: true, durationMs: true, ok: true, error: true, inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheWriteTokens: true, cacheFallback: true, userId: true, worldId: true, createdAt: true } }),
-    db.adminAuditLog.findMany({ orderBy: { createdAt: "desc" }, take: 6, select: { id: true, action: true, targetType: true, targetId: true, targetLabel: true, reason: true, success: true, requestIp: true, createdAt: true, actor: { select: { id: true, name: true, email: true } } } }).catch(() => []),
+    recentAuditQuery,
     databaseProbe, loadAdminSystemHealth(),
   ]);
 

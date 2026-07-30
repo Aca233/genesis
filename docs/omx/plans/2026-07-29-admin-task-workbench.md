@@ -456,7 +456,7 @@ git commit -m "feat(admin): prioritize task triage navigation"
 - Modify: `src/app/globals.css`
 
 **Interfaces:**
-- Consumes: `loadAdminTaskWorkbench()`, `AdminAttentionTask`, and `allowedAdminTaskActions()` from Tasks 1–2. Use the existing `AdminActionButton` for allowed actions in this task; Task 5 replaces its prompt implementation without changing the workbench action payloads.
+- Consumes: `loadAdminTaskWorkbench()`, `AdminAttentionTask`, and `allowedAdminTaskActions()` from Tasks 1–2. Render the recommended action as explanatory text only in this task; Task 5 adds executable controls after the prompt-free action panel exists.
 - Produces: `/admin?view=<attention|failed|stale|repeated>&q=<text>&task=<kind:id>`.
 
 - [ ] **Step 1: Replace the page loader with awaited URL parameters**
