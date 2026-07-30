@@ -104,18 +104,40 @@ export type GenesisV2StageOutputs = {
   characters: z.infer<typeof GenesisV2CharactersOutputSchema>;
 };
 
+export type GenesisV2CharactersRelationContext = {
+  pantheonDomain: GenesisV2StageOutputs["pantheon_domain"];
+  civilizations: GenesisV2StageOutputs["civilizations"];
+};
+
 const MIN_CHARACTER_ABILITIES = 2;
 const MAX_RELATIONS_PER_ACTIVE_CHARACTER = 4;
 
 export function sanitizeGenesisV2CharactersTemporalOutput(
   rawOutput: GenesisV2StageOutputs["characters"],
+  relationContext?: GenesisV2CharactersRelationContext,
 ): GenesisV2StageOutputs["characters"] {
   const output = GenesisV2CharactersOutputSchema.parse(rawOutput);
   const activeCharacterRefs = new Set(output.majorCharacters.flatMap((character) =>
     (character.statusAtAnchor ?? "active") === "active" ? [character.ref] : [],
   ));
   const relationCounts = new Map<string, number>();
+  const validRelationRefs = relationContext === undefined
+    ? null
+    : new Set([
+      ...(relationContext.pantheonDomain.mode === "pantheon"
+        ? [relationContext.pantheonDomain.playerGod.ref]
+        : []),
+      ...relationContext.pantheonDomain.majorGods.map(({ ref }) => ref),
+      ...relationContext.civilizations.races.map(({ ref }) => ref),
+      ...relationContext.civilizations.factions.map(({ ref }) => ref),
+      ...relationContext.civilizations.places.map(({ ref }) => ref),
+      ...output.majorCharacters.map(({ ref }) => ref),
+    ]);
   const relationsAtAnchor = output.relationsAtAnchor?.filter((relation) => {
+    if (validRelationRefs !== null
+      && (!validRelationRefs.has(relation.sourceRef) || !validRelationRefs.has(relation.targetRef))) {
+      return false;
+    }
     if (!activeCharacterRefs.has(relation.sourceRef)) return true;
     const count = relationCounts.get(relation.sourceRef) ?? 0;
     relationCounts.set(relation.sourceRef, count + 1);

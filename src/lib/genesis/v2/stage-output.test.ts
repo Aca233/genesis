@@ -164,4 +164,26 @@ describe("Genesis V2 stage output contracts", () => {
 
     expect(sanitized.relationsAtAnchor).toHaveLength(4);
   });
+
+  it("drops anchor relations whose refs do not exist in accepted card artifacts", () => {
+    const outputs = splitDeck(completeDeck());
+    const validRelation = outputs.characters.relationsAtAnchor?.[0] ?? {
+      sourceRef: outputs.characters.majorCharacters[0]!.ref,
+      targetRef: outputs.characters.majorCharacters[1]!.ref,
+      status: "ally" as const,
+      publicDescription: "测试关系",
+    };
+    const sanitized = sanitizeGenesisV2CharactersTemporalOutput({
+      ...outputs.characters,
+      relationsAtAnchor: [
+        validRelation,
+        { ...validRelation, targetRef: "gv2:creator:epoch_conflict:01" },
+      ],
+    }, {
+      pantheonDomain: outputs.pantheon_domain,
+      civilizations: outputs.civilizations,
+    });
+
+    expect(sanitized.relationsAtAnchor).toEqual([validRelation]);
+  });
 });

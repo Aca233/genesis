@@ -42,9 +42,9 @@ describe("semanticRepairPrompt", () => {
       mode: "creator",
       decree: "让守誓者从零开始",
       intent,
-      invalidDeck,
       issues: [issue],
       issueValues: [{ path: issue.path, value: invalidDeck.majorCharacters[0]!.situation }],
+      referenceCatalog: [{ path: "majorCharacters.0", ref: "character-1", name: "守誓者" }],
       requiredRemovePaths: ["majorGods[0]"],
       lockedPaths: ["worldName", "majorGods.0.ref"],
       lorebookExcerpts: "旧王冠尚未被发现",
@@ -55,11 +55,13 @@ describe("semanticRepairPrompt", () => {
     expect(prompt).toContain("让守誓者从零开始");
     expect(prompt).toContain("FROZEN GENESIS INTENT CONTRACT");
     expect(prompt).toContain(JSON.stringify(intent));
-    expect(prompt).toContain(JSON.stringify(invalidDeck));
+    expect(prompt).not.toContain(JSON.stringify(invalidDeck));
     expect(prompt).toContain(issue.path);
     expect(prompt).toContain(issue.repairInstruction);
     expect(prompt).toContain("Current JSON values at the exact issue paths");
     expect(prompt).toContain(invalidDeck.majorCharacters[0]!.situation);
+    expect(prompt).toContain("Available stable card references");
+    expect(prompt).toContain("character-1");
     expect(prompt).toContain('Required remove paths (must use action="remove")');
     expect(prompt).toContain("majorGods[0]");
     expect(prompt).toContain("worldName");
@@ -72,7 +74,6 @@ describe("semanticRepairPrompt", () => {
       mode: "creator",
       decree: "从零开始",
       intent,
-      invalidDeck: completeCreatorDeck(),
       issues: [issue],
       lockedPaths: ["worldName"],
     });

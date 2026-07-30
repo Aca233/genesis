@@ -180,12 +180,14 @@ describe("enforceGenesisQuality", () => {
         userId: input.userId,
         owner,
         schema: GenesisSemanticRepairResultSchema,
+        maxTokens: 3500,
         maxAttempts: 2,
         transportMaxAttempts: 2,
         allowTransportFallback: true,
         failOnTruncation: false,
       });
       expect(opts.user).toContain("晨钟议会名称不可修改");
+      expect(opts.user).not.toContain(JSON.stringify(input.deck));
       return repairOutput;
     });
     const validate = vi.fn().mockImplementation((rawDeck, expectedMode, snapshot) => {
@@ -215,7 +217,10 @@ describe("enforceGenesisQuality", () => {
       "audit:final",
     ]);
     expect(audit).toHaveBeenCalledTimes(2);
-    expect(audit.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ owner }));
+    expect(audit.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+      owner,
+      scopeIssues: lockedPathReport.issues,
+    }));
     expect(repair).toHaveBeenCalledTimes(1);
     expect(validate).toHaveBeenCalledTimes(1);
     expect(result.deck.worldName).toBe("玩家锁定世界名");
@@ -630,7 +635,7 @@ describe("enforceGenesisQuality", () => {
     expect(repair).not.toHaveBeenCalled();
   });
 
-  it("十六轮修复后的复审仍有 error 时抛携带最终 report 的安全 terminal error", async () => {
+  it("三轮修复后的复审仍有 error 时抛携带最终 report 的安全 terminal error", async () => {
     const audit = vi.fn().mockResolvedValue(errorReport);
     const repair = vi.fn().mockResolvedValue({
       operations: [{
@@ -659,14 +664,14 @@ describe("enforceGenesisQuality", () => {
         initialErrorCount: 1,
         initialWarningCount: 0,
         repaired: true,
-        auditPasses: 17,
+        auditPasses: 4,
         durationMs: expect.any(Number),
       },
     });
     expect((caught as Error).message).toBe("创世语义修复后仍有阻断问题，已安全终止生成");
     expect((caught as Error).message).not.toContain("旧王冠已经归还");
     expect(isTransientLlmError(caught)).toBe(false);
-    expect(repair).toHaveBeenCalledTimes(16);
-    expect(audit).toHaveBeenCalledTimes(17);
+    expect(repair).toHaveBeenCalledTimes(3);
+    expect(audit).toHaveBeenCalledTimes(4);
   });
 });

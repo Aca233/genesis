@@ -147,7 +147,7 @@ Audit for exactly these issue types:
 - future_identity_leak, continuity_mix, death_conflict, causality_conflict, unsupported_canon_claim: prose-level source continuity and temporal violations.
 
 Rules:
-1. Audit the full deck and report at most 16 significant issues. Never rewrite the deck.
+1. For an initial audit, audit the full deck and report at most 16 significant issues. For a bounded repair verification request, re-check only the supplied previously-audited paths and report only unresolved issues on those paths. Never rewrite the deck.
 2. For IP-derived worlds, check source claims against the declared temporal anchor, provenance, and lorebook. Player overrides are deliberate changes only where provenance explicitly marks them as such.
 3. For original worlds, skip only canon-specific checks; still audit premise drift, narrative-center duplication, ontology, anchor state, power shortcuts, fusion boundaries, causal connection, and information access. Never skip the whole audit.
 4. Treat the frozen intent contract as authoritative. Uncertain unsupported detail must be omitted or generalized, not invented.
@@ -164,17 +164,36 @@ export type SemanticAuditPromptOptions = {
   decree: string;
   intent: GenesisIntentContract;
   lorebookExcerpts?: string;
+  scopeIssues?: GenesisSemanticIssue[];
 };
+
+function scopedIssueValue(deck: WorldDeck, path: string): unknown {
+  const segments = path.match(/[^.[\]]+/g) ?? [];
+  let current: unknown = deck;
+  for (const segment of segments) {
+    if (current === null || typeof current !== "object" || !(segment in current)) return null;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
 
 export function semanticAuditUserPrompt(
   deck: WorldDeck,
   opts: SemanticAuditPromptOptions,
 ): string {
+  const scope = opts.scopeIssues?.map((issue) => ({
+    issue,
+    currentValue: scopedIssueValue(deck, issue.path),
+  }));
   const sections = [
-    "Audit this generated world deck against every supplied authority layer and return the JSON report.",
+    scope === undefined
+      ? "Audit this generated world deck against every supplied authority layer and return the JSON report."
+      : "Verify only these bounded semantic repairs. The rest of the world deck is unchanged and already audited. Return only unresolved issues whose path exactly matches one supplied path.",
     `Creator decree:\n${opts.decree}`,
     `FROZEN GENESIS INTENT CONTRACT:\n${JSON.stringify(opts.intent)}`,
-    `World deck JSON (compact):\n${JSON.stringify(deck)}`,
+    scope === undefined
+      ? `World deck JSON (compact):\n${JSON.stringify(deck)}`
+      : `Repaired paths and current JSON values:\n${JSON.stringify(scope)}`,
   ];
   if (opts.lorebookExcerpts !== undefined && opts.lorebookExcerpts.trim().length > 0) {
     sections.push(`Lorebook excerpts (reference evidence):\n${opts.lorebookExcerpts}`);
@@ -221,6 +240,7 @@ export async function auditGenesisSemantics(
     lorebookExcerpts?: string;
     slot?: SlotName;
     owner?: CompletionRequest["owner"];
+    scopeIssues?: GenesisSemanticIssue[];
   },
   deps: SemanticAuditDeps = { complete: completeStructured },
 ): Promise<GenesisSemanticAuditResult> {
@@ -236,7 +256,7 @@ export async function auditGenesisSemantics(
         user: semanticAuditUserPrompt(deck, opts),
         schema: GenesisSemanticAuditResultSchema,
         temperature: 0.1,
-        maxTokens: 8000,
+        maxTokens: 5000,
         maxAttempts: 2,
         transportMaxAttempts: 2,
         allowTransportFallback: true,

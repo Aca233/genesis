@@ -299,9 +299,14 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
       maxTokens: preflight.budgetPlan.stages.find((budget) => budget.stage === stageId)?.maxOutputTokens,
       cache: { namespace: bundle.routingNamespace },
     }) as Record<string, unknown>;
+    const dependencyContent = new Map(dependencies.map((dependency) => [dependency.stageKey, dependency.content]));
     const content = stageId === "characters"
       ? sanitizeGenesisV2CharactersTemporalOutput(
         generatedContent as GenesisV2StageOutputs["characters"],
+        {
+          pantheonDomain: dependencyContent.get("pantheon_domain") as GenesisV2StageOutputs["pantheon_domain"],
+          civilizations: dependencyContent.get("civilizations") as GenesisV2StageOutputs["civilizations"],
+        },
       )
       : generatedContent;
     const validation = validateGenesisV2ShadowOutput({ stageId, output: content, structuralManifest: preflight.structuralManifest });
@@ -310,7 +315,6 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
     }
     const outputHash = hashGenesisV2ArtifactContent(content);
     const dependencyHashes = dependencies.map((dependency) => dependency.outputHash);
-    const dependencyContent = new Map(dependencies.map((dependency) => [dependency.stageKey, dependency.content]));
     let assembled = null;
     if (stageId === "characters") {
       try {

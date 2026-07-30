@@ -301,6 +301,22 @@ describe("semantic audit prompt", () => {
     expect(GENESIS_SEMANTIC_AUDIT_SYSTEM).toContain("provenance");
     expect(GENESIS_SEMANTIC_AUDIT_SYSTEM).toContain("lorebook");
   });
+
+  it("re-audits only repaired paths without resending the complete deck", () => {
+    const scopeIssue = issue("premise_drift", "error");
+    scopeIssue.path = "worldName";
+    const prompt = semanticAuditUserPrompt(badDeck, {
+      decree: auditInput.decree,
+      intent: crossoverIntent,
+      scopeIssues: [scopeIssue],
+    });
+
+    expect(prompt).toContain("Verify only these bounded semantic repairs");
+    expect(prompt).toContain(scopeIssue.path);
+    expect(prompt).toContain(badDeck.worldName);
+    expect(prompt).not.toContain("World deck JSON (compact)");
+    expect(prompt).not.toContain(JSON.stringify(badDeck));
+  });
 });
 
 describe("auditGenesisSemantics", () => {
@@ -322,7 +338,7 @@ describe("auditGenesisSemantics", () => {
       owner: auditInput.owner,
       schema: GenesisSemanticAuditResultSchema,
       temperature: 0.1,
-      maxTokens: 8000,
+      maxTokens: 5000,
       maxAttempts: 2,
       transportMaxAttempts: 2,
       allowTransportFallback: true,

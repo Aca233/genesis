@@ -1,15 +1,20 @@
-import type { WorldDeck } from "@/lib/cards/schemas";
 import type { GenesisIntentContract } from "@/lib/genesis/intent";
 import type { GenesisSemanticIssue } from "@/lib/genesis/semantic-audit";
 import type { WorldMode } from "@/lib/world-mode";
+
+export type SemanticRepairReference = {
+  path: string;
+  ref: string;
+  name?: string;
+};
 
 export type SemanticRepairPromptInput = {
   mode: WorldMode;
   decree: string;
   intent: GenesisIntentContract;
-  invalidDeck: WorldDeck;
   issues: GenesisSemanticIssue[];
   issueValues?: Array<{ path: string; value: unknown }>;
+  referenceCatalog?: SemanticRepairReference[];
   requiredRemovePaths?: string[];
   lockedPaths?: string[];
   lorebookExcerpts?: string;
@@ -28,8 +33,8 @@ export function semanticRepairPrompt(input: SemanticRepairPromptInput): string {
     `FROZEN GENESIS INTENT CONTRACT:\n${JSON.stringify(input.intent)}`,
     `Blocking semantic issues:\n${JSON.stringify(input.issues)}`,
     `Current JSON values at the exact issue paths (edit these values directly):\n${JSON.stringify(input.issueValues ?? [])}`,
+    `Available stable card references (use only when a repaired value needs a ref):\n${JSON.stringify(input.referenceCatalog ?? [])}`,
     `Required remove paths (must use action="remove"):\n${JSON.stringify(input.requiredRemovePaths ?? [])}`,
-    `Invalid world deck JSON (read-only context):\n${JSON.stringify(input.invalidDeck)}`,
     `Locked paths (must remain byte-for-byte equivalent as JSON values):\n${JSON.stringify(input.lockedPaths ?? [])}`,
   ];
 

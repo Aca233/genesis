@@ -1,9 +1,8 @@
 /**
  * End-to-end Genesis budgets include intent extraction, five V2 stages,
- * sixteen bounded semantic repair rounds, and physical transport recovery.
- * The configured pipeline can issue up to 130 logical calls; permits count
- * physical requests, so the call ceiling allows two requests per logical call
- * plus bounded transport-recovery headroom.
+ * three bounded semantic repair rounds, structured-output correction, and
+ * physical transport recovery. Permits count physical requests, so the call
+ * ceiling deliberately retains generous recovery headroom for large worlds.
  * These are safety ceilings, not target usage.
  */
 export const GENESIS_PRIMARY_BUDGET = {

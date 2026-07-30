@@ -6,6 +6,7 @@ import type { GenesisMaterialSnapshot } from "@/lib/materials/types";
 import {
   GENESIS_SEMANTIC_REPAIR_SYSTEM,
   semanticRepairPrompt,
+  type SemanticRepairReference,
 } from "@/lib/prompts/genesis-quality";
 import type { WorldMode } from "@/lib/world-mode";
 import { validateGenesisDeck } from "./generate";
@@ -56,7 +57,7 @@ type SemanticRepairRequest = {
   maxOutputBytes: number;
 };
 
-const MAX_SEMANTIC_REPAIR_ROUNDS = 16;
+const MAX_SEMANTIC_REPAIR_ROUNDS = 3;
 
 const JsonTextSchema = z.string().refine((value) => {
   try {
@@ -163,13 +164,14 @@ function withMetrics(
   };
 }
 
-function auditOptions(input: GenesisQualityGateInput) {
+function auditOptions(input: GenesisQualityGateInput, scopeIssues?: GenesisSemanticIssue[]) {
   return {
     userId: input.userId,
     decree: input.decree,
     intent: input.intent,
     lorebookExcerpts: input.lorebookExcerpts,
     owner: input.owner,
+    ...(scopeIssues === undefined ? {} : { scopeIssues }),
   };
 }
 
@@ -188,6 +190,26 @@ function readPath(value: unknown, segments: string[]): unknown | typeof MISSING_
     current = (current as Record<string, unknown>)[segment];
   }
   return current;
+}
+
+function semanticRepairReferenceCatalog(deck: WorldDeck): SemanticRepairReference[] {
+  const catalog: SemanticRepairReference[] = [];
+  const add = (path: string, value: unknown) => {
+    if (value === null || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (typeof record.ref !== "string") return;
+    catalog.push({
+      path,
+      ref: record.ref,
+      ...(typeof record.name === "string" ? { name: record.name } : {}),
+    });
+  };
+
+  add("playerGod", "playerGod" in deck ? deck.playerGod : undefined);
+  for (const collection of ["majorGods", "majorCharacters", "races", "factions", "places"] as const) {
+    deck[collection].forEach((value, index) => add(`${collection}.${index}`, value));
+  }
+  return catalog;
 }
 
 function semanticIdentityTokens(value: unknown): string[] {
@@ -540,9 +562,9 @@ export async function enforceGenesisQuality(
           mode: input.mode,
           decree: input.decree,
           intent: input.intent,
-          invalidDeck: currentDeck,
           issues: repairIssues,
           issueValues,
+          referenceCatalog: semanticRepairReferenceCatalog(currentDeck),
           requiredRemovePaths,
           lockedPaths: input.lockedPaths,
           lorebookExcerpts: input.lorebookExcerpts,
@@ -550,7 +572,7 @@ export async function enforceGenesisQuality(
           repairFeedback,
         }),
         temperature: 0.1,
-        maxTokens: 8000,
+        maxTokens: 3500,
         maxAttempts: 2,
         transportMaxAttempts: 2,
         allowTransportFallback: true,
@@ -595,7 +617,7 @@ export async function enforceGenesisQuality(
       }
     }
     if (!repairedDeck) throw new Error("语义补丁未生成可校验世界");
-    const nextAudit = await deps.audit(repairedDeck, auditOptions(input));
+    const nextAudit = await deps.audit(repairedDeck, auditOptions(input, repairIssues));
     finalReport = withMetrics(nextAudit, initialReport, true, round + 1, startedAt);
 
     if (!hasBlockingIssues(nextAudit)) {
