@@ -1,6 +1,6 @@
 # World Director Runtime Implementation Roadmap
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 用可回滚、可分阶段验证的方式，将现有“正文 + META + settlement”主链路一次性切换为持久化世界导演 Agent 运行时。
 
@@ -14,7 +14,7 @@
 - 修改 Route Handler 前读取 `node_modules/next/dist/docs/01-app/01-getting-started/15-route-handlers.md`；修改服务启动恢复前读取 `node_modules/next/dist/docs/01-app/02-guides/instrumentation.md`。
 - 源码语义修改只使用原生 `apply_patch`；机械替换必须先用 FastCtx `replace` dry-run；不得用 shell、Python、Node 或重定向生成源码。
 - 实施必须在 Codex/宿主提供的隔离 worktree 或 `codex/` 前缀实现分支中进行；不得直接在 `master` 开始实现。
-- 不得清理、覆盖或提交开始实施前已存在的用户改动；`.superpowers/`、`current-play-ui.png`、`prisma/migrations/20260724053824/` 默认不属于本计划。
+- 不得清理、覆盖或提交开始实施前已存在的用户改动；`.omx/`、`current-play-ui.png`、`prisma/migrations/20260724053824/` 默认不属于本计划。
 - 单一世界导演是唯一 LLM 决策者；不得引入多个模型角色重新解释同一正文。
 - 每个 Run 最多 `4` 次 LLM 调用，规划和正文共用最多 `2` 次自动修正；预算必须由运行时硬拒绝越界。
 - Provider 原生工具调用不是必需能力；`native_tools`、`structured_output`、`text_frame` 必须映射到同一个 `AgentCommand`。
@@ -37,7 +37,7 @@
 3. 不修改或提交以下现有未跟踪项：
 
    ```text
-   .superpowers/
+   .omx/
    current-play-ui.png
    prisma/migrations/20260724053824/
    ```
@@ -65,12 +65,12 @@ flowchart LR
 
 ---
 
-## Superpowers 6.2.0 执行协议
+## oh-my-codex 执行协议
 
 六个 Phase 是六份独立实施计划，按依赖顺序串行执行。每份计划拥有自己的：
 
 ```text
-.superpowers/sdd/<plan-basename>/
+.omx/plans/<plan-basename>/
 ├─ progress.md
 ├─ task-N-brief.md
 ├─ task-N-report.md
@@ -125,7 +125,7 @@ Phase 6 完成后，再对 Phase 1 开始前的总 `MERGE_BASE..HEAD` 做一次�
 文件：
 
 ```text
-docs/superpowers/plans/2026-07-24-world-director-phase-1-foundation.md
+docs/omx/plans/2026-07-24-world-director-phase-1-foundation.md
 ```
 
 交付：
@@ -147,7 +147,7 @@ docs/superpowers/plans/2026-07-24-world-director-phase-1-foundation.md
 文件：
 
 ```text
-docs/superpowers/plans/2026-07-24-world-director-phase-2-kernel.md
+docs/omx/plans/2026-07-24-world-director-phase-2-kernel.md
 ```
 
 交付：
@@ -171,7 +171,7 @@ docs/superpowers/plans/2026-07-24-world-director-phase-2-kernel.md
 文件：
 
 ```text
-docs/superpowers/plans/2026-07-24-world-director-phase-3-agent.md
+docs/omx/plans/2026-07-24-world-director-phase-3-agent.md
 ```
 
 交付：
@@ -197,7 +197,7 @@ docs/superpowers/plans/2026-07-24-world-director-phase-3-agent.md
 文件：
 
 ```text
-docs/superpowers/plans/2026-07-24-world-director-phase-4-runtime.md
+docs/omx/plans/2026-07-24-world-director-phase-4-runtime.md
 ```
 
 交付：
@@ -221,7 +221,7 @@ docs/superpowers/plans/2026-07-24-world-director-phase-4-runtime.md
 文件：
 
 ```text
-docs/superpowers/plans/2026-07-24-world-director-phase-5-experience.md
+docs/omx/plans/2026-07-24-world-director-phase-5-experience.md
 ```
 
 交付：
@@ -247,7 +247,7 @@ docs/superpowers/plans/2026-07-24-world-director-phase-5-experience.md
 文件：
 
 ```text
-docs/superpowers/plans/2026-07-24-world-director-phase-6-cutover.md
+docs/omx/plans/2026-07-24-world-director-phase-6-cutover.md
 ```
 
 交付：

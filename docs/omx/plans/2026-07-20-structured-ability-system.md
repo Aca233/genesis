@@ -1,6 +1,6 @@
 # 结构化能力系统 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 为新世界建立可继承、可见性受控、可随章节演化的种族能力、神权与主要人物技能系统，同时保持现有手动章节结算流程不变。
 
@@ -12,7 +12,7 @@
 
 ## 实施前约束
 
-- 以 [设计规格](/mnt/c/创世/docs/superpowers/specs/2026-07-20-structured-ability-system-design.md) 为唯一产品规则来源。
+- 以 [设计规格](/mnt/c/创世/docs/omx/specs/2026-07-20-structured-ability-system-design.md) 为唯一产品规则来源。
 - 不修改“同章多轮对话 → 玩家点击结束本章 → 集中结算”的流程；`InputDeck.tsx`、`SettleCeremony.tsx` 的交互语义必须保持。
 - 不添加技能快捷栏、数值战斗、法力、冷却、伤害或成功率。
 - 保留当前未提交的 `pnpm-workspace.yaml` 和 `.claude/` 改动，不暂存、不修改、不纳入任何提交。

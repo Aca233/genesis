@@ -209,6 +209,12 @@ describe("complete transport attempts", () => {
     expect(isTransientLlmError(new Error("流式响应为空"))).toBe(true);
   });
 
+  it("将中转站 SSE 空闲超时 499 视为可重试的断流", () => {
+    expect(isTransientLlmError(new Error(
+      "HTTP 499: stream disconnected before completion: idle timeout waiting for SSE",
+    ))).toBe(true);
+  });
+
   it("可将一次模型调用限制为一次上游请求且禁止非流式回落", async () => {
     mocks.stream.mockImplementation(async function* () {
       throw new Error("fetch failed");
@@ -556,6 +562,63 @@ describe("输出上限续写接力", () => {
     })) void chunk; };
     await expect(consume()).rejects.toThrow("terminated");
     expect(mocks.stream).toHaveBeenCalledTimes(1);
+  });
+
+  it("stream: 普通叙事在首字符前遇到 SSE 空闲超时 499 时重试", async () => {
+    mocks.stream
+      .mockImplementationOnce(async function* () {
+        throw new Error(
+          "HTTP 499: stream disconnected before completion: idle timeout waiting for SSE",
+        );
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: "重连成功" };
+        yield usageChunk(false);
+        yield { type: "done" };
+      });
+
+    let text = "";
+    for await (const chunk of stream("narrative", {
+      task: "narrative",
+      userId: "test-user",
+      messages: [{ role: "user", content: "continue" }],
+    })) {
+      if (chunk.type === "text") text += chunk.text;
+    }
+
+    expect(text).toBe("重连成功");
+    expect(mocks.stream).toHaveBeenCalledTimes(2);
+  });
+
+  it("stream: 普通叙事在部分输出后遇到 SSE 空闲超时 499 时断点续传", async () => {
+    mocks.stream
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: "第一段" };
+        throw new Error(
+          "HTTP 499: stream disconnected before completion: idle timeout waiting for SSE",
+        );
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: "第一段第二段" };
+        yield usageChunk(false);
+        yield { type: "done" };
+      });
+
+    let text = "";
+    for await (const chunk of stream("narrative", {
+      task: "narrative",
+      userId: "test-user",
+      messages: [{ role: "user", content: "continue" }],
+    })) {
+      if (chunk.type === "text") text += chunk.text;
+    }
+
+    expect(text).toBe("第一段第二段");
+    expect(mocks.stream).toHaveBeenCalledTimes(2);
+    expect(mocks.stream.mock.calls[1][1].messages.at(-2)).toMatchObject({
+      role: "assistant",
+      content: "第一段",
+    });
   });
 
   it("stream: 上游正常结束却没有文本时在当前任务内重试", async () => {

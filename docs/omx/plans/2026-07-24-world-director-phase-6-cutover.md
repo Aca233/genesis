@@ -1,6 +1,6 @@
 # World Director Phase 6: Migration, Cache Observability, and Cutover Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 确定性迁移旧历史和活动现实基线，验证缓存与 Provider 能力，正式切换世界写路径，并删除 META/settlement 的事实生成职责。
 

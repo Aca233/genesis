@@ -1,6 +1,6 @@
 # Autonomous World Activity and Durable Task Progress Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在不增加每轮 LLM 调用的前提下，让世界随每次 Narrator 回复自主产生可见动态和持续事件，并让聊天、世界整理、现实分叉都显示可恢复、可重连、可从失败步骤重试的真实任务进度。
 

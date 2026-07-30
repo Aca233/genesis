@@ -527,7 +527,7 @@ export const EventConsequenceSchema = z.discriminatedUnion("kind", [
 /**
  * 将临之事（CanonFutureEvent）：作者侧未来候选事件，对玩家隐藏。
  * 形状严格遵循时间一致设计稿的 future 档 CanonEvent
- * （docs/superpowers/specs/2026-07-26-temporal-consistent-world-generation-design.md §5.3/§8.4）：
+ * （docs/omx/specs/2026-07-26-temporal-consistent-world-generation-design.md §5.3/§8.4）：
  * 整数 ordinal 承担全部先后序（timeLabel 仅展示），开局时刻为隐式 ordinal 0，
  * 所有条目 ordinal >= 1；epoch 固定 "future"，status 恒 "pending"，visibility 恒 "author_only"。
  * 注：阶段 1 已引入可选的 temporalAnchor 卡（source.basis / anchorOrdinal）。卡组携带锚点时，
