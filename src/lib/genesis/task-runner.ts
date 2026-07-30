@@ -685,9 +685,11 @@ export async function runGenesisTask(
       || error instanceof GenesisSemanticGateError
       || error instanceof GenesisPersistedIntentError;
     // 质量契约错误必须先于 generic terminal_unknown 判定，绝不重排队或等待 provider。
+    const transportFailure = classifyTransportFailure(error);
     const waitingForProvider = !terminalQualityFailure && (
       error instanceof LlmCircuitOpenError
-      || classifyTransportFailure(error).terminalEvidence === "terminal_unknown"
+      || (transportFailure.terminalEvidence === "terminal_unknown"
+        && transportFailure.stableErrorCode !== "UNKNOWN_ERROR")
     );
     const transient = !terminalQualityFailure
       && !waitingForProvider

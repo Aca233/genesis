@@ -12,6 +12,7 @@ import {
 } from "./task-runner";
 import { CreatorWorldDeckSchema, PantheonWorldDeckSchema } from "@/lib/cards/schemas";
 import { completeDeck } from "@/lib/abilities/embark.test-fixtures";
+import { LlmBudgetError } from "@/lib/llm/permits";
 import {
   LORE_INDEX_UNAVAILABLE_NOTICE,
   lorebookExcerpts,
@@ -474,6 +475,24 @@ describe("genesis task runner", () => {
     expect(harness.recordQualityEvent).toHaveBeenCalledWith(expect.objectContaining({
       kind: "intent_failed",
       taskId: "task-1",
+    }));
+  });
+
+  it("预算耗尽直接 failed，不进入 provider 探测循环", async () => {
+    const harness = createRunnerHarness({ intentContract: crossoverIntent });
+    harness.generateDeck.mockRejectedValue(new LlmBudgetError());
+
+    await runGenesisTask("task-1", harness.deps as never);
+
+    expect(harness.worldCreate).not.toHaveBeenCalled();
+    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "failed",
+        error: "创世任务已达到模型调用预算上限",
+      }),
+    }));
+    expect(harness.taskUpdateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "waiting_for_provider" }),
     }));
   });
 
