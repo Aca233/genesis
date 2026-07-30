@@ -8,6 +8,7 @@ import { MaterialSelectionItemSchema } from "@/lib/materials/types";
 import { buildGenesisMaterialSnapshot, snapshotJson } from "@/lib/materials/task-snapshot";
 import { WorldModeSchema } from "@/lib/world-mode";
 import { withAuth } from "@/lib/auth/route";
+import { GENESIS_PRIMARY_BUDGET } from "@/lib/genesis/budget";
 import {
   GENESIS_CREATE_MAX_BYTES,
   PayloadLimitError,
@@ -115,6 +116,9 @@ export const POST = withAuth(async (userId, request: Request) => {
   const taskData = {
     ...taskInput,
     engineVersion,
+    budgetMaxCalls: GENESIS_PRIMARY_BUDGET.maxCalls,
+    budgetMaxInput: GENESIS_PRIMARY_BUDGET.maxInputTokens,
+    budgetMaxOutput: GENESIS_PRIMARY_BUDGET.maxOutputTokens,
     shadowEnabled,
     shadowStatus: shadowEnabled ? "pending_legacy" : "disabled",
     ...(primaryPreflight ? {

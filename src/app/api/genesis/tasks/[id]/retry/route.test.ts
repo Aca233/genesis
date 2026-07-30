@@ -54,9 +54,9 @@ describe("POST /api/genesis/tasks/[id]/retry", () => {
       data: expect.objectContaining({
         status: "queued",
         aggregateVersion: 5,
-        budgetMaxCalls: { increment: 12 },
-        budgetMaxInput: { increment: 500_000 },
-        budgetMaxOutput: { increment: 96_000 },
+        budgetMaxCalls: { increment: 16 },
+        budgetMaxInput: { increment: 1_000_000 },
+        budgetMaxOutput: { increment: 128_000 },
       }),
     }));
     expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -64,5 +64,29 @@ describe("POST /api/genesis/tasks/[id]/retry", () => {
       data: expect.objectContaining({ status: "queued", attempt: 0 }),
     }));
     expect(mocks.wake).toHaveBeenCalledOnce();
+  });
+
+  it("legacy 人工重试也补充预算，避免预算失败后原地再次失败", async () => {
+    mocks.taskFindFirst.mockResolvedValue({
+      aggregateVersion: 2,
+      stage: "semantic_repair",
+      engineVersion: "legacy-v1",
+    });
+
+    const response = await POST(new Request("http://localhost/api/genesis/tasks/task-1/retry", {
+      method: "POST",
+    }), context);
+
+    expect(response.status).toBe(202);
+    expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        budgetMaxCalls: { increment: 16 },
+        budgetMaxInput: { increment: 1_000_000 },
+        budgetMaxOutput: { increment: 128_000 },
+      }),
+    }));
+    expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { genesisTaskId: "task-1", nodeKey: "legacy-world-deck" },
+    }));
   });
 });

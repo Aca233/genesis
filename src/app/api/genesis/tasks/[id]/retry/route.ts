@@ -1,13 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { GENESIS_RETRY_BUDGET_ALLOWANCE } from "@/lib/genesis/budget";
 import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
 import { withAuth } from "@/lib/auth/route";
-
-const V2_RETRY_BUDGET_ALLOWANCE = {
-  calls: 12,
-  inputTokens: 500_000,
-  outputTokens: 96_000,
-} as const;
 
 export const POST = withAuth(async (
   userId,
@@ -33,11 +28,9 @@ export const POST = withAuth(async (
         leaseExpiresAt: null,
         attempt: 0,
         aggregateVersion,
-        ...(current.engineVersion === "dag-v2" ? {
-          budgetMaxCalls: { increment: V2_RETRY_BUDGET_ALLOWANCE.calls },
-          budgetMaxInput: { increment: V2_RETRY_BUDGET_ALLOWANCE.inputTokens },
-          budgetMaxOutput: { increment: V2_RETRY_BUDGET_ALLOWANCE.outputTokens },
-        } : {}),
+        budgetMaxCalls: { increment: GENESIS_RETRY_BUDGET_ALLOWANCE.calls },
+        budgetMaxInput: { increment: GENESIS_RETRY_BUDGET_ALLOWANCE.inputTokens },
+        budgetMaxOutput: { increment: GENESIS_RETRY_BUDGET_ALLOWANCE.outputTokens },
       },
     });
     if (updated.count !== 1) return false;
