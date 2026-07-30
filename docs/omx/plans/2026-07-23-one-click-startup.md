@@ -1,6 +1,6 @@
 # One-Click Startup Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Create a Windows batch file that prepares and starts the complete local development environment with one double-click.
 
@@ -64,6 +64,6 @@ Expected: no whitespace errors; diff contains only the intended startup workflow
 - [x] **Step 5: Commit**
 
 ```powershell
-git add -- 启动.bat docs/superpowers/plans/2026-07-23-one-click-startup.md
+git add -- 启动.bat docs/omx/plans/2026-07-23-one-click-startup.md
 git commit -m "feat: add one-click Windows startup"
 ```

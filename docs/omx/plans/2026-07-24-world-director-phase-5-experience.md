@@ -1,6 +1,6 @@
 # World Director Phase 5: Play Experience and Revision Semantics Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将游玩界面接入持久 Run，并把异文、朱批、裁去和重新生成改造成正文与 ChangeSet 一致的现实修订操作。
 

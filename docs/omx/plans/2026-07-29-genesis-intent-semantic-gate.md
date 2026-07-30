@@ -1,6 +1,6 @@
 # Genesis Intent Contract and Semantic Quality Gate Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a frozen Genesis intent contract and a blocking semantic quality gate so premise drift, false divinity classification, unsupported canon claims, anchor-state leaks, and unearned power shortcuts cannot enter a newly saved world.
 
@@ -1163,7 +1163,7 @@ git commit -m "feat(genesis): preserve intent through world lifecycle"
 **Files:**
 - Create: `src/lib/genesis/semantic-gate.regression.test.ts`
 - Modify as failures require: only files already owned by Tasks 1–8
-- Verify: `docs/superpowers/specs/2026-07-29-genesis-intent-semantic-gate-design.md`
+- Verify: `docs/omx/specs/2026-07-29-genesis-intent-semantic-gate-design.md`
 
 **Interfaces:**
 - Adds no production API.
@@ -1283,7 +1283,7 @@ Do not include unrelated workspace files or generated icon diffs in this commit.
 
 ## Execution Handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-07-29-genesis-intent-semantic-gate.md`.
+Plan complete and saved to `docs/omx/plans/2026-07-29-genesis-intent-semantic-gate.md`.
 
 Two execution options:
 

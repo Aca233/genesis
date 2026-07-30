@@ -1,6 +1,6 @@
 # 大模型厂商 Prompt Cache 优化实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use $team (coordinated parallel execution) or $ralph (persistent single-owner completion) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 为创世、正文、章末结算、卡片重掷及修复请求启用兼容优先的厂商 Prompt Cache，并在香炉页展示真实缓存 Token 命中统计。
 
