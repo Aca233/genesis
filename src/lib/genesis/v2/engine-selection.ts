@@ -12,10 +12,11 @@ type RolloutEnvironment = Record<string, string | undefined>;
 export function readGenesisV2PrimaryRollout(
   environment: RolloutEnvironment = process.env,
 ): GenesisV2PrimaryRollout {
-  const parsedPercent = Number(environment.GENESIS_V2_PRIMARY_PERCENT ?? "0");
+  const configuredPercent = environment.GENESIS_V2_PRIMARY_PERCENT?.trim();
+  const parsedPercent = Number(configuredPercent || "100");
   const percent = Number.isInteger(parsedPercent) && parsedPercent >= 0 && parsedPercent <= 100
     ? parsedPercent
-    : 0;
+    : 100;
   const userIds = new Set(
     (environment.GENESIS_V2_PRIMARY_USER_IDS ?? "")
       .split(",")

@@ -42,7 +42,16 @@ describe("POST /api/genesis/tasks", () => {
         budgetMaxCalls: 32,
         budgetMaxInput: 2_000_000,
         budgetMaxOutput: 192_000,
-        jobs: { create: [expect.objectContaining({ nodeKey: "legacy-world-deck" })] },
+        engineVersion: "dag-v2",
+        jobs: {
+          create: expect.arrayContaining([
+            expect.objectContaining({ nodeKey: "v2:blueprint", engineVersion: "dag-v2" }),
+            expect.objectContaining({ nodeKey: "v2:pantheon_domain", engineVersion: "dag-v2" }),
+            expect.objectContaining({ nodeKey: "v2:civilizations", engineVersion: "dag-v2" }),
+            expect.objectContaining({ nodeKey: "v2:eras", engineVersion: "dag-v2" }),
+            expect.objectContaining({ nodeKey: "v2:characters", engineVersion: "dag-v2" }),
+          ]),
+        },
         outboxEvents: { create: expect.objectContaining({ aggregateVersion: 1 }) },
       }),
     }));
@@ -109,6 +118,7 @@ describe("POST /api/genesis/tasks", () => {
   });
 
   it("shadow 开关开启时在同一创建事务冻结预检和五个低优先级节点", async () => {
+    process.env.GENESIS_V2_PRIMARY_PERCENT = "0";
     process.env.GENESIS_V2_SHADOW_ENABLED = "1";
     mocks.create.mockResolvedValue({ id: "task-shadow" });
 
@@ -136,6 +146,7 @@ describe("POST /api/genesis/tasks", () => {
   });
 
   it("V2 白名单用户创建冻结的主 DAG，且不再创建 legacy 作业", async () => {
+    process.env.GENESIS_V2_PRIMARY_PERCENT = "0";
     process.env.GENESIS_V2_PRIMARY_USER_IDS = "test-user";
     mocks.create.mockResolvedValue({ id: "task-v2" });
 
