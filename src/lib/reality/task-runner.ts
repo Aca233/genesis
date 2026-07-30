@@ -1034,14 +1034,37 @@ export async function runRealityRewriteTask(
   }
 }
 
-const activeRunners = new Map<string, Promise<void>>();
+type RealityRewriteTaskRunner = (taskId: string) => Promise<void>;
+
+export function createRealityRewriteRunnerScheduler(runTask: RealityRewriteTaskRunner): (taskId: string) => void {
+  const activeRunners = new Map<string, Promise<void>>();
+  const pendingRunners = new Set<string>();
+
+  const launch = (taskId: string): void => {
+    const promise = Promise.resolve()
+      .then(() => runTask(taskId))
+      .finally(() => {
+        activeRunners.delete(taskId);
+        if (pendingRunners.delete(taskId)) launch(taskId);
+      });
+    activeRunners.set(taskId, promise);
+    void promise.catch(() => {
+      // The runner persists sanitized failure state. Detached route tasks must not
+      // produce unhandled rejections.
+    });
+  };
+
+  return (taskId: string): void => {
+    if (activeRunners.has(taskId)) {
+      pendingRunners.add(taskId);
+      return;
+    }
+    launch(taskId);
+  };
+}
+
+const scheduleRealityRewriteRunner = createRealityRewriteRunnerScheduler(runRealityRewriteTask);
 
 export function ensureRealityRewriteRunning(taskId: string): void {
-  if (activeRunners.has(taskId)) return;
-  const promise = runRealityRewriteTask(taskId).finally(() => activeRunners.delete(taskId));
-  activeRunners.set(taskId, promise);
-  void promise.catch(() => {
-    // The runner persists sanitized failure state. Detached route tasks must not
-    // produce unhandled rejections.
-  });
+  scheduleRealityRewriteRunner(taskId);
 }

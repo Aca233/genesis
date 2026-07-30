@@ -5,6 +5,7 @@ import {
   REWRITE_LEASE_MS,
   claimRealityRewriteTask,
   createRealityRewrite,
+  createRealityRewriteRunnerScheduler,
   remapRewritePlanForClone,
   rewriteDurableProgress,
   retryRealityRewrite,
@@ -225,6 +226,30 @@ describe("reality rewrite creation and leases", () => {
     await expect(retryRealityRewrite(db as never, "test-user", failed.id)).resolves.toBe(newOwner);
     expect(updateMany).toHaveBeenCalledTimes(1);
     expect(findUnique).toHaveBeenCalledWith({ where: { id: failed.id } });
+  });
+});
+
+describe("reality rewrite runner scheduling", () => {
+  it("coalesces wakeups during an active run into one guaranteed follow-up attempt", async () => {
+    let finishFirstRun!: () => void;
+    const firstRun = new Promise<void>((resolve) => {
+      finishFirstRun = resolve;
+    });
+    const runTask = vi.fn()
+      .mockImplementationOnce(() => firstRun)
+      .mockResolvedValue(undefined);
+    const ensureRunning = createRealityRewriteRunnerScheduler(runTask);
+
+    ensureRunning("rewrite-1");
+    await vi.waitFor(() => expect(runTask).toHaveBeenCalledTimes(1));
+
+    ensureRunning("rewrite-1");
+    ensureRunning("rewrite-1");
+    expect(runTask).toHaveBeenCalledTimes(1);
+
+    finishFirstRun();
+    await vi.waitFor(() => expect(runTask).toHaveBeenCalledTimes(2));
+    expect(runTask).toHaveBeenNthCalledWith(2, "rewrite-1");
   });
 });
 

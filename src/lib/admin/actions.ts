@@ -2,7 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
-import { ensureRealityRewriteRunning, retryRealityRewrite } from "@/lib/reality/task-runner";
+import { ensureRealityRewriteRunning } from "@/lib/reality/task-runner";
 import { assertAdminConfirmation, assertAdminMutationAllowed, redactAdminError } from "./security";
 import { canAdminTaskAction, type AdminTaskAction, type AdminTaskKind } from "./task-attention";
 
@@ -143,13 +143,46 @@ export async function mutateAdminTask(ctx: AdminActionContext, input: { kind: "g
     if (result.count !== 1) throw new Error("任务当前不可取消");
     await audit(db, ctx, { action: "cancel-task", targetType: "narrative-task", targetId: task.id, targetLabel: task.chapter.timeline.world.name, reason: input.reason.trim(), success: true });
   } else {
-    const task = await db.realityRewrite.findUnique({ where: { id: input.taskId }, select: { id: true, status: true, leaseExpiresAt: true, world: { select: { userId: true, name: true } } } });
+    const task = await db.realityRewrite.findUnique({
+      where: { id: input.taskId },
+      select: {
+        id: true,
+        status: true,
+        plan: true,
+        resultTimelineId: true,
+        leaseToken: true,
+        leaseExpiresAt: true,
+        world: { select: { name: true } },
+      },
+    });
     if (!task) throw new Error("任务不存在");
     targetType = "rewrite-task";
     targetLabel = task.world.name;
     assertAdminTaskActionAllowed({ kind: "rewrite", status: task.status, leaseExpiresAt: task.leaseExpiresAt }, input.action, now);
-    if (input.action === "cancel") { const result = await db.realityRewrite.updateMany({ where: { id: task.id, status: { in: ["planning", "applying", "narrating"] } }, data: { status: "cancelled", leaseToken: null, leaseExpiresAt: null, error: "管理员已取消" } }); if (result.count !== 1) throw new Error("任务当前不可取消"); }
-    else { const current = await retryRealityRewrite(db, task.world.userId, task.id); if (current.status !== "completed") ensureRealityRewriteRunning(current.id); }
+    if (input.action === "cancel") {
+      const result = await db.realityRewrite.updateMany({
+        where: { id: task.id, status: { in: ["planning", "applying", "narrating"] } },
+        data: { status: "cancelled", leaseToken: null, leaseExpiresAt: null, error: "管理员已取消" },
+      });
+      if (result.count !== 1) throw new Error("任务当前不可取消");
+    } else {
+      const nextStatus = input.action === "retry"
+        ? task.resultTimelineId !== null
+          ? "narrating"
+          : task.plan !== null ? "applying" : "planning"
+        : task.status;
+      const result = await db.realityRewrite.updateMany({
+        where: {
+          id: task.id,
+          status: task.status,
+          leaseToken: task.leaseToken,
+          leaseExpiresAt: task.leaseExpiresAt,
+        },
+        data: { status: nextStatus, error: null, leaseToken: null, leaseExpiresAt: null },
+      });
+      if (result.count !== 1) throw new Error("任务状态已变化，请刷新后重试");
+      ensureRealityRewriteRunning(task.id);
+    }
     await audit(db, ctx, { action: `${input.action}-task`, targetType: "rewrite-task", targetId: task.id, targetLabel: task.world.name, reason: input.reason.trim(), success: true });
   }
   return { ok: true };
