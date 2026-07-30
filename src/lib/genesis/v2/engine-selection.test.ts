@@ -15,6 +15,9 @@ describe("Genesis V2 primary engine selection", () => {
       requestHash: "request-1",
       rollout: readGenesisV2PrimaryRollout({}),
     })).toBe("legacy-v1");
+    expect(readGenesisV2PrimaryRollout({
+      GENESIS_V2_PRIMARY_PERCENT: "100",
+    }).percent).toBe(0);
   });
 
   it("routes explicit internal users to V2 even at zero percent", () => {
@@ -29,7 +32,10 @@ describe("Genesis V2 primary engine selection", () => {
   });
 
   it("uses a stable request bucket for percentage rollout", () => {
-    const rollout = readGenesisV2PrimaryRollout({ GENESIS_V2_PRIMARY_PERCENT: "37" });
+    const rollout = readGenesisV2PrimaryRollout({
+      GENESIS_V2_PRIMARY_ENABLED: "true",
+      GENESIS_V2_PRIMARY_PERCENT: "37",
+    });
     const first = selectGenesisEngine({ userId: "user-1", requestHash: "same-request", rollout });
     const second = selectGenesisEngine({ userId: "user-1", requestHash: "same-request", rollout });
 
@@ -45,10 +51,22 @@ describe("Genesis V2 primary engine selection", () => {
     expect(selectGenesisEngine({
       userId: "user-1",
       requestHash: "request-1",
-      rollout: readGenesisV2PrimaryRollout({ GENESIS_V2_PRIMARY_PERCENT: "100" }),
+      rollout: readGenesisV2PrimaryRollout({
+        GENESIS_V2_PRIMARY_ENABLED: "true",
+        GENESIS_V2_PRIMARY_PERCENT: "100",
+      }),
     })).toBe("dag-v2");
-    expect(readGenesisV2PrimaryRollout({ GENESIS_V2_PRIMARY_PERCENT: "101" }).percent).toBe(0);
-    expect(readGenesisV2PrimaryRollout({ GENESIS_V2_PRIMARY_PERCENT: "not-a-number" }).percent).toBe(0);
-    expect(readGenesisV2PrimaryRollout({ GENESIS_V2_PRIMARY_PERCENT: "" }).percent).toBe(0);
+    expect(readGenesisV2PrimaryRollout({
+      GENESIS_V2_PRIMARY_ENABLED: "true",
+      GENESIS_V2_PRIMARY_PERCENT: "101",
+    }).percent).toBe(0);
+    expect(readGenesisV2PrimaryRollout({
+      GENESIS_V2_PRIMARY_ENABLED: "true",
+      GENESIS_V2_PRIMARY_PERCENT: "not-a-number",
+    }).percent).toBe(0);
+    expect(readGenesisV2PrimaryRollout({
+      GENESIS_V2_PRIMARY_ENABLED: "true",
+      GENESIS_V2_PRIMARY_PERCENT: "",
+    }).percent).toBe(0);
   });
 });
