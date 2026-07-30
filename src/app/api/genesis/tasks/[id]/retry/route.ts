@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { GENESIS_RETRY_BUDGET_ALLOWANCE } from "@/lib/genesis/budget";
+import { expandedGenesisRetryBudget } from "@/lib/genesis/budget";
 import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
 import { withAuth } from "@/lib/auth/route";
 
@@ -13,10 +13,30 @@ export const POST = withAuth(async (
   const retried = await prisma.$transaction(async (tx) => {
     const current = await tx.genesisTask.findFirst({
       where: { id, userId, status: "failed" },
-      select: { aggregateVersion: true, stage: true, engineVersion: true },
+      select: {
+        aggregateVersion: true,
+        stage: true,
+        engineVersion: true,
+        budgetMaxCalls: true,
+        budgetMaxInput: true,
+        budgetMaxOutput: true,
+        budgetCallCount: true,
+        budgetReservedIn: true,
+        budgetReservedOut: true,
+        budgetSettledIn: true,
+        budgetSettledOut: true,
+      },
     });
     if (!current) return false;
     const aggregateVersion = current.aggregateVersion + 1;
+    const retryBudget = expandedGenesisRetryBudget({
+      maxCalls: current.budgetMaxCalls,
+      maxInputTokens: current.budgetMaxInput,
+      maxOutputTokens: current.budgetMaxOutput,
+      usedCalls: current.budgetCallCount,
+      usedInputTokens: current.budgetReservedIn + current.budgetSettledIn,
+      usedOutputTokens: current.budgetReservedOut + current.budgetSettledOut,
+    });
     const updated = await tx.genesisTask.updateMany({
       where: { id, userId, status: "failed", aggregateVersion: current.aggregateVersion },
       data: {
@@ -28,9 +48,9 @@ export const POST = withAuth(async (
         leaseExpiresAt: null,
         attempt: 0,
         aggregateVersion,
-        budgetMaxCalls: { increment: GENESIS_RETRY_BUDGET_ALLOWANCE.calls },
-        budgetMaxInput: { increment: GENESIS_RETRY_BUDGET_ALLOWANCE.inputTokens },
-        budgetMaxOutput: { increment: GENESIS_RETRY_BUDGET_ALLOWANCE.outputTokens },
+        budgetMaxCalls: retryBudget.maxCalls,
+        budgetMaxInput: retryBudget.maxInputTokens,
+        budgetMaxOutput: retryBudget.maxOutputTokens,
       },
     });
     if (updated.count !== 1) return false;

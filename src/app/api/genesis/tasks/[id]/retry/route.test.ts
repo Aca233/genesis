@@ -38,6 +38,14 @@ describe("POST /api/genesis/tasks/[id]/retry", () => {
       aggregateVersion: 4,
       stage: "characters",
       engineVersion: "dag-v2",
+      budgetMaxCalls: 32,
+      budgetMaxInput: 2_000_000,
+      budgetMaxOutput: 192_000,
+      budgetCallCount: 32,
+      budgetReservedIn: 0,
+      budgetReservedOut: 0,
+      budgetSettledIn: 1_800_000,
+      budgetSettledOut: 180_000,
     });
     mocks.taskUpdateMany.mockResolvedValue({ count: 1 });
     mocks.jobUpdateMany.mockResolvedValue({ count: 1 });
@@ -54,9 +62,9 @@ describe("POST /api/genesis/tasks/[id]/retry", () => {
       data: expect.objectContaining({
         status: "queued",
         aggregateVersion: 5,
-        budgetMaxCalls: { increment: 16 },
-        budgetMaxInput: { increment: 1_000_000 },
-        budgetMaxOutput: { increment: 128_000 },
+        budgetMaxCalls: 320,
+        budgetMaxInput: 30_000_000,
+        budgetMaxOutput: 2_500_000,
       }),
     }));
     expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -71,6 +79,14 @@ describe("POST /api/genesis/tasks/[id]/retry", () => {
       aggregateVersion: 2,
       stage: "semantic_repair",
       engineVersion: "legacy-v1",
+      budgetMaxCalls: 320,
+      budgetMaxInput: 30_000_000,
+      budgetMaxOutput: 2_500_000,
+      budgetCallCount: 310,
+      budgetReservedIn: 100_000,
+      budgetReservedOut: 10_000,
+      budgetSettledIn: 28_900_000,
+      budgetSettledOut: 2_390_000,
     });
 
     const response = await POST(new Request("http://localhost/api/genesis/tasks/task-1/retry", {
@@ -80,9 +96,9 @@ describe("POST /api/genesis/tasks/[id]/retry", () => {
     expect(response.status).toBe(202);
     expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        budgetMaxCalls: { increment: 16 },
-        budgetMaxInput: { increment: 1_000_000 },
-        budgetMaxOutput: { increment: 128_000 },
+        budgetMaxCalls: 480,
+        budgetMaxInput: 45_000_000,
+        budgetMaxOutput: 3_750_000,
       }),
     }));
     expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({

@@ -39,9 +39,9 @@ describe("POST /api/genesis/tasks", () => {
         decree: "创造星海",
         mode: "pantheon",
         completedKeys: [],
-        budgetMaxCalls: 32,
-        budgetMaxInput: 2_000_000,
-        budgetMaxOutput: 192_000,
+        budgetMaxCalls: 320,
+        budgetMaxInput: 30_000_000,
+        budgetMaxOutput: 2_500_000,
         engineVersion: "dag-v2",
         jobs: {
           create: expect.arrayContaining([
@@ -161,9 +161,9 @@ describe("POST /api/genesis/tasks", () => {
       engineVersion: "dag-v2",
       shadowEnabled: false,
       shadowStatus: "disabled",
-      budgetMaxCalls: 32,
-      budgetMaxInput: 2_000_000,
-      budgetMaxOutput: 192_000,
+      budgetMaxCalls: 320,
+      budgetMaxInput: 30_000_000,
+      budgetMaxOutput: 2_500_000,
       preflightHash: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(data.jobs.create).toHaveLength(5);
