@@ -180,6 +180,31 @@ describe("finalizeNarration", () => {
     });
   });
 
+  it("非阻断正文 lint 只写入消息私有 meta，不改变 Narrator completion 契约", async () => {
+    const { client, state, tx } = fixture();
+    tx.ability.findFirst.mockResolvedValue(null);
+    const meta = {
+      ...base.meta,
+      revealedEventIds: [],
+      abilityReveals: [],
+    };
+
+    const result = await finalizeNarration(client as never, {
+      ...base,
+      prose: "### 正文\n空气仿佛凝固！！",
+      meta,
+    });
+    const stored = state.messages.get("generation-1");
+    const storedMeta = stored?.meta as { proseLint?: Array<{ ruleId: string }> } | undefined;
+    const variants = stored?.variants as Array<{ meta: Record<string, unknown> }> | undefined;
+
+    expect(storedMeta?.proseLint?.map((finding) => finding.ruleId)).toEqual(
+      expect.arrayContaining(["markdown_heading", "stock_phrase", "repeated_punctuation"]),
+    );
+    expect(variants?.[0]?.meta).not.toHaveProperty("proseLint");
+    expect(result.meta).toEqual(meta);
+  });
+
   it("相同 generationId 重试直接复用，不重复任何副作用", async () => {
     const { client, tx } = fixture();
     tx.ability.findFirst.mockImplementation(async ({ where }: { where: { id: string } }) =>

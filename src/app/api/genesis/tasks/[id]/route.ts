@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { ensureGenesisTaskRunning, toGenesisTaskDto } from "@/lib/genesis/task-runner";
+import { toGenesisTaskDto } from "@/lib/genesis/task-runner";
 import { withAuth } from "@/lib/auth/route";
 
 export const dynamic = "force-dynamic";
@@ -24,11 +24,9 @@ export const GET = withAuth(async (
       createdAt: true,
       updatedAt: true,
       auditReport: true,
+      aggregateVersion: true,
     },
   });
   if (!task) return NextResponse.json({ error: "创世任务不存在" }, { status: 404 });
-  if (task.status === "queued" || task.status === "running" || task.status === "repairing") {
-    ensureGenesisTaskRunning(id);
-  }
   return NextResponse.json({ task: toGenesisTaskDto(task) });
 });

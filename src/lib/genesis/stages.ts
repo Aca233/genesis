@@ -6,6 +6,7 @@ import {
 
 export const GENESIS_STAGES = [
   { id: "oracle", title: "聆听神谕", description: "请求建立，解析随行典籍" },
+  { id: "intent", title: "冻结神谕理解", description: "固化神谕前提、叙事中心与边界" },
   { id: "laws", title: "奠定世界法则", description: "凝聚世界名、宇宙论与融合公理" },
   { id: "gods", title: "铸造诸神", description: "塑造诸神谱系与神间关系" },
   { id: "peoples", title: "铺展众生与疆域", description: "生成种族、势力与重要地点" },
@@ -13,12 +14,21 @@ export const GENESIS_STAGES = [
   { id: "conflict", title: "确立时代冲突", description: "定下时代矛盾、文风与主题" },
   { id: "validation", title: "校验世界引用", description: "核验卡组结构及所有稳定引用" },
   { id: "repair", title: "修补命运裂隙", description: "定向修复不完整结构或错误引用" },
+  { id: "audit", title: "审阅世界语义", description: "对照冻结意图审阅完整世界" },
+  { id: "semantic_repair", title: "纠正世界偏移", description: "修复偏离前提或时间锚点的内容" },
   { id: "saving", title: "世界凝固成形", description: "保存可编辑的世界草稿" },
   { id: "completed", title: "创世完成", description: "前往卡组典籍继续雕琢世界" },
 ] as const;
 
 export type GenesisStageId = (typeof GENESIS_STAGES)[number]["id"];
-export type GenesisTaskStatus = "queued" | "running" | "repairing" | "completed" | "failed";
+export type GenesisTaskStatus =
+  | "queued"
+  | "running"
+  | "repairing"
+  | "waiting_for_provider"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 const sharedRequirements: Array<{ stage: GenesisStageId; keys: GenesisTopLevelKey[] }> = [
   { stage: "laws", keys: ["mode", "worldName", "cosmology", "fusionAxiom"] },

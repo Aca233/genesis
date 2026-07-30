@@ -15,6 +15,16 @@ function emblemSeed(name: string): string {
   return h.toString(36);
 }
 
+function requireMappedId(
+  ids: ReadonlyMap<string, string>,
+  ref: string,
+  label: string,
+): string {
+  const id = ids.get(ref);
+  if (id === undefined) throw new Error(`无法解析${label}引用 "${ref}"`);
+  return id;
+}
+
 function raceSections(race: WorldDeck["races"][number]) {
   return [
     { key: "overview", content: { text: race.traits } },
@@ -289,6 +299,27 @@ export async function materializeEmbarkDeck(
       timelineId: timeline.id,
       index: 1,
       title: "创世",
+      ...(deck.openingChapterBrief === undefined
+        ? {}
+        : {
+            brief: {
+              objective: deck.openingChapterBrief.objective,
+              viewpointEntityId: deck.openingChapterBrief.viewpointCharacterRef === null
+                ? null
+                : requireMappedId(
+                    ids.characterByRef,
+                    deck.openingChapterBrief.viewpointCharacterRef,
+                    "首章视角人物",
+                  ),
+              openingConstraint: deck.openingChapterBrief.openingConstraint,
+              endingConstraint: deck.openingChapterBrief.endingConstraint,
+              readerKnows: deck.openingChapterBrief.readerKnows,
+              viewpointKnows: deck.openingChapterBrief.viewpointKnows,
+              mustHide: deck.openingChapterBrief.mustHide,
+              hintOnly: deck.openingChapterBrief.hintOnly,
+              forbiddenDevelopments: deck.openingChapterBrief.forbiddenDevelopments,
+            },
+          }),
     },
   });
 

@@ -12,6 +12,8 @@ import { assertModeTransition, WorldModeSchema } from "@/lib/world-mode";
 import { validateDeckReferences } from "@/lib/abilities/validator";
 import { withAuth } from "@/lib/auth/route";
 import { ownedWhere } from "@/lib/auth/ownership";
+import { parseGenesisIntent } from "@/lib/genesis/intent";
+import { parseGenesisQualityReport } from "@/lib/genesis/semantic-audit";
 
 /**
  * GET    /api/worlds/[id] —— 读取世界（含草稿卡组）
@@ -38,17 +40,33 @@ export const GET = withAuth(async (
       where: ownedWhere.world(userId, id),
       include: {
         timelines: { select: { id: true }, orderBy: { createdAt: "asc" } },
+        genesisTasks: {
+          select: { auditReport: true },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
       },
     });
     if (!world) return NextResponse.json({ error: "不存在" }, { status: 404 });
+    const { genesisTasks, ...persistedWorld } = world;
+    const projectedWorld = {
+      ...persistedWorld,
+      genesisIntent: parseGenesisIntent(world.genesisIntent),
+      genesisAuditReport: parseGenesisQualityReport(genesisTasks?.[0]?.auditReport),
+    };
     if (world.draftDeck) {
       try {
-        return NextResponse.json({ world: { ...world, draftDeck: parsePersistedWorldDeck(world.draftDeck) } });
+        return NextResponse.json({
+          world: {
+            ...projectedWorld,
+            draftDeck: parsePersistedWorldDeck(world.draftDeck),
+          },
+        });
       } catch {
         return NextResponse.json({ error: "草稿卡组已损坏" }, { status: 500 });
       }
     }
-    return NextResponse.json({ world });
+    return NextResponse.json({ world: projectedWorld });
   } catch (cause) {
     // 未捕获异常兜底：保证错误响应始终为结构化中文 JSON 而非空 500。
     console.error("GET /api/worlds/[id] 未捕获异常：", cause);

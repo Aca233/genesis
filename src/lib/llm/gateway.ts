@@ -4,6 +4,21 @@ import { decryptSecret } from "@/lib/crypto";
 import { adapters } from "./adapters";
 import { buildPromptCachePlan, normalizedEndpointKey } from "./cache";
 import { cacheCapabilitySnapshot } from "./cache-capabilities";
+import { PayloadLimitError, takeUtf8Prefix, utf8Bytes } from "@/lib/genesis/limits";
+import {
+  classifyTransportFailure,
+  classifyTransportSuccess,
+  safeTransportError,
+  type TerminalEvidenceType,
+  type TransportKind,
+  type TransportOutcome,
+} from "./transport";
+import {
+  acquireLlmPermit,
+  settleLlmPermit,
+  type Permit,
+  type PermitSettlement,
+} from "./permits";
 import {
   ModelSlotSchema,
   type CompletionRequest,
@@ -20,7 +35,31 @@ export type CompleteOptions = {
   maxAttempts?: number;
   /** Whether a failed streaming request may issue one additional non-streaming request. */
   allowFallback?: boolean;
+  maxInputBytes?: number;
+  maxOutputBytes?: number;
 };
+
+type StreamOptions = {
+  signal?: AbortSignal;
+  maxInputBytes?: number;
+  maxOutputBytes?: number;
+};
+
+function completionInputBytes(req: CompletionRequest): number {
+  return req.messages.reduce((total, message) => total + utf8Bytes(message.content), 0);
+}
+
+function estimatedInputTokens(req: CompletionRequest): number {
+  return Math.max(1, Math.ceil(completionInputBytes(req) / 3));
+}
+
+function assertInputLimit(req: CompletionRequest, limitBytes?: number): void {
+  if (limitBytes === undefined) return;
+  const observedBytes = completionInputBytes(req);
+  if (observedBytes > limitBytes) {
+    throw new PayloadLimitError("INPUT_LIMIT_EXCEEDED", observedBytes, limitBytes);
+  }
+}
 
 class SlotNotConfiguredError extends Error {
   constructor(slot: SlotName) {
@@ -54,6 +93,9 @@ function isNetworkError(message: string): boolean {
 }
 
 function isRetryable(error: unknown): boolean {
+  const failure = classifyTransportFailure(error);
+  if (failure.terminalEvidence === "terminal_unknown") return false;
+  if (["AUTH_ERROR", "BALANCE_ERROR"].includes(failure.stableErrorCode)) return false;
   const message = error instanceof Error ? error.message : String(error);
   if (message === "流式响应为空") return true;
   if (/HTTP (429|500|502|503|504|529)/.test(message)) return true;
@@ -63,11 +105,16 @@ function isRetryable(error: unknown): boolean {
 
 /** 供任务运行器判断：该错误是否属于值得整体重试的瞬时故障（网络断流/上游过载）。 */
 export function isTransientLlmError(error: unknown): boolean {
-  return isRetryable(error);
+  const failure = classifyTransportFailure(error);
+  return failure.terminalEvidence !== "terminal_unknown"
+    && ["EMPTY_RESPONSE", "RATE_LIMITED", "SERVER_ERROR", "HTTP_ERROR"]
+      .includes(failure.stableErrorCode);
 }
 
 function describeError(error: unknown): Error {
+  const safeError = safeTransportError(error);
   const message = error instanceof Error ? error.message : String(error);
+  if (safeError.message !== message) return safeError;
   if (isNetworkError(message) && !/^HTTP \d/.test(message)) {
     return new Error(`与模型端点的连接中断（${message}）——多为中转站在长响应中途掐断连接。已自动重试仍失败，可稍后再试或换用更稳的端点/模型。`);
   }
@@ -94,6 +141,14 @@ type CallLog = {
   agentRunId?: string;
   /** 运行内轮号:0 = 首轮请求,1+ = 后续轮,按落库顺序递增(F5 可观测)。 */
   agentCallIndex?: number;
+  /** Every physical Provider request for one Gateway call shares this ID. */
+  logicalCallId?: string;
+  /** Zero-based physical Provider request index within logicalCallId. */
+  physicalAttemptIndex?: number;
+  transportKind?: TransportKind;
+  transportOutcome?: TransportOutcome;
+  terminalEvidence?: TerminalEvidenceType;
+  stableErrorCode?: string | null;
   startedAt: number;
   ok: boolean;
   error?: string;
@@ -125,6 +180,12 @@ async function logCall(log: CallLog) {
         stablePrefixHash: log.stablePrefixHash ?? null,
         agentRunId: log.agentRunId ?? null,
         agentCallIndex: log.agentCallIndex ?? null,
+        logicalCallId: log.logicalCallId ?? null,
+        physicalAttemptIndex: log.physicalAttemptIndex ?? null,
+        transportKind: log.transportKind ?? null,
+        transportOutcome: log.transportOutcome ?? null,
+        terminalEvidence: log.terminalEvidence ?? null,
+        stableErrorCode: log.stableErrorCode ?? null,
       },
     });
   } catch {
@@ -132,17 +193,109 @@ async function logCall(log: CallLog) {
   }
 }
 
-type RunLogBase = Omit<CallLog, "ok" | "error" | "usage" | "cacheRequested" | "cacheFallback" | "agentRunId" | "agentCallIndex">;
-type RunLogEntry = Pick<CallLog, "ok" | "error" | "usage" | "cacheRequested" | "cacheFallback">;
+type RunLogBase = Omit<CallLog,
+  | "startedAt"
+  | "ok"
+  | "error"
+  | "usage"
+  | "cacheRequested"
+  | "cacheFallback"
+  | "agentRunId"
+  | "agentCallIndex"
+  | "logicalCallId"
+  | "physicalAttemptIndex"
+  | "transportKind"
+  | "transportOutcome"
+  | "terminalEvidence"
+  | "stableErrorCode"
+>;
+type RunLogEntry = Pick<CallLog,
+  | "startedAt"
+  | "ok"
+  | "error"
+  | "usage"
+  | "cacheRequested"
+  | "cacheFallback"
+  | "transportKind"
+  | "transportOutcome"
+  | "terminalEvidence"
+  | "stableErrorCode"
+>;
 
 /**
  * 一条业务请求(含全部续写接力/断点续传/非流式回退轮)共享同一 agentRunId;
  * agentCallIndex 按落库顺序从 0 递增,使「一次请求发了几轮、每轮读/写了多少缓存」可归因。
  */
-function createRunLogger(base: RunLogBase): (entry: RunLogEntry) => Promise<void> {
-  const agentRunId = randomUUID();
-  let agentCallIndex = 0;
-  return (entry) => logCall({ ...base, agentRunId, agentCallIndex: agentCallIndex++, ...entry });
+type PhysicalCallLog = {
+  logicalCallId: string;
+  physicalAttemptIndex: number;
+  finish(entry: RunLogEntry): Promise<void>;
+};
+
+type RunLogger = { begin(): PhysicalCallLog };
+
+function createRunLogger(base: RunLogBase): RunLogger {
+  const logicalCallId = randomUUID();
+  let physicalAttemptIndex = 0;
+  return {
+    begin() {
+      const index = physicalAttemptIndex++;
+      return {
+        logicalCallId,
+        physicalAttemptIndex: index,
+        finish: (entry) => logCall({
+          ...base,
+          agentRunId: logicalCallId,
+          agentCallIndex: index,
+          logicalCallId,
+          physicalAttemptIndex: index,
+          ...entry,
+        }),
+      };
+    },
+  };
+}
+
+function canFallback(error: unknown): boolean {
+  const failure = classifyTransportFailure(error);
+  return failure.terminalEvidence !== "terminal_unknown"
+    && !["AUTH_ERROR", "BALANCE_ERROR"].includes(failure.stableErrorCode);
+}
+
+async function acquirePhysicalPermit(
+  logger: RunLogger,
+  transportKind: TransportKind,
+  slot: ModelSlot,
+  req: CompletionRequest,
+): Promise<{ call: PhysicalCallLog; permit: Permit; endpointKey: string }> {
+  const call = logger.begin();
+  const endpointKey = normalizedEndpointKey(slot);
+  const permit = await acquireLlmPermit({
+    logicalCallId: call.logicalCallId,
+    physicalAttemptIndex: call.physicalAttemptIndex,
+    transportKind,
+    endpointKey,
+    slot,
+    req,
+    reservedInputTokens: estimatedInputTokens(req),
+  });
+  return { call, permit, endpointKey };
+}
+
+async function settlePhysicalPermit(
+  acquired: { permit: Permit; endpointKey: string },
+  slot: ModelSlot,
+  req: CompletionRequest,
+  settlement: PermitSettlement,
+) {
+  await settleLlmPermit(
+    acquired.permit,
+    settlement,
+    acquired.endpointKey,
+    slot.model,
+    req.task,
+    req.userId,
+  );
 }
 
 type CollectedStream = {
@@ -153,28 +306,165 @@ type CollectedStream = {
   truncated: boolean;
 };
 
+type CompletedCall = Awaited<ReturnType<(typeof adapters)[keyof typeof adapters]["complete"]>>;
+
 async function collectStream(
   adapter: (typeof adapters)[keyof typeof adapters],
   slot: ModelSlot,
   req: CompletionRequest,
   apiKey: string,
+  logger: RunLogger,
+  cachePlanned: boolean,
+  maxOutputBytes?: number,
+  outputOffsetBytes = 0,
 ): Promise<CollectedStream> {
+  const acquired = await acquirePhysicalPermit(logger, "stream", slot, req);
+  const startedAt = Date.now();
+  const controller = new AbortController();
   let text = "";
   let usage: NormalizedUsage | undefined;
   let cacheRequested = false;
   let cacheFallback = false;
   let truncated = false;
-  for await (const chunk of adapter.stream(slot, req, apiKey)) {
-    if (chunk.type === "text") text += chunk.text;
-    if (chunk.type === "usage") {
-      usage = chunk.usage;
-      cacheRequested = chunk.cacheRequested;
-      cacheFallback = chunk.cacheFallback;
-      truncated = chunk.truncated ?? false;
+  let providerTerminal = false;
+  try {
+    for await (const chunk of adapter.stream(slot, req, apiKey, { signal: controller.signal })) {
+      if (chunk.type === "text") {
+        const nextBytes = outputOffsetBytes + utf8Bytes(text) + utf8Bytes(chunk.text);
+        if (maxOutputBytes !== undefined && nextBytes > maxOutputBytes) {
+          const boundedPrefix = text + takeUtf8Prefix(
+            chunk.text,
+            maxOutputBytes - outputOffsetBytes - utf8Bytes(text),
+          );
+          controller.abort();
+          throw new PayloadLimitError(
+            "OUTPUT_LIMIT_EXCEEDED",
+            nextBytes,
+            maxOutputBytes,
+            boundedPrefix,
+          );
+        }
+        text += chunk.text;
+      }
+      if (chunk.type === "usage") {
+        usage = chunk.usage;
+        cacheRequested = chunk.cacheRequested;
+        cacheFallback = chunk.cacheFallback;
+        truncated = chunk.truncated ?? false;
+      }
     }
+    if (!text.trim()) throw new Error("流式响应为空");
+    const transport = classifyTransportSuccess("stream", truncated);
+    providerTerminal = true;
+    await settlePhysicalPermit(acquired, slot, req, {
+      transportOutcome: transport.outcome,
+      terminalEvidence: transport.terminalEvidence,
+      stableErrorCode: transport.stableErrorCode,
+      usage,
+    });
+    await acquired.call.finish({
+      startedAt,
+      ok: true,
+      usage,
+      cacheRequested,
+      cacheFallback,
+      transportKind: "stream",
+      transportOutcome: transport.outcome,
+      terminalEvidence: transport.terminalEvidence,
+      stableErrorCode: transport.stableErrorCode,
+    });
+    return { text, usage, cacheRequested, cacheFallback, truncated };
+  } catch (error) {
+    if (providerTerminal) throw error;
+    const failure = classifyTransportFailure(error);
+    await settlePhysicalPermit(acquired, slot, req, {
+      transportOutcome: failure.outcome,
+      terminalEvidence: failure.terminalEvidence,
+      stableErrorCode: failure.stableErrorCode,
+      usage,
+      error: failure.errorDetails,
+    });
+    await acquired.call.finish({
+      startedAt,
+      ok: false,
+      error: failure.errorDetails,
+      usage,
+      cacheRequested: cacheRequested || cachePlanned,
+      cacheFallback,
+      transportKind: "stream",
+      transportOutcome: failure.outcome,
+      terminalEvidence: failure.terminalEvidence,
+      stableErrorCode: failure.stableErrorCode,
+    });
+    throw error;
   }
-  if (!text.trim()) throw new Error("流式响应为空");
-  return { text, usage, cacheRequested, cacheFallback, truncated };
+}
+
+async function collectCompletion(
+  adapter: (typeof adapters)[keyof typeof adapters],
+  slot: ModelSlot,
+  req: CompletionRequest,
+  apiKey: string,
+  logger: RunLogger,
+  cachePlanned: boolean,
+  maxOutputBytes?: number,
+  outputOffsetBytes = 0,
+): Promise<CompletedCall> {
+  const acquired = await acquirePhysicalPermit(logger, "complete", slot, req);
+  const startedAt = Date.now();
+  let providerTerminal = false;
+  try {
+    const result = await adapter.complete(slot, req, apiKey);
+    const observedBytes = outputOffsetBytes + utf8Bytes(result.text);
+    if (maxOutputBytes !== undefined && observedBytes > maxOutputBytes) {
+      throw new PayloadLimitError(
+        "OUTPUT_LIMIT_EXCEEDED",
+        observedBytes,
+        maxOutputBytes,
+        takeUtf8Prefix(result.text, maxOutputBytes - outputOffsetBytes),
+      );
+    }
+    const transport = classifyTransportSuccess("complete", result.truncated ?? false);
+    providerTerminal = true;
+    await settlePhysicalPermit(acquired, slot, req, {
+      transportOutcome: transport.outcome,
+      terminalEvidence: transport.terminalEvidence,
+      stableErrorCode: transport.stableErrorCode,
+      usage: result.usage,
+    });
+    await acquired.call.finish({
+      startedAt,
+      ok: true,
+      usage: result.usage,
+      cacheRequested: result.cacheRequested,
+      cacheFallback: result.cacheFallback,
+      transportKind: "complete",
+      transportOutcome: transport.outcome,
+      terminalEvidence: transport.terminalEvidence,
+      stableErrorCode: transport.stableErrorCode,
+    });
+    return result;
+  } catch (error) {
+    if (providerTerminal) throw error;
+    const failure = classifyTransportFailure(error);
+    await settlePhysicalPermit(acquired, slot, req, {
+      transportOutcome: failure.outcome,
+      terminalEvidence: failure.terminalEvidence,
+      stableErrorCode: failure.stableErrorCode,
+      error: failure.errorDetails,
+    });
+    await acquired.call.finish({
+      startedAt,
+      ok: false,
+      error: failure.errorDetails,
+      cacheRequested: cachePlanned,
+      transportKind: "complete",
+      transportOutcome: failure.outcome,
+      terminalEvidence: failure.terminalEvidence,
+      stableErrorCode: failure.stableErrorCode,
+    });
+    throw error;
+  }
 }
 
 // ───────────── 输出上限续写拼接:让 4096 上限的通道也能完成长文生成 ─────────────
@@ -265,9 +555,9 @@ export async function complete(
   req: CompletionRequest,
   options?: CompleteOptions,
 ): Promise<string> {
+  assertInputLimit(req, options?.maxInputBytes);
   const { slot, apiKey, slotName: used } = await resolveSlot(slotName, req.userId);
   const adapter = adapters[slot.provider];
-  const startedAt = Date.now();
   const plan = buildPromptCachePlan(slot, req);
   const logRound = createRunLogger({
     task: req.task,
@@ -277,37 +567,50 @@ export async function complete(
     userId: req.userId,
     endpoint: normalizedEndpointKey(slot),
     stablePrefixHash: plan.key,
-    startedAt,
   });
 
   /** 需要完整输出时,对截断结果做续写接力;超过轮数上限才判失败。 */
   const stitchStreamed = async (): Promise<string> => {
-    let result = await collectStream(adapter, slot, req, apiKey);
-    await logRound({ ok: true, usage: result.usage,
-      cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+    let result = await collectStream(
+      adapter, slot, req, apiKey, logRound, plan.enabled, options?.maxOutputBytes,
+    );
     if (!req.failOnTruncation) return result.text;
     let text = result.text;
     for (let round = 0; needsContinuation(req, result.truncated, text); round += 1) {
       if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
-      result = await collectStream(adapter, slot, continuationRequest(req, text), apiKey);
-      await logRound({ ok: true, usage: result.usage,
-        cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+      result = await collectStream(
+        adapter,
+        slot,
+        continuationRequest(req, text),
+        apiKey,
+        logRound,
+        plan.enabled,
+        options?.maxOutputBytes,
+        utf8Bytes(text),
+      );
       text += trimOverlap(text, result.text);
     }
     return text;
   };
 
   const stitchCompleted = async (): Promise<string> => {
-    let result = await adapter.complete(slot, req, apiKey);
-    await logRound({ ok: true, usage: result.usage,
-      cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+    let result = await collectCompletion(
+      adapter, slot, req, apiKey, logRound, plan.enabled, options?.maxOutputBytes,
+    );
     if (!req.failOnTruncation) return result.text;
     let text = result.text;
     for (let round = 0; needsContinuation(req, result.truncated, text); round += 1) {
       if (round >= MAX_CONTINUATION_ROUNDS) throw truncationError(req);
-      result = await adapter.complete(slot, continuationRequest(req, text), apiKey);
-      await logRound({ ok: true, usage: result.usage,
-        cacheRequested: result.cacheRequested, cacheFallback: result.cacheFallback });
+      result = await collectCompletion(
+        adapter,
+        slot,
+        continuationRequest(req, text),
+        apiKey,
+        logRound,
+        plan.enabled,
+        options?.maxOutputBytes,
+        utf8Bytes(text),
+      );
       text += trimOverlap(text, result.text);
     }
     return text;
@@ -326,20 +629,17 @@ export async function complete(
     }
   }
 
-  if (allowFallback) {
+  if (lastError instanceof PayloadLimitError) throw lastError;
+
+  if (allowFallback && canFallback(lastError)) {
     try {
       return await stitchCompleted();
     } catch (fallbackError) {
       const finalError = lastError ?? fallbackError;
-      const message = finalError instanceof Error ? finalError.message : String(finalError);
-      // 失败轮也记录缓存意图:plan.enabled 即该请求本会携带缓存标记
-      await logRound({ ok: false, error: message, cacheRequested: plan.enabled });
       throw describeError(finalError);
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : String(lastError);
-  await logRound({ ok: false, error: message, cacheRequested: plan.enabled });
   throw describeError(lastError);
 }
 
@@ -347,11 +647,11 @@ export async function complete(
 export async function* stream(
   slotName: SlotName,
   req: CompletionRequest,
-  options?: { signal?: AbortSignal },
+  options?: StreamOptions,
 ): AsyncGenerator<StreamChunk> {
+  assertInputLimit(req, options?.maxInputBytes);
   const { slot, apiKey, slotName: used } = await resolveSlot(slotName, req.userId);
   const adapter = adapters[slot.provider];
-  const startedAt = Date.now();
   const plan = buildPromptCachePlan(slot, req);
   const logRound = createRunLogger({
     task: req.task,
@@ -361,55 +661,124 @@ export async function* stream(
     userId: req.userId,
     endpoint: normalizedEndpointKey(slot),
     stablePrefixHash: plan.key,
-    startedAt,
   });
 
   try {
     let accumulated = "";
     let truncated = false;
     const runRound = async function* (roundReq: CompletionRequest, overlapBase: string) {
+      const acquired = await acquirePhysicalPermit(logRound, "stream", slot, roundReq);
+      const startedAt = Date.now();
+      const controller = new AbortController();
+      const signal = options?.signal
+        ? AbortSignal.any([options.signal, controller.signal])
+        : controller.signal;
       let usage: NormalizedUsage | undefined;
       let cacheRequested = false;
       let cacheFallback = false;
       let receivedText = false;
+      let providerTerminal = false;
       truncated = false;
       // 接缝缓冲:续写轮开头可能与已产出结尾重叠,先攒足 400 字符做去重
       let seamBuffer: string | null = overlapBase ? "" : null;
-      for await (const chunk of adapter.stream(slot, roundReq, apiKey, options)) {
-        if (chunk.type === "usage") {
-          usage = chunk.usage;
-          cacheRequested = chunk.cacheRequested;
-          cacheFallback = chunk.cacheFallback;
-          truncated = chunk.truncated ?? false;
-        } else if (chunk.type === "text") {
-          if (chunk.text) receivedText = true;
-          if (seamBuffer !== null) {
-            seamBuffer += chunk.text;
-            if (seamBuffer.length >= 400) {
-              const deduped = trimOverlap(overlapBase, seamBuffer);
-              seamBuffer = null;
-              if (deduped) {
-                accumulated += deduped;
-                yield { type: "text", text: deduped } as StreamChunk;
+      try {
+        for await (const chunk of adapter.stream(slot, roundReq, apiKey, { signal })) {
+          if (chunk.type === "usage") {
+            usage = chunk.usage;
+            cacheRequested = chunk.cacheRequested;
+            cacheFallback = chunk.cacheFallback;
+            truncated = chunk.truncated ?? false;
+          } else if (chunk.type === "text") {
+            if (chunk.text) receivedText = true;
+            const observedBytes = utf8Bytes(accumulated) + utf8Bytes(seamBuffer ?? "")
+              + utf8Bytes(chunk.text);
+            if (options?.maxOutputBytes !== undefined && observedBytes > options.maxOutputBytes) {
+              const room = options.maxOutputBytes
+                - utf8Bytes(accumulated)
+                - utf8Bytes(seamBuffer ?? "");
+              const boundedChunk = takeUtf8Prefix(chunk.text, room);
+              if (seamBuffer !== null) seamBuffer += boundedChunk;
+              else if (boundedChunk) {
+                accumulated += boundedChunk;
+                yield { type: "text", text: boundedChunk } as StreamChunk;
               }
+              controller.abort();
+              throw new PayloadLimitError(
+                "OUTPUT_LIMIT_EXCEEDED",
+                observedBytes,
+                options.maxOutputBytes,
+                accumulated + (seamBuffer ?? ""),
+              );
+            }
+            if (seamBuffer !== null) {
+              seamBuffer += chunk.text;
+              if (seamBuffer.length >= 400) {
+                const deduped = trimOverlap(overlapBase, seamBuffer);
+                seamBuffer = null;
+                if (deduped) {
+                  accumulated += deduped;
+                  yield { type: "text", text: deduped } as StreamChunk;
+                }
+              }
+            } else {
+              accumulated += chunk.text;
+              yield chunk;
             }
           } else {
-            accumulated += chunk.text;
             yield chunk;
           }
-        } else {
-          yield chunk;
         }
-      }
-      if (!receivedText) throw new Error("流式响应为空");
-      if (seamBuffer !== null && seamBuffer) {
-        const deduped = trimOverlap(overlapBase, seamBuffer);
-        if (deduped) {
-          accumulated += deduped;
-          yield { type: "text", text: deduped } as StreamChunk;
+        if (!receivedText) throw new Error("流式响应为空");
+        if (seamBuffer !== null && seamBuffer) {
+          const deduped = trimOverlap(overlapBase, seamBuffer);
+          if (deduped) {
+            accumulated += deduped;
+            yield { type: "text", text: deduped } as StreamChunk;
+          }
         }
+        const transport = classifyTransportSuccess("stream", truncated);
+        providerTerminal = true;
+        await settlePhysicalPermit(acquired, slot, roundReq, {
+          transportOutcome: transport.outcome,
+          terminalEvidence: transport.terminalEvidence,
+          stableErrorCode: transport.stableErrorCode,
+          usage,
+        });
+        await acquired.call.finish({
+          startedAt,
+          ok: true,
+          usage,
+          cacheRequested,
+          cacheFallback,
+          transportKind: "stream",
+          transportOutcome: transport.outcome,
+          terminalEvidence: transport.terminalEvidence,
+          stableErrorCode: transport.stableErrorCode,
+        });
+      } catch (error) {
+        if (providerTerminal) throw error;
+        const failure = classifyTransportFailure(error);
+        await settlePhysicalPermit(acquired, slot, roundReq, {
+          transportOutcome: failure.outcome,
+          terminalEvidence: failure.terminalEvidence,
+          stableErrorCode: failure.stableErrorCode,
+          usage,
+          error: failure.errorDetails,
+        });
+        await acquired.call.finish({
+          startedAt,
+          ok: false,
+          error: failure.errorDetails,
+          usage,
+          cacheRequested: cacheRequested || plan.enabled,
+          cacheFallback,
+          transportKind: "stream",
+          transportOutcome: failure.outcome,
+          terminalEvidence: failure.terminalEvidence,
+          stableErrorCode: failure.stableErrorCode,
+        });
+        throw error;
       }
-      await logRound({ ok: true, usage, cacheRequested, cacheFallback });
     };
 
     // 断点续传:接力途中的瞬时网络错误不废弃整条流,以已累积文本为基础改走续写。
@@ -447,10 +816,7 @@ export async function* stream(
     }
   } catch (error) {
     if (options?.signal?.aborted) return;
-    const message = error instanceof Error ? error.message : String(error);
-    // 失败轮也记录缓存意图:plan.enabled 即该请求本会携带缓存标记
-    await logRound({ ok: false, error: message, cacheRequested: plan.enabled });
-    throw error;
+    throw safeTransportError(error);
   }
 }
 
@@ -460,7 +826,6 @@ export async function* stream(
  */
 export async function testSlot(slot: ModelSlot, apiKey: string, userId: string): Promise<string> {
   const adapter = adapters[slot.provider];
-  const startedAt = Date.now();
   const req: CompletionRequest = {
     task: "test",
     userId,
@@ -475,21 +840,16 @@ export async function testSlot(slot: ModelSlot, apiKey: string, userId: string):
     userId,
     endpoint: normalizedEndpointKey(slot),
     stablePrefixHash: null,
-    startedAt,
   });
   try {
     try {
-      const result = await collectStream(adapter, slot, req, apiKey);
-      await logRound({ ok: true, usage: result.usage });
+      const result = await collectStream(adapter, slot, req, apiKey, logRound, false);
       return result.text;
     } catch {
-      const result = await adapter.complete(slot, req, apiKey);
-      await logRound({ ok: true, usage: result.usage });
+      const result = await collectCompletion(adapter, slot, req, apiKey, logRound, false);
       return result.text;
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await logRound({ ok: false, error: message });
-    throw error;
+    throw safeTransportError(error);
   }
 }

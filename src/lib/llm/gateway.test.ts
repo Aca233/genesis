@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   complete: vi.fn(),
   settingsFindUnique: vi.fn(),
   llmCallCreate: vi.fn(),
+  acquirePermit: vi.fn(),
+  settlePermit: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -22,11 +24,17 @@ vi.mock("./adapters", () => ({
     },
   },
 }));
+vi.mock("./permits", () => ({
+  acquireLlmPermit: mocks.acquirePermit,
+  settleLlmPermit: mocks.settlePermit,
+}));
 
 import { complete, isTransientLlmError, stream } from "./gateway";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.stream.mockReset();
+  mocks.complete.mockReset();
   mocks.settingsFindUnique.mockResolvedValue({
     narrativeSlot: {
       provider: "openai-compatible",
@@ -37,6 +45,18 @@ beforeEach(() => {
     backstageSlot: null,
   });
   mocks.llmCallCreate.mockResolvedValue({});
+  mocks.acquirePermit.mockImplementation((input) => Promise.resolve({
+    attemptId: `attempt-${input.physicalAttemptIndex}`,
+    slotNo: 1,
+    slotEpoch: input.physicalAttemptIndex + 1,
+    logicalCallId: input.logicalCallId,
+    physicalAttemptIndex: input.physicalAttemptIndex,
+    requestId: `request-${input.physicalAttemptIndex}`,
+    budgetScope: input.req.owner?.budgetScope ?? "primary",
+    reservedInputTokens: input.reservedInputTokens,
+    reservedOutputTokens: input.req.maxTokens ?? 4096,
+  }));
+  mocks.settlePermit.mockResolvedValue(undefined);
 });
 
 describe("prompt cache call logging", () => {
@@ -147,6 +167,16 @@ describe("prompt cache call logging", () => {
     expect(second.agentRunId).toBe(first.agentRunId);
     expect(first.agentCallIndex).toBe(0);
     expect(second.agentCallIndex).toBe(1);
+    expect(first).toEqual(expect.objectContaining({
+      transportOutcome: "truncated",
+      terminalEvidence: "stream_eof",
+      stableErrorCode: "OUTPUT_TRUNCATED",
+    }));
+    expect(second).toEqual(expect.objectContaining({
+      transportOutcome: "success",
+      terminalEvidence: "stream_eof",
+      stableErrorCode: null,
+    }));
   });
 
   it("records cache intent and run metadata on failed rounds", async () => {
@@ -175,7 +205,7 @@ describe("prompt cache call logging", () => {
 });
 
 describe("complete transport attempts", () => {
-  it("将空流视为可由任务级调度恢复的瞬时故障", () => {
+  it("空流有 EOF 终局证据，可由任务级调度恢复", () => {
     expect(isTransientLlmError(new Error("流式响应为空"))).toBe(true);
   });
 
@@ -195,6 +225,163 @@ describe("complete transport attempts", () => {
     })).rejects.toThrow("fetch failed");
 
     expect(mocks.stream).toHaveBeenCalledTimes(1);
+    expect(mocks.complete).not.toHaveBeenCalled();
+  });
+
+  it("终局未知的断流失败关闭端点且不启动第二个物理请求", async () => {
+    mocks.stream.mockImplementationOnce(async function* () {
+      throw new Error("terminated");
+    });
+
+    await expect(complete("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      messages: [{ role: "user", content: "create" }],
+    }, { maxAttempts: 2, allowFallback: true })).rejects.toThrow("terminated");
+
+    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.stream).toHaveBeenCalledTimes(1);
+    expect(mocks.complete).not.toHaveBeenCalled();
+    const rows = mocks.llmCallCreate.mock.calls.map(([call]) => call.data);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      ok: false,
+      transportOutcome: "network_terminated",
+      terminalEvidence: "terminal_unknown",
+      stableErrorCode: "NETWORK_TERMINATED",
+    }));
+    expect(mocks.settlePermit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ terminalEvidence: "terminal_unknown" }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("认证错误明确终局但不触发非流式回落", async () => {
+    mocks.stream.mockImplementationOnce(async function* () {
+      throw new Error("HTTP 401: bad key");
+    });
+    mocks.complete.mockResolvedValueOnce({
+      text: "fallback response",
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheWriteTokens: null },
+      cacheRequested: false,
+      cacheFallback: false,
+      truncated: false,
+    });
+
+    await expect(complete("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      messages: [{ role: "user", content: "create" }],
+    }, { maxAttempts: 1, allowFallback: true })).rejects.toThrow("HTTP 401");
+
+    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.complete).not.toHaveBeenCalled();
+    const rows = mocks.llmCallCreate.mock.calls.map(([call]) => call.data);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      ok: false,
+      transportOutcome: "http_error",
+      stableErrorCode: "AUTH_ERROR",
+    }));
+  });
+
+  it("504 页面不会原样落库或返回给调用方", async () => {
+    const raw = 'HTTP 504: <html><head><title>504 Gateway Time-out</title></head><body>openresty</body></html>';
+    mocks.stream.mockImplementationOnce(async function* () {
+      throw new Error(raw);
+    });
+
+    let rejected: Error | undefined;
+    try {
+      await complete("narrative", {
+        task: "genesis",
+        userId: "test-user",
+        messages: [{ role: "user", content: "create" }],
+      }, { maxAttempts: 1, allowFallback: false });
+    } catch (error) {
+      rejected = error as Error;
+    }
+
+    expect(rejected?.message).toBe("上游模型服务超时（HTTP 504）");
+    const row = mocks.llmCallCreate.mock.calls[0][0].data;
+    expect(row).toEqual(expect.objectContaining({
+      transportOutcome: "upstream_timeout",
+      terminalEvidence: "terminal_unknown",
+      stableErrorCode: "UPSTREAM_TIMEOUT",
+      error: "上游模型服务超时（HTTP 504）",
+    }));
+    expect(JSON.stringify(row)).not.toContain("<html>");
+    expect(JSON.stringify(row)).not.toContain("openresty");
+  });
+
+  it("输入超过硬上限时不发起 Provider 请求", async () => {
+    await expect(complete("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      messages: [{ role: "user", content: "界".repeat(200) }],
+    }, { maxInputBytes: 100, maxAttempts: 1, allowFallback: false }))
+      .rejects.toMatchObject({ code: "INPUT_LIMIT_EXCEEDED" });
+
+    expect(mocks.stream).not.toHaveBeenCalled();
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(mocks.llmCallCreate).not.toHaveBeenCalled();
+  });
+
+  it("流式输出超过硬上限时中止且不交付越界块", async () => {
+    mocks.stream.mockImplementationOnce(async function* () {
+      yield { type: "text", text: "星".repeat(40) };
+      yield { type: "done" };
+    });
+
+    await expect(complete("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      messages: [{ role: "user", content: "create" }],
+    }, { maxOutputBytes: 60, maxAttempts: 1, allowFallback: false }))
+      .rejects.toMatchObject({ code: "OUTPUT_LIMIT_EXCEEDED", observedBytes: 120, limitBytes: 60 });
+
+    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.llmCallCreate.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      ok: false,
+      transportOutcome: "truncated",
+      stableErrorCode: "OUTPUT_LIMIT_EXCEEDED",
+      error: "模型输出超过安全上限（已读取 120 字节，上限 60 字节）",
+    }));
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(mocks.stream.mock.calls[0][3].signal.aborted).toBe(true);
+  });
+
+  it("输出上限跨续写轮累计而不是每轮重置", async () => {
+    const usage = (truncated: boolean) => ({
+      type: "usage",
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cacheWriteTokens: null },
+      cacheRequested: false,
+      cacheFallback: false,
+      truncated,
+    });
+    mocks.stream
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: '{"x":"星星星' };
+        yield usage(true);
+        yield { type: "done" };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "text", text: '月月月"}' };
+        yield usage(false);
+        yield { type: "done" };
+      });
+
+    await expect(complete("narrative", {
+      task: "genesis",
+      userId: "test-user",
+      failOnTruncation: true,
+      messages: [{ role: "user", content: "create" }],
+    }, { maxOutputBytes: 24, maxAttempts: 1, allowFallback: false }))
+      .rejects.toMatchObject({ code: "OUTPUT_LIMIT_EXCEEDED", limitBytes: 24 });
+
+    expect(mocks.stream).toHaveBeenCalledTimes(2);
     expect(mocks.complete).not.toHaveBeenCalled();
   });
 });
@@ -241,7 +428,7 @@ describe("输出上限续写接力", () => {
     expect(continuation.messages.at(-1).prefixStable).toBeUndefined();
   });
 
-  it("complete: 未要求完整输出时截断按原样返回,不追加请求", async () => {
+  it("complete: 显式禁用截断续写时只发起一次物理请求", async () => {
     mocks.stream.mockImplementationOnce(async function* () {
       yield { type: "text", text: "partial prose" };
       yield usageChunk(true);
@@ -251,6 +438,7 @@ describe("输出上限续写接力", () => {
     await expect(complete("narrative", {
       task: "narrative",
       userId: "test-user",
+      failOnTruncation: false,
       messages: [{ role: "user", content: "tell" }],
     }, { maxAttempts: 1, allowFallback: false })).resolves.toBe("partial prose");
     expect(mocks.stream).toHaveBeenCalledTimes(1);
@@ -321,7 +509,7 @@ describe("输出上限续写接力", () => {
     expect(mocks.stream).toHaveBeenCalledTimes(1);
   });
 
-  it("stream: 接力途中瞬时网络错误断点续传,不废弃已产出文本", async () => {
+  it("stream: 终局未知时不续传", async () => {
     mocks.stream
       .mockImplementationOnce(async function* () {
         yield { type: "text", text: '{"chapter":"上卷' };
@@ -339,21 +527,17 @@ describe("输出上限续写接力", () => {
         yield { type: "done" };
       });
 
-    let text = "";
-    for await (const chunk of stream("narrative", {
+    const consume = async () => { for await (const chunk of stream("narrative", {
       task: "genesis",
       userId: "test-user",
       failOnTruncation: true,
       messages: [{ role: "user", content: "create" }],
-    })) {
-      if (chunk.type === "text") text += chunk.text;
-    }
-    // 断线轮的未交付片段不进入结果(消费者从未收到),续传轮从已确认文本接续
-    expect(text).toBe('{"chapter":"上卷下卷"}');
-    expect(mocks.stream).toHaveBeenCalledTimes(3);
+    })) void chunk; };
+    await expect(consume()).rejects.toThrow("fetch failed");
+    expect(mocks.stream).toHaveBeenCalledTimes(2);
   });
 
-  it("stream: 首字符前连接终止时在当前任务内重试", async () => {
+  it("stream: 首字符前终局未知时不重试", async () => {
     mocks.stream
       .mockImplementationOnce(async function* () {
         throw new Error("terminated");
@@ -364,18 +548,14 @@ describe("输出上限续写接力", () => {
         yield { type: "done" };
       });
 
-    let text = "";
-    for await (const chunk of stream("narrative", {
+    const consume = async () => { for await (const chunk of stream("narrative", {
       task: "genesis",
       userId: "test-user",
       failOnTruncation: true,
       messages: [{ role: "user", content: "create" }],
-    })) {
-      if (chunk.type === "text") text += chunk.text;
-    }
-
-    expect(text).toBe("{\"ok\":true}");
-    expect(mocks.stream).toHaveBeenCalledTimes(2);
+    })) void chunk; };
+    await expect(consume()).rejects.toThrow("terminated");
+    expect(mocks.stream).toHaveBeenCalledTimes(1);
   });
 
   it("stream: 上游正常结束却没有文本时在当前任务内重试", async () => {
@@ -402,6 +582,15 @@ describe("输出上限续写接力", () => {
 
     expect(text).toBe("{\"ok\":true}");
     expect(mocks.stream).toHaveBeenCalledTimes(2);
+    expect(mocks.llmCallCreate).toHaveBeenCalledTimes(2);
+    const rows = mocks.llmCallCreate.mock.calls.map(([call]) => call.data);
+    expect(rows.map((row) => row.physicalAttemptIndex)).toEqual([0, 1]);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      ok: false,
+      transportOutcome: "empty_response",
+      terminalEvidence: "stream_eof",
+      stableErrorCode: "EMPTY_RESPONSE",
+    }));
   });
 
   it("stream: 连续截断超过轮数上限时报可操作错误", async () => {

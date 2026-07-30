@@ -13,9 +13,13 @@ import { acceptTaskSnapshot } from "@/lib/genesis/client-state";
 import type { WorldMode } from "@/lib/world-mode";
 import { PlayBackground } from "@/components/play/PlayBackground";
 import { OperationIcon } from "@/components/icons/OperationIcon";
+import { GenesisAuditWarnings } from "@/components/genesis/GenesisAuditWarnings";
+import type { GenesisQualityReport } from "@/lib/genesis/semantic-audit";
 
 /** 阶段序数镌记：未至之印以汉字序数浅刻 */
-const STAGE_NUMERALS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"] as const;
+const STAGE_NUMERALS = [
+  "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二", "十三",
+] as const;
 
 type Task = {
   id: string;
@@ -24,9 +28,12 @@ type Task = {
   stage: GenesisStageId;
   completedKeys: string[];
   error: string | null;
+  auditReport: GenesisQualityReport | null;
   worldId: string | null;
   createdAt: string;
   updatedAt: string;
+  aggregateVersion: number;
+  snapshotHash: string;
 };
 
 type Connection = "connecting" | "live" | "reconnecting";
@@ -50,6 +57,7 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     // SSE 存活期间轮询退避为兜底频率，断线时恢复 5s
     let sseLive = false;
+    let lastEventId = latestTask.current?.aggregateVersion ?? 0;
 
     const apply = (next: Task) => {
       if (disposed) return;
@@ -57,6 +65,7 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
       latestTask.current = next;
       setTask(next);
       setPageError(null);
+      if (next.status === "waiting_for_provider") setConnection("reconnecting");
       if (next.status === "completed" && next.worldId && !redirected.current) {
         redirected.current = true;
         router.replace(`/genesis/${next.worldId}`);
@@ -79,7 +88,7 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
       if (disposed) return;
       pollTimer = setTimeout(async () => {
         if (disposed) return;
-        if (latestTask.current?.status === "failed") return;
+        if (["failed", "cancelled"].includes(latestTask.current?.status ?? "")) return;
         if (!sseLive) await fetchTask();
         schedulePoll();
       }, sseLive ? 30_000 : 5_000);
@@ -88,13 +97,16 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
     const connect = () => {
       if (disposed) return;
       setConnection((value) => (value === "connecting" ? "connecting" : "reconnecting"));
-      source = new EventSource(`/api/genesis/tasks/${taskId}/events`);
+      source = new EventSource(`/api/genesis/tasks/${taskId}/events?cursor=${lastEventId}`);
       source.onopen = () => {
         sseLive = true;
         setConnection("live");
       };
       source.addEventListener("progress", (event) => {
-        apply(JSON.parse((event as MessageEvent<string>).data) as Task);
+        const message = event as MessageEvent<string>;
+        const parsedId = Number.parseInt(message.lastEventId, 10);
+        if (Number.isSafeInteger(parsedId)) lastEventId = Math.max(lastEventId, parsedId);
+        apply(JSON.parse(message.data) as Task);
       });
       source.addEventListener("completed", (event) => {
         const data = JSON.parse((event as MessageEvent<string>).data) as { worldId?: string };
@@ -201,10 +213,11 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
             ← 返回神谕（生成将在后台继续）
           </Link>
 
-          {(task?.status === "failed" || pageError) && (
+          {(task?.status === "failed" || task?.status === "cancelled" || pageError) && (
             <div className="rounded-xl border border-cinnabar/40 bg-cinnabar/5 p-4">
               <p className="font-bold text-cinnabar">命运丝线在「{current.title}」阶段断裂</p>
               <p className="mt-2 break-words text-sm leading-6 text-ink-soft">{task?.error ?? pageError}</p>
+              <GenesisAuditWarnings report={task?.auditReport ?? null} severity="error" />
               <div className="mt-4 flex gap-3">
                 {task?.status === "failed" && (
                   <button onClick={retry} className="seal-button min-h-10! px-5! py-2! text-sm">
@@ -223,7 +236,7 @@ export function GenesisProgress({ taskId }: { taskId: string }) {
           {GENESIS_STAGES.map((stage, index) => {
             const done = index < currentIndex || task?.status === "completed";
             const active = stage.id === task?.stage && task?.status !== "completed";
-            const failed = active && task?.status === "failed";
+            const failed = active && (task?.status === "failed" || task?.status === "cancelled");
             return (
               <li key={stage.id} className="relative flex min-h-14 gap-4 pb-3">
                 {/* 鎏金进度丝线：已成阶段间的连线泛金微光 */}

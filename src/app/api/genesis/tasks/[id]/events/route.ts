@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { ensureGenesisTaskRunning, toGenesisTaskDto } from "@/lib/genesis/task-runner";
+import { toGenesisTaskDto } from "@/lib/genesis/task-runner";
 import { withAuth } from "@/lib/auth/route";
 
 export const dynamic = "force-dynamic";
@@ -8,8 +8,17 @@ export const maxDuration = 300;
 const encoder = new TextEncoder();
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function encodeEvent(event: string, data: unknown) {
-  return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+function encodeEvent(event: string, data: unknown, id?: number) {
+  return encoder.encode(`${id === undefined ? "" : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+function parseCursor(request: Request): number {
+  const urlCursor = new URL(request.url).searchParams.get("cursor");
+  const headerCursor = request.headers.get("Last-Event-ID");
+  const values = [urlCursor, headerCursor]
+    .map((value) => Number.parseInt(value ?? "", 10))
+    .filter((value) => Number.isSafeInteger(value) && value >= 0);
+  return values.length ? Math.max(...values) : 0;
 }
 
 export const GET = withAuth(async (
@@ -24,13 +33,18 @@ export const GET = withAuth(async (
   });
   if (!exists) return Response.json({ error: "创世任务不存在" }, { status: 404 });
 
-  ensureGenesisTaskRunning(id);
-
   const body = new ReadableStream({
     async start(controller) {
-      let lastVersion = "";
+      let cursor = parseCursor(request);
+      let sentSnapshot = false;
       try {
         for (let tick = 0; !request.signal.aborted; tick += 1) {
+          const events = await prisma.genesisOutbox.findMany({
+            where: { taskId: id, aggregateVersion: { gt: cursor } },
+            orderBy: { aggregateVersion: "asc" },
+            take: 100,
+            select: { aggregateVersion: true },
+          });
           const task = await prisma.genesisTask.findFirst({
             where: { id, userId },
             select: {
@@ -44,6 +58,7 @@ export const GET = withAuth(async (
               createdAt: true,
               updatedAt: true,
               auditReport: true,
+              aggregateVersion: true,
             },
           });
           if (!task) {
@@ -52,20 +67,21 @@ export const GET = withAuth(async (
           }
 
           const dto = toGenesisTaskDto(task);
-          const version = `${dto.updatedAt}:${dto.status}:${dto.stage}`;
-          if (version !== lastVersion) {
-            controller.enqueue(encodeEvent("progress", dto));
-            lastVersion = version;
+          const hasReplay = events.length > 0;
+          if (!sentSnapshot || hasReplay || dto.aggregateVersion > cursor) {
+            controller.enqueue(encodeEvent("progress", dto, dto.aggregateVersion));
+            cursor = dto.aggregateVersion;
+            sentSnapshot = true;
           } else if (tick % 5 === 0) {
             controller.enqueue(encoder.encode(": heartbeat\n\n"));
           }
 
           if (dto.status === "completed") {
-            controller.enqueue(encodeEvent("completed", { worldId: dto.worldId }));
+            controller.enqueue(encodeEvent("completed", { worldId: dto.worldId }, dto.aggregateVersion));
             break;
           }
-          if (dto.status === "failed") {
-            controller.enqueue(encodeEvent("failed", { stage: dto.stage, error: dto.error }));
+          if (dto.status === "failed" || dto.status === "cancelled") {
+            controller.enqueue(encodeEvent("failed", { stage: dto.stage, error: dto.error }, dto.aggregateVersion));
             break;
           }
           await sleep(1_000);

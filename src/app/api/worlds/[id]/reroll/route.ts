@@ -16,9 +16,23 @@ import {
   rerollReferenceRepairPrompt,
   rerollUserPrompt,
 } from "@/lib/prompts/genesis";
-import { assertModeTransition, WorldModeSchema, type WorldMode } from "@/lib/world-mode";
+import { assertModeTransition, WorldModeSchema } from "@/lib/world-mode";
 import { withAuth } from "@/lib/auth/route";
 import { ownedWhere } from "@/lib/auth/ownership";
+import type { ParsedLorebookEntry } from "@/lib/lorebook/st-import";
+import { generateGenesisIntent } from "@/lib/genesis/intent-generator";
+import {
+  assertGenesisIntentForMode,
+  parseGenesisIntent,
+  type GenesisIntentContract,
+} from "@/lib/genesis/intent";
+import type { GenesisQualityReport } from "@/lib/genesis/semantic-audit";
+import {
+  enforceGenesisQuality,
+  GenesisSemanticGateError,
+} from "@/lib/genesis/semantic-gate";
+import { preserveLockedPaths } from "@/lib/genesis/locked-paths";
+import { resolveLorebookExcerpts } from "@/lib/genesis/task-runner";
 
 /**
  * POST /api/worlds/[id]/reroll —— 单卡重掷（其余卡组为约束；player_locked 保留）
@@ -32,53 +46,22 @@ const BodySchema = z.object({
 
 export const maxDuration = 300;
 
-/** 按路径读值（"playerGod.name" / "majorGods.0.voice"） */
-function getPath(obj: unknown, path: string): unknown {
-  return path
-    .split(".")
-    .reduce<unknown>(
-      (acc, key) =>
-        acc && typeof acc === "object"
-          ? (acc as Record<string, unknown>)[key]
-          : undefined,
-      obj,
-    );
-}
-
-/** 按路径写值 */
-function setPath(obj: unknown, path: string, value: unknown) {
-  const keys = path.split(".");
-  const last = keys.pop()!;
-  const target = keys.reduce<unknown>(
-    (acc, key) =>
-      acc && typeof acc === "object"
-        ? (acc as Record<string, unknown>)[key]
-        : undefined,
-    obj,
-  );
-  if (target && typeof target === "object") {
-    (target as Record<string, unknown>)[last] = value;
-  }
-}
-
-function parseForMode(value: unknown, mode: WorldMode): WorldDeck {
-  return mode === "pantheon"
-    ? PantheonWorldDeckSchema.parse(value)
-    : CreatorWorldDeckSchema.parse(value);
-}
-
-function applyLockedPaths(
-  generated: unknown,
-  currentDeck: unknown,
-  lockedPaths: string[],
-  mode: WorldMode,
-): WorldDeck {
-  const merged = JSON.parse(JSON.stringify(generated)) as Record<string, unknown>;
-  for (const path of lockedPaths) {
-    const oldValue = getPath(currentDeck, path);
-    if (oldValue !== undefined) setPath(merged, path, oldValue);
-  }
-  return parseForMode(merged, mode);
+function normalizeLorebookEntries(entries: Array<{
+  keys: string[];
+  content: string;
+  enabled: boolean;
+  stExtra: Prisma.JsonValue | null;
+}>): ParsedLorebookEntry[] {
+  return entries.map((entry) => ({
+    keys: entry.keys,
+    content: entry.content,
+    enabled: entry.enabled,
+    stExtra: entry.stExtra !== null
+      && typeof entry.stExtra === "object"
+      && !Array.isArray(entry.stExtra)
+      ? { ...entry.stExtra }
+      : {},
+  }));
 }
 
 function referenceIssue(deck: WorldDeck): string | null {
@@ -98,7 +81,10 @@ export const POST = withAuth(async (
   const { id } = await params;
   const { cardKey, note } = BodySchema.parse(await request.json());
 
-  const world = await prisma.world.findFirst({ where: ownedWhere.world(userId, id) });
+  const world = await prisma.world.findFirst({
+    where: ownedWhere.world(userId, id),
+    include: { lorebookEntries: true },
+  });
   if (world === null) {
     return NextResponse.json({ error: "世界草稿不存在" }, { status: 404 });
   }
@@ -127,6 +113,39 @@ export const POST = withAuth(async (
   }
   const lockedPaths = world.lockedPaths;
 
+  const persistedIntent = parseGenesisIntent(world.genesisIntent);
+  if (world.genesisIntent !== null && persistedIntent === null) {
+    return NextResponse.json({ error: "创世意图契约已损坏" }, { status: 500 });
+  }
+  if (persistedIntent !== null) {
+    try {
+      assertGenesisIntentForMode(persistedIntent, mode);
+    } catch {
+      return NextResponse.json(
+        { error: "创世意图契约与世界模式不匹配" },
+        { status: 500 },
+      );
+    }
+  }
+
+  let lorebookExcerpts: string | undefined;
+  let intent: GenesisIntentContract;
+  try {
+    lorebookExcerpts = await resolveLorebookExcerpts(
+      normalizeLorebookEntries(world.lorebookEntries),
+      userId,
+    );
+    intent = persistedIntent ?? await generateGenesisIntent({
+      mode,
+      decree: world.genesisInput,
+      userId,
+      lorebookExcerpts,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
+
   let generated: WorldDeck;
   try {
     const requestOptions = {
@@ -138,6 +157,7 @@ export const POST = withAuth(async (
         decree: world.genesisInput,
         cardKey,
         currentDeckJson: JSON.stringify(currentDeck),
+        intentContract: intent,
         lockedNote: lockedPaths.length ? lockedPaths.join(", ") : undefined,
         playerNote: note,
       }),
@@ -159,7 +179,7 @@ export const POST = withAuth(async (
 
   let deck: WorldDeck;
   try {
-    deck = applyLockedPaths(generated, currentDeck, lockedPaths, mode);
+    deck = preserveLockedPaths(generated, currentDeck, lockedPaths, mode);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: `重掷结果与锁定字段无法组成有效卡组：${message}` }, { status: 502 });
@@ -177,6 +197,7 @@ export const POST = withAuth(async (
           decree: world.genesisInput,
           currentDeckJson: JSON.stringify(deck),
           referenceIssue: firstReferenceIssue,
+          intentContract: intent,
         }),
         maxTokens: 16000,
         cache: { namespace: `reroll:v1:${mode}` },
@@ -189,7 +210,7 @@ export const POST = withAuth(async (
       } catch {
         return NextResponse.json({ error: "世界模式不可更改" }, { status: 409 });
       }
-      deck = applyLockedPaths(repaired, currentDeck, lockedPaths, mode);
+      deck = preserveLockedPaths(repaired, currentDeck, lockedPaths, mode);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return NextResponse.json({ error: `重掷引用修复失败：${message}` }, { status: 502 });
@@ -204,6 +225,38 @@ export const POST = withAuth(async (
     }
   }
 
+  let auditReport: GenesisQualityReport;
+  try {
+    const quality = await enforceGenesisQuality({
+      deck,
+      mode,
+      decree: world.genesisInput,
+      intent,
+      userId,
+      lorebookExcerpts,
+      materialSnapshot: null,
+      lockedPaths,
+      currentDeck,
+    });
+    deck = quality.deck;
+    auditReport = quality.report;
+  } catch (err) {
+    if (err instanceof GenesisSemanticGateError) {
+      return NextResponse.json(
+        { error: err.message, auditReport: err.report },
+        { status: 502 },
+      );
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
+
+  try {
+    assertModeTransition(mode, deck.mode);
+  } catch {
+    return NextResponse.json({ error: "世界模式不可更改" }, { status: 409 });
+  }
+
   const updatedAt = await prisma.$transaction(async (tx) => {
     const { count } = await tx.world.updateMany({
       where: { id, userId, mode, status: "draft", updatedAt: world.updatedAt },
@@ -213,12 +266,17 @@ export const POST = withAuth(async (
         themeCard: deck.theme as unknown as Prisma.InputJsonValue,
         styleCard: deck.style as unknown as Prisma.InputJsonValue,
         cosmology: deck.cosmology as unknown as Prisma.InputJsonValue,
+        genesisIntent: intent as unknown as Prisma.InputJsonValue,
         fusionAxiom: deck.fusionAxiom
           ? (deck.fusionAxiom as unknown as Prisma.InputJsonValue)
           : undefined,
       },
     });
     if (count !== 1) return null;
+    await tx.genesisTask.updateMany({
+      where: { worldId: id, userId },
+      data: { auditReport: auditReport as unknown as Prisma.InputJsonValue },
+    });
     const updated = await tx.world.findUnique({
       where: { id },
       select: { updatedAt: true },
@@ -237,5 +295,5 @@ export const POST = withAuth(async (
     );
   }
 
-  return NextResponse.json({ deck, updatedAt });
+  return NextResponse.json({ deck, updatedAt, auditReport, genesisIntent: intent });
 });

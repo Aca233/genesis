@@ -90,6 +90,7 @@ model World {
   user                    User             @relation(fields: [userId], references: [id], onDelete: Restrict)
   name                    String
   genesisInput            String           @map("genesis_input") // 原初神谕
+  genesisIntent           Json?            @map("genesis_intent")
   mode                    String           @default("pantheon")
   status                  String           @default("draft") // draft | playing | concluded
   draftDeck               Json?            @map("draft_deck") // 创世草稿卡组（开局落地后清空）
@@ -121,34 +122,248 @@ model World {
 }
 
 model GenesisTask {
-  id                String    @id @default(cuid())
-  userId            String    @map("user_id")
-  user              User      @relation(fields: [userId], references: [id], onDelete: Restrict)
-  decree            String
-  lorebook          Json?
-  lorebookName      String?   @map("lorebook_name")
-  materialSelection Json?     @map("material_selection")
-  mode              String    @default("pantheon")
-  status            String    @default("queued") // queued | running | repairing | completed | failed
-  stage             String    @default("oracle")
-  completedKeys     String[]  @map("completed_keys")
-  rawOutput         String    @default("") @map("raw_output") @db.Text
-  error             String?
+  id                      String            @id @default(cuid())
+  userId                  String            @map("user_id")
+  user                    User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  idempotencyKey          String?           @map("idempotency_key")
+  requestHash             String?           @map("request_hash")
+  engineVersion           String            @default("legacy-v1") @map("engine_version")
+  aggregateVersion        Int               @default(1) @map("aggregate_version")
+  budgetMaxCalls          Int               @default(12) @map("budget_max_calls")
+  budgetMaxInput          Int               @default(500000) @map("budget_max_input_tokens")
+  budgetMaxOutput         Int               @default(65536) @map("budget_max_output_tokens")
+  budgetCallCount         Int               @default(0) @map("budget_call_count")
+  budgetReservedIn        Int               @default(0) @map("budget_reserved_input_tokens")
+  budgetReservedOut       Int               @default(0) @map("budget_reserved_output_tokens")
+  budgetSettledIn         Int               @default(0) @map("budget_settled_input_tokens")
+  budgetSettledOut        Int               @default(0) @map("budget_settled_output_tokens")
+  shadowEnabled           Boolean           @default(false) @map("shadow_enabled")
+  shadowStatus            String            @default("disabled") @map("shadow_status")
+  shadowPreflight         Json?             @map("shadow_preflight")
+  shadowPreflightHash     String?           @map("shadow_preflight_hash")
+  shadowBudgetMaxCalls    Int               @default(5) @map("shadow_budget_max_calls")
+  shadowBudgetMaxInput    Int               @default(120000) @map("shadow_budget_max_input_tokens")
+  shadowBudgetMaxOutput   Int               @default(30000) @map("shadow_budget_max_output_tokens")
+  shadowBudgetCallCount   Int               @default(0) @map("shadow_budget_call_count")
+  shadowBudgetReservedIn  Int               @default(0) @map("shadow_budget_reserved_input_tokens")
+  shadowBudgetReservedOut Int               @default(0) @map("shadow_budget_reserved_output_tokens")
+  shadowBudgetSettledIn   Int               @default(0) @map("shadow_budget_settled_input_tokens")
+  shadowBudgetSettledOut  Int               @default(0) @map("shadow_budget_settled_output_tokens")
+  decree                  String
+  intentContract          Json?             @map("intent_contract")
+  lorebook                Json?
+  lorebookName            String?           @map("lorebook_name")
+  materialSelection       Json?             @map("material_selection")
+  mode                    String            @default("pantheon")
+  status                  String            @default("queued") // queued | running | repairing | completed | failed
+  stage                   String            @default("oracle")
+  completedKeys           String[]          @map("completed_keys")
+  rawOutput               String            @default("") @map("raw_output") @db.Text
+  rawExpiresAt            DateTime?         @map("raw_expires_at")
+  error                   String?
   /**
    * 时间一致设计稿 §10.4：报告型 AI 语义审计结果（TemporalAuditResult）；仅 IP 世界产出，审计失败/旧任务为 NULL
    */
-  auditReport       Json?     @map("audit_report")
-  attempt           Int       @default(0)
-  leaseToken        String?   @map("lease_token")
-  leaseExpiresAt    DateTime? @map("lease_expires_at")
-  worldId           String?   @unique @map("world_id")
-  world             World?    @relation(fields: [worldId], references: [id], onDelete: SetNull)
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  auditReport             Json?             @map("audit_report")
+  attempt                 Int               @default(0)
+  leaseToken              String?           @map("lease_token")
+  leaseExpiresAt          DateTime?         @map("lease_expires_at")
+  worldId                 String?           @unique @map("world_id")
+  world                   World?            @relation(fields: [worldId], references: [id], onDelete: SetNull)
+  jobs                    GenesisJob[]
+  outboxEvents            GenesisOutbox[]
+  llmAttempts             LlmAttempt[]
+  artifacts               GenesisArtifact[]
+  createdAt               DateTime          @default(now()) @map("created_at")
+  updatedAt               DateTime          @updatedAt @map("updated_at")
 
+  @@unique([userId, idempotencyKey])
   @@index([userId, status])
+  @@index([rawExpiresAt])
   @@index([status, leaseExpiresAt])
   @@map("genesis_tasks")
+}
+
+model GenesisJob {
+  id                String            @id @default(cuid())
+  userId            String            @map("user_id")
+  genesisTaskId     String            @map("genesis_task_id")
+  task              GenesisTask       @relation(fields: [genesisTaskId], references: [id], onDelete: Cascade)
+  nodeKey           String            @map("node_key")
+  engineVersion     String            @map("engine_version")
+  priority          Int               @default(0)
+  status            String            @default("queued")
+  dependencyKeys    String[]          @default([]) @map("dependency_keys")
+  inputHash         String?           @map("input_hash")
+  leaseToken        String?           @map("lease_token")
+  leaseEpoch        Int               @default(0) @map("lease_epoch")
+  leaseExpiresAt    DateTime?         @map("lease_expires_at")
+  attempt           Int               @default(0)
+  estimatedDuration Int?              @map("estimated_duration")
+  estimatedTokens   Int?              @map("estimated_tokens")
+  startedAt         DateTime?         @map("started_at")
+  completedAt       DateTime?         @map("completed_at")
+  error             String?
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  llmAttempts       LlmAttempt[]
+  artifacts         GenesisArtifact[]
+
+  @@unique([genesisTaskId, nodeKey])
+  @@index([status, priority, createdAt])
+  @@index([userId, status])
+  @@index([leaseExpiresAt])
+  @@map("genesis_jobs")
+}
+
+model LlmSlot {
+  slotNo           Int         @id @map("slot_no")
+  currentAttemptId String?     @unique @map("current_attempt_id")
+  slotEpoch        Int         @default(0) @map("slot_epoch")
+  boundAt          DateTime?   @map("bound_at")
+  currentAttempt   LlmAttempt? @relation("CurrentLlmSlotAttempt", fields: [currentAttemptId], references: [id], onDelete: Restrict)
+
+  @@map("llm_slots")
+}
+
+model LlmAttempt {
+  id                   String       @id @default(cuid())
+  logicalCallId        String       @map("logical_call_id")
+  physicalAttemptIndex Int          @map("physical_attempt_index")
+  usedSlotNo           Int          @map("used_slot_no")
+  slotEpoch            Int          @map("slot_epoch")
+  cacheIsolationDomain String       @map("cache_isolation_domain")
+  endpointKey          String       @map("endpoint_key")
+  model                String
+  taskClass            String       @map("task_class")
+  ownerKind            String       @map("owner_kind")
+  ownerId              String       @map("owner_id")
+  genesisTaskId        String?      @map("genesis_task_id")
+  genesisTask          GenesisTask? @relation(fields: [genesisTaskId], references: [id], onDelete: SetNull)
+  genesisJobId         String?      @map("genesis_job_id")
+  genesisJob           GenesisJob?  @relation(fields: [genesisJobId], references: [id], onDelete: SetNull)
+  userId               String       @map("user_id")
+  leaseEpoch           Int?         @map("lease_epoch")
+  budgetScope          String       @default("primary") @map("budget_scope")
+  state                String       @default("reserved")
+  transportKind        String       @map("transport_kind")
+  transportOutcome     String?      @map("transport_outcome")
+  terminalEvidence     String?      @map("terminal_evidence")
+  stableErrorCode      String?      @map("stable_error_code")
+  reservedInputTokens  Int          @map("reserved_input_tokens")
+  reservedOutputTokens Int          @map("reserved_output_tokens")
+  settledInputTokens   Int?         @map("settled_input_tokens")
+  settledOutputTokens  Int?         @map("settled_output_tokens")
+  inputTokens          Int?         @map("input_tokens")
+  outputTokens         Int?         @map("output_tokens")
+  cacheReadTokens      Int?         @map("cache_read_tokens")
+  cacheWriteTokens     Int?         @map("cache_write_tokens")
+  acquiredAt           DateTime     @default(now()) @map("acquired_at")
+  ownerLeaseExpiresAt  DateTime?    @map("owner_lease_expires_at")
+  hardCallDeadline     DateTime?    @map("hard_call_deadline")
+  heartbeatAt          DateTime?    @map("heartbeat_at")
+  providerStartedAt    DateTime?    @map("provider_started_at")
+  providerFinishedAt   DateTime?    @map("provider_finished_at")
+  releasedAt           DateTime?    @map("released_at")
+  error                String?
+  currentSlot          LlmSlot?     @relation("CurrentLlmSlotAttempt")
+
+  @@unique([logicalCallId, physicalAttemptIndex])
+  @@index([state, acquiredAt])
+  @@index([endpointKey, model, taskClass, state])
+  @@index([userId, state])
+  @@index([genesisTaskId, state])
+  @@map("llm_attempts")
+}
+
+model LlmPermitRequest {
+  id                   String    @id @default(cuid())
+  logicalCallId        String    @map("logical_call_id")
+  physicalAttemptIndex Int       @map("physical_attempt_index")
+  userId               String    @map("user_id")
+  taskClass            String    @map("task_class")
+  priority             Int
+  endpointKey          String    @map("endpoint_key")
+  model                String
+  cacheIsolationDomain String    @map("cache_isolation_domain")
+  state                String    @default("waiting")
+  requestedAt          DateTime  @default(now()) @map("requested_at")
+  acquiredAt           DateTime? @map("acquired_at")
+  cancelledAt          DateTime? @map("cancelled_at")
+
+  @@unique([logicalCallId, physicalAttemptIndex])
+  @@index([state, priority, requestedAt])
+  @@index([userId, state])
+  @@map("llm_permit_requests")
+}
+
+model GenesisArtifact {
+  id               String      @id @default(cuid())
+  genesisTaskId    String      @map("genesis_task_id")
+  task             GenesisTask @relation(fields: [genesisTaskId], references: [id], onDelete: Cascade)
+  genesisJobId     String?     @map("genesis_job_id")
+  job              GenesisJob? @relation(fields: [genesisJobId], references: [id], onDelete: SetNull)
+  stageKey         String      @map("stage_key")
+  version          Int
+  status           String      @default("candidate")
+  visibility       String      @default("shadow")
+  inputHash        String      @map("input_hash")
+  outputHash       String      @map("output_hash")
+  reuseKey         String      @map("reuse_key")
+  dependencyHashes String[]    @default([]) @map("dependency_hashes")
+  content          Json
+  validation       Json?
+  acceptedAt       DateTime?   @map("accepted_at")
+  supersededAt     DateTime?   @map("superseded_at")
+  sealedAt         DateTime?   @map("sealed_at")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+
+  @@unique([genesisTaskId, stageKey, version])
+  @@index([genesisTaskId, stageKey, status])
+  @@index([reuseKey, status])
+  @@map("genesis_artifacts")
+}
+
+model LlmFairness {
+  userId        String    @id @map("user_id")
+  virtualFinish Float     @default(0) @map("virtual_finish")
+  lastGrantedAt DateTime? @map("last_granted_at")
+
+  @@map("llm_fairness")
+}
+
+model LlmCircuit {
+  circuitKey      String    @id @map("circuit_key")
+  endpointKey     String    @map("endpoint_key")
+  model           String
+  taskClass       String    @map("task_class")
+  state           String    @default("closed")
+  failureCount    Int       @default(0) @map("failure_count")
+  openUntil       DateTime? @map("open_until")
+  probeRequestId  String?   @map("probe_request_id")
+  lastFailureCode String?   @map("last_failure_code")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([state, openUntil])
+  @@map("llm_circuits")
+}
+
+model GenesisOutbox {
+  eventId           String      @id @default(cuid()) @map("event_id")
+  taskId            String      @map("task_id")
+  task              GenesisTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  aggregateVersion  Int         @map("aggregate_version")
+  eventType         String      @map("event_type")
+  payloadProjection Json        @map("payload_projection")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  publishedAt       DateTime?   @map("published_at")
+  deliveryAttempts  Int         @default(0) @map("delivery_attempts")
+
+  @@unique([taskId, aggregateVersion])
+  @@index([taskId, createdAt])
+  @@index([publishedAt, createdAt])
+  @@map("genesis_outbox")
 }
 
 model Timeline {
@@ -190,6 +405,7 @@ model Chapter {
   index              Int
   title              String?
   summary            String? // 章末史官小结
+  brief              Json?   // 章节级目标、视角与信息控制合同
   settleState        String              @default("open") @map("settle_state") // open | settling:<step> | settled
   settleError        String?             @map("settle_error")
   settleRetryable    Boolean             @default(true) @map("settle_retryable")
@@ -686,53 +902,80 @@ model Settings {
 }
 
 model LlmCall {
-  id               String   @id @default(cuid())
-  task             String // narrative | genesis | settlement | reroll | pantheon | extract | chronicle | test
-  slot             String // narrative | backstage
-  provider         String?
-  model            String?
-  durationMs       Int      @map("duration_ms")
-  ok               Boolean
-  error            String?
-  inputTokens      Int?     @map("input_tokens")
-  outputTokens     Int?     @map("output_tokens")
-  cacheReadTokens  Int?     @map("cache_read_tokens")
-  cacheWriteTokens Int?     @map("cache_write_tokens")
-  cacheRequested   Boolean  @default(false) @map("cache_requested")
-  cacheFallback    Boolean  @default(false) @map("cache_fallback")
+  id                   String   @id @default(cuid())
+  task                 String // narrative | genesis | settlement | reroll | pantheon | extract | chronicle | test
+  slot                 String // narrative | backstage
+  provider             String?
+  model                String?
+  durationMs           Int      @map("duration_ms")
+  ok                   Boolean
+  error                String?
+  inputTokens          Int?     @map("input_tokens")
+  outputTokens         Int?     @map("output_tokens")
+  cacheReadTokens      Int?     @map("cache_read_tokens")
+  cacheWriteTokens     Int?     @map("cache_write_tokens")
+  cacheRequested       Boolean  @default(false) @map("cache_requested")
+  cacheFallback        Boolean  @default(false) @map("cache_fallback")
   /**
    * 端点缓存能力降级快照(能力位 + 最近一次降级原因);全部完好为 NULL(F8 可观测)
    */
-  cacheCapability  String?  @map("cache_capability")
+  cacheCapability      String?  @map("cache_capability")
   /**
    * 缓存前缀指纹(buildPromptCachePlan().key);同 hash 短窗口内第 2+ 次调用「应命中」(F5 可观测)
    */
-  stablePrefixHash String?  @map("stable_prefix_hash")
+  stablePrefixHash     String?  @map("stable_prefix_hash")
   /**
    * 一条业务请求(含全部续写/断点续传轮)共享的运行 ID(F5 可观测)
    */
-  agentRunId       String?  @map("agent_run_id")
+  agentRunId           String?  @map("agent_run_id")
   /**
    * 运行内轮号:0 = 首轮请求,1+ = 续写接力/回退轮(F5 可观测)
    */
-  agentCallIndex   Int?     @map("agent_call_index")
-  dynamicTokens    Int?     @map("dynamic_tokens")
-  toolResultTokens Int?     @map("tool_result_tokens")
-  cacheLayer       String?  @map("cache_layer")
+  agentCallIndex       Int?     @map("agent_call_index")
+  /**
+   * One business-level Gateway request shared by every physical Provider request.
+   */
+  logicalCallId        String?  @map("logical_call_id")
+  /**
+   * Zero-based index of the real Provider request within logicalCallId.
+   */
+  physicalAttemptIndex Int?     @map("physical_attempt_index")
+  /**
+   * stream | complete
+   */
+  transportKind        String?  @map("transport_kind")
+  /**
+   * Stable transport result classification; distinct from business validation.
+   */
+  transportOutcome     String?  @map("transport_outcome")
+  /**
+   * Evidence proving what is known about Provider-side termination.
+   */
+  terminalEvidence     String?  @map("terminal_evidence")
+  /**
+   * Stable machine-readable failure code; error remains the bounded redacted detail.
+   */
+  stableErrorCode      String?  @map("stable_error_code")
+  dynamicTokens        Int?     @map("dynamic_tokens")
+  toolResultTokens     Int?     @map("tool_result_tokens")
+  cacheLayer           String?  @map("cache_layer")
   /**
    * 归因:发起调用的用户(多租户 Phase A);历史行保持 NULL 不回填
    */
-  userId           String?  @map("user_id")
+  userId               String?  @map("user_id")
   /**
    * 归因:调用所属世界(设计 §3.1 顺手可加);无世界语境的调用(test 等)为 NULL
    */
-  worldId          String?  @map("world_id")
-  createdAt        DateTime @default(now()) @map("created_at")
+  worldId              String?  @map("world_id")
+  createdAt            DateTime @default(now()) @map("created_at")
 
+  @@unique([logicalCallId, physicalAttemptIndex])
   @@index([createdAt])
   @@index([task, createdAt])
   @@index([stablePrefixHash])
   @@index([agentRunId])
+  @@index([logicalCallId])
+  @@index([transportOutcome, createdAt])
   @@index([userId, createdAt])
   @@map("llm_calls")
 }

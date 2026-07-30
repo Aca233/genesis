@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -7,6 +8,15 @@ import { MaterialSelectionItemSchema } from "@/lib/materials/types";
 import { buildGenesisMaterialSnapshot, snapshotJson } from "@/lib/materials/task-snapshot";
 import { WorldModeSchema } from "@/lib/world-mode";
 import { withAuth } from "@/lib/auth/route";
+import {
+  GENESIS_CREATE_MAX_BYTES,
+  PayloadLimitError,
+  readUtf8Body,
+} from "@/lib/genesis/limits";
+import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
+import { isGenesisV2ShadowEnabled } from "@/lib/genesis/v2/config";
+import { runDeterministicPreflight } from "@/lib/genesis/v2/preflight";
+import { GENESIS_V2_STAGE_REGISTRY } from "@/lib/genesis/v2/stage-registry";
 
 const CreateGenesisTaskSchema = z.object({
   mode: WorldModeSchema.default("pantheon"),
@@ -19,8 +29,17 @@ const CreateGenesisTaskSchema = z.object({
 export const POST = withAuth(async (userId, request: Request) => {
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
+    const rawBody = await readUtf8Body(request, GENESIS_CREATE_MAX_BYTES);
+    body = JSON.parse(rawBody);
+  } catch (error) {
+    if (error instanceof PayloadLimitError) {
+      return NextResponse.json({
+        error: "创世请求超过安全上限",
+        code: error.code,
+        observedBytes: error.observedBytes,
+        limitBytes: error.limitBytes,
+      }, { status: 413 });
+    }
     return NextResponse.json({ error: "创世请求无效" }, { status: 400 });
   }
   const parsed = CreateGenesisTaskSchema.safeParse(body);
@@ -46,18 +65,92 @@ export const POST = withAuth(async (userId, request: Request) => {
   try { materialSelection = await buildGenesisMaterialSnapshot(parsed.data.materialSelections, userId); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 }); }
 
-  const task = await prisma.genesisTask.create({
-    data: {
-      userId,
-      mode: parsed.data.mode,
-      decree: parsed.data.decree,
-      lorebook: parsed.data.lorebook as Prisma.InputJsonValue | undefined,
-      lorebookName: parsed.data.lorebookName,
-      materialSelection: snapshotJson(materialSelection),
-      completedKeys: [],
+  const taskInput = {
+    userId,
+    mode: parsed.data.mode,
+    decree: parsed.data.decree,
+    lorebook: parsed.data.lorebook as Prisma.InputJsonValue | undefined,
+    lorebookName: parsed.data.lorebookName,
+    materialSelection: snapshotJson(materialSelection),
+    completedKeys: [],
+  };
+  const idempotencyKey = request.headers.get("Idempotency-Key")?.trim();
+  if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 128)) {
+    return NextResponse.json({ error: "创世幂等键长度必须为 8–128 字符" }, { status: 400 });
+  }
+  const requestHash = createHash("sha256").update(JSON.stringify({
+    mode: taskInput.mode,
+    decree: taskInput.decree,
+    lorebook: taskInput.lorebook ?? null,
+    lorebookName: taskInput.lorebookName ?? null,
+    materialSelection: taskInput.materialSelection,
+  }), "utf8").digest("hex");
+  const shadowEnabled = isGenesisV2ShadowEnabled();
+  const shadowPreflight = shadowEnabled
+    ? runDeterministicPreflight({
+        mode: taskInput.mode,
+        decree: taskInput.decree,
+        lorebook: taskInput.lorebook,
+        materialSelection,
+      })
+    : null;
+  const taskData = {
+    ...taskInput,
+    shadowEnabled,
+    shadowStatus: shadowEnabled ? "pending_legacy" : "disabled",
+    ...(shadowPreflight ? {
+      shadowPreflight: shadowPreflight as unknown as Prisma.InputJsonValue,
+    } : {}),
+    shadowPreflightHash: shadowPreflight?.preflightHash,
+    shadowBudgetMaxCalls: shadowPreflight?.budgetPlan.maxCalls ?? 5,
+    shadowBudgetMaxInput: shadowPreflight?.budgetPlan.maxInputTokens ?? 120_000,
+    shadowBudgetMaxOutput: shadowPreflight?.budgetPlan.maxOutputTokens ?? 30_000,
+    jobs: {
+      create: [
+        {
+          userId,
+          nodeKey: "legacy-world-deck",
+          engineVersion: "legacy-v1",
+          inputHash: requestHash,
+        },
+        ...(shadowEnabled ? GENESIS_V2_STAGE_REGISTRY.map((stage) => ({
+          userId,
+          nodeKey: `shadow:${stage.id}`,
+          engineVersion: "dag-v2-shadow",
+          priority: -100,
+          status: "queued",
+          dependencyKeys: stage.dependencies.map((dependency) => `shadow:${dependency}`),
+          inputHash: shadowPreflight!.preflightHash,
+          estimatedTokens: shadowPreflight!.budgetPlan.stages
+            .find((budget) => budget.stage === stage.id)?.maxOutputTokens,
+        })) : []),
+      ],
     },
-    select: { id: true },
-  });
+    outboxEvents: {
+      create: {
+        aggregateVersion: 1,
+        eventType: "task_created",
+        payloadProjection: { status: "queued", stage: "oracle" },
+      },
+    },
+  };
 
+  const task = idempotencyKey
+    ? await prisma.genesisTask.upsert({
+        where: { userId_idempotencyKey: { userId, idempotencyKey } },
+        create: { ...taskData, idempotencyKey, requestHash },
+        update: {},
+        select: { id: true, requestHash: true },
+      })
+    : await prisma.genesisTask.create({
+        data: taskData,
+        select: { id: true, requestHash: true },
+      });
+
+  if (idempotencyKey && task.requestHash !== requestHash) {
+    return NextResponse.json({ error: "幂等键已用于不同的创世请求" }, { status: 409 });
+  }
+
+  wakeGenesisScheduler();
   return NextResponse.json({ taskId: task.id }, { status: 202 });
 });

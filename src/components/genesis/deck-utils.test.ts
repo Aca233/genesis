@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completeCreatorDeck } from "@/lib/abilities/embark.test-fixtures";
+import { completeCreatorDeck, completeDeck } from "@/lib/abilities/embark.test-fixtures";
 import { DECK_CARD_KEYS } from "@/lib/cards/schemas";
 import {
   CARD_KEY_LABELS,
@@ -15,12 +15,40 @@ import {
   traditionAbilityRefsForRace,
   visibleAbilityIndexes,
   deckCardOrder,
+  minimumMajorGodCount,
   addCreatorGodRelation,
   creatorRelationTargetRefs,
   removeCreatorGodRelation,
   removeCreatorMajorGod,
   updateCreatorGodRelation,
 } from "./deck-utils";
+
+function temporalAnchor(source: {
+  basis: "original" | "single_ip" | "multi_ip";
+}) {
+  return {
+    source: source.basis === "original"
+      ? { basis: "original" as const, ambiguityNotes: [] }
+      : {
+          basis: source.basis,
+          sourceIps: source.basis === "single_ip" ? ["甲"] : ["甲", "乙"],
+          continuity: "原作线",
+          continuitySource: "model_inferred" as const,
+          ambiguityNotes: [],
+        },
+    anchor: {
+      anchorType: source.basis === "original" ? "original_present" as const : "main_story_opening" as const,
+      currentTimeLabel: "开局",
+      currentEraLabel: "当前纪元",
+      anchorEvent: "故事开始",
+      canonCutoff: source.basis === "original" ? null : "主线开幕之前",
+      selectionSource: "model_inferred" as const,
+      confidence: "high" as const,
+      assumptions: [],
+    },
+    anchorOrdinal: 0,
+  };
+}
 
 describe("创世人物引用工具", () => {
   const deck = {
@@ -176,6 +204,24 @@ describe("Creator 卡墙顺序", () => {
     const deck = completeCreatorDeck();
     expect(deckCardOrder(deck).slice(0, 2)).toEqual(["cosmology", "majorGods"]);
     expect(deckCardOrder(deck)).not.toContain("playerGod");
+  });
+});
+
+describe("主神编辑下限", () => {
+  it("IP 世界为 1，原创世界与无锚点旧卡组为 4", () => {
+    expect(minimumMajorGodCount({
+      ...completeDeck(),
+      temporalAnchor: temporalAnchor({ basis: "single_ip" }),
+    })).toBe(1);
+    expect(minimumMajorGodCount({
+      ...completeDeck(),
+      temporalAnchor: temporalAnchor({ basis: "multi_ip" }),
+    })).toBe(1);
+    expect(minimumMajorGodCount({
+      ...completeDeck(),
+      temporalAnchor: temporalAnchor({ basis: "original" }),
+    })).toBe(4);
+    expect(minimumMajorGodCount(completeDeck())).toBe(4);
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/genesis/task-runner", () => ({ ensureGenesisTaskRunning: vi.fn() }));
+vi.mock("@/lib/genesis/scheduler", () => ({ wakeGenesisScheduler: vi.fn() }));
 vi.mock("@/lib/reality/task-runner", () => ({ ensureRealityRewriteRunning: vi.fn(), retryRealityRewrite: vi.fn() }));
 
 import { mutateAdminTask, mutateAdminUser } from "./actions";

@@ -200,6 +200,17 @@ describe("materializeDeckAbilities", () => {
 
   it("在同一事务中创建种族、势力、地点、人物、神与第一章", async () => {
     const deck = completeDeck();
+    deck.openingChapterBrief = {
+      objective: "让人物1确认星海异象的来源",
+      viewpointCharacterRef: "character-1",
+      openingConstraint: "从一次失败的观测开始",
+      endingConstraint: "只推进一个因果节点",
+      readerKnows: ["诸神正在争夺信仰"],
+      viewpointKnows: ["旧塔昨夜出现异光"],
+      mustHide: ["旧神正在苏醒"],
+      hintOnly: ["异光与旧神有关"],
+      forbiddenDevelopments: ["旧神在首章完全苏醒"],
+    };
     const entities = new Map<string, { id: string; timelineId: string; type: string; raceId: string | null }>();
     const gods = new Map<string, { id: string; timelineId: string }>();
     const abilities: StoredAbility[] = [];
@@ -207,6 +218,7 @@ describe("materializeDeckAbilities", () => {
     const memberships: Array<{ characterId: string; factionId: string; role: string; isPrimary: boolean }> = [];
     let entityIndex = 0;
     let godIndex = 0;
+    const chapterCreate = vi.fn(async () => ({ id: "chapter-1" }));
 
     const tx = {
       timeline: { create: async () => ({ id: "timeline-1" }) },
@@ -246,7 +258,7 @@ describe("materializeDeckAbilities", () => {
           return { id: `membership-${memberships.length}`, ...data };
         },
       },
-      chapter: { create: async () => ({ id: "chapter-1" }) },
+      chapter: { create: chapterCreate },
       world: { update: async () => ({ id: "world-1" }) },
     } as unknown as Prisma.TransactionClient;
 
@@ -277,6 +289,24 @@ describe("materializeDeckAbilities", () => {
     });
     expect(memberships).toContainEqual(expect.objectContaining({ role: "执政官", isPrimary: true }));
     expect(abilities.filter((ability) => ability.godId !== null)).toHaveLength(15);
+    expect(chapterCreate).toHaveBeenCalledWith({
+      data: {
+        timelineId: "timeline-1",
+        index: 1,
+        title: "创世",
+        brief: {
+          objective: "让人物1确认星海异象的来源",
+          viewpointEntityId: "entity-db-5",
+          openingConstraint: "从一次失败的观测开始",
+          endingConstraint: "只推进一个因果节点",
+          readerKnows: ["诸神正在争夺信仰"],
+          viewpointKnows: ["旧塔昨夜出现异光"],
+          mustHide: ["旧神正在苏醒"],
+          hintOnly: ["异光与旧神有关"],
+          forbiddenDevelopments: ["旧神在首章完全苏醒"],
+        },
+      },
+    });
   });
 
   it("引用物化失败时事务不提交任何已暂存写入", async () => {

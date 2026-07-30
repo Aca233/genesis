@@ -44,4 +44,31 @@ describe("completeStructured attempts", () => {
     );
   });
 
+  it("默认要求完整输出，但允许调用方显式禁用截断续写", async () => {
+    mocks.complete.mockResolvedValue('{"ok":true}');
+
+    const baseOptions = {
+      task: "extract" as const,
+      userId: "test-user",
+      system: "system",
+      user: "user",
+      schema: z.object({ ok: z.boolean() }),
+      maxAttempts: 1,
+    };
+
+    await completeStructured("backstage", baseOptions);
+    await completeStructured("backstage", {
+      ...baseOptions,
+      failOnTruncation: false,
+    });
+
+    expect(mocks.complete).toHaveBeenCalledTimes(2);
+    expect(mocks.complete.mock.calls[0]![1]).toEqual(expect.objectContaining({
+      failOnTruncation: true,
+    }));
+    expect(mocks.complete.mock.calls[1]![1]).toEqual(expect.objectContaining({
+      failOnTruncation: false,
+    }));
+  });
+
 });

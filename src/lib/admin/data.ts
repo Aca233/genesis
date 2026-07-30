@@ -163,7 +163,7 @@ export async function listAdminTasks(input: AdminListInput & { kind: string; sta
 
 export async function listAdminLlmCalls(input: AdminListInput & { ok: string; task: string }, db: AdminDb = prisma) {
   const where = { ...(input.ok === "yes" ? { ok: true } : input.ok === "no" ? { ok: false } : {}), ...(input.task !== "all" ? { task: input.task } : {}) };
-  const [items, total] = await Promise.all([db.llmCall.findMany({ where, orderBy: { createdAt: "desc" }, skip: input.skip, take: input.pageSize, select: { id: true, task: true, slot: true, provider: true, model: true, durationMs: true, ok: true, error: true, inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheWriteTokens: true, cacheRequested: true, cacheFallback: true, userId: true, worldId: true, createdAt: true } }), db.llmCall.count({ where })]);
+  const [items, total] = await Promise.all([db.llmCall.findMany({ where, orderBy: { createdAt: "desc" }, skip: input.skip, take: input.pageSize, select: { id: true, task: true, slot: true, provider: true, model: true, durationMs: true, ok: true, error: true, inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheWriteTokens: true, cacheRequested: true, cacheFallback: true, logicalCallId: true, physicalAttemptIndex: true, transportKind: true, transportOutcome: true, terminalEvidence: true, stableErrorCode: true, userId: true, worldId: true, createdAt: true } }), db.llmCall.count({ where })]);
   return { items: items.map((row) => ({ ...row, error: row.error ? redactAdminError(row.error) : null })), total };
 }
 

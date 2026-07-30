@@ -4,6 +4,7 @@ import {
   CreatorWorldDeckSchema,
   DECK_CARD_KEYS,
   LegacyWorldDeckSchema,
+  PantheonWorldDeckSchema,
   TemporalAnchorCardSchema,
   WorldDeckSchema,
   isLegacyWorldDeck,
@@ -252,6 +253,81 @@ describe("WorldDeck 模式判别联合", () => {
     const { mode: _mode, ...persisted } = completeDeck();
     void _mode;
     expect(parsePersistedWorldDeck(persisted).mode).toBe("pantheon");
+  });
+
+  it("仅接受新版融合公理，并将已持久化旧字段归一为新版结构", () => {
+    const legacyFusion = {
+      sourceIps: ["甲", "乙"],
+      axioms: ["旧公理"],
+      powerMapping: "旧力量对标",
+      conflictRule: "以甲为准",
+    };
+    const canonicalFusion = {
+      sourceIps: ["甲", "乙"],
+      establishedRules: ["旧公理"],
+      openQuestions: ["旧力量对标"],
+      hardLimits: ["旧版融合公理未记录明确限制"],
+      conflictRule: "以甲为准",
+    };
+
+    expect(PantheonWorldDeckSchema.safeParse({
+      ...completeDeck(),
+      fusionAxiom: canonicalFusion,
+    }).success).toBe(true);
+    expect(PantheonWorldDeckSchema.safeParse({
+      ...completeDeck(),
+      fusionAxiom: legacyFusion,
+    }).success).toBe(false);
+    expect(parsePersistedWorldDeck({
+      ...completeDeck(),
+      fusionAxiom: legacyFusion,
+    }).fusionAxiom).toEqual(canonicalFusion);
+
+    const legacyDeck = completeLegacyDeck();
+    legacyDeck.fusionAxiom = legacyFusion;
+    expect(parsePersistedWorldDeck(legacyDeck).fusionAxiom).toEqual(canonicalFusion);
+  });
+
+  it("拒绝混合 legacy 与 canonical 字段的融合公理", () => {
+    const mixedFusion = {
+      sourceIps: ["甲", "乙"],
+      axioms: ["旧公理"],
+      powerMapping: "旧力量对标",
+      establishedRules: ["新规则"],
+      openQuestions: ["新问题"],
+      hardLimits: ["新限制"],
+      conflictRule: "以甲为准",
+    };
+
+    expect(() => parsePersistedWorldDeck({
+      ...completeDeck(),
+      fusionAxiom: mixedFusion,
+    })).toThrow();
+
+    const legacyDeck = completeLegacyDeck();
+    legacyDeck.fusionAxiom = mixedFusion;
+    expect(() => parsePersistedWorldDeck(legacyDeck)).toThrow();
+  });
+
+  it("按来源类型约束主神下限，同时保持无时间锚点旧卡组可读", () => {
+    const gods = completeDeck().majorGods;
+    const ipDeck = {
+      ...completeDeck(),
+      temporalAnchor: ipTemporalAnchorCard(),
+      majorGods: gods.slice(0, 1),
+    };
+    expect(PantheonWorldDeckSchema.safeParse(ipDeck).success).toBe(true);
+    expect(PantheonWorldDeckSchema.safeParse({ ...ipDeck, majorGods: [] }).success).toBe(false);
+
+    expect(PantheonWorldDeckSchema.safeParse({
+      ...completeDeck(),
+      temporalAnchor: originalTemporalAnchorCard(),
+      majorGods: gods.slice(0, 3),
+    }).success).toBe(false);
+    expect(PantheonWorldDeckSchema.safeParse({
+      ...completeDeck(),
+      majorGods: gods.slice(0, 1),
+    }).success).toBe(true);
   });
 });
 
@@ -711,6 +787,48 @@ describe("时间锚点（temporalAnchor）与锚点状态", () => {
 
   it("temporalAnchor 进入重掷粒度键（编辑器 UI 键暂缓）", () => {
     expect(DECK_CARD_KEYS).toContain("temporalAnchor");
+  });
+});
+
+describe("首章启动约束", () => {
+  it("接受结构化 openingChapterBrief 并校验视角人物 ref", () => {
+    const valid = WorldDeckSchema.safeParse({
+      ...completeDeck(),
+      openingChapterBrief: {
+        objective: "让见证者确认星海异象的来源",
+        viewpointCharacterRef: "character-1",
+        openingConstraint: "从一次失败的观测开始",
+        endingConstraint: "只推进一个因果节点",
+        readerKnows: ["诸神正在争夺信仰"],
+        viewpointKnows: ["旧塔昨夜出现异光"],
+        mustHide: ["旧神正在苏醒"],
+        hintOnly: ["异光与旧神有关"],
+        forbiddenDevelopments: ["旧神在首章完全苏醒"],
+      },
+    });
+    expect(valid.success).toBe(true);
+
+    const dangling = completeDeck() as ReturnType<typeof completeDeck> & {
+      openingChapterBrief: Record<string, unknown>;
+    };
+    dangling.openingChapterBrief = {
+      objective: "制造悬空视角",
+      viewpointCharacterRef: "character-missing",
+      openingConstraint: "从行动开始",
+      endingConstraint: "留下选择",
+      readerKnows: [],
+      viewpointKnows: [],
+      mustHide: [],
+      hintOnly: [],
+      forbiddenDevelopments: [],
+    };
+    const result = WorldDeckSchema.safeParse(dangling);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) =>
+        issue.path.join(".") === "openingChapterBrief.viewpointCharacterRef"
+      )).toBe(true);
+    }
   });
 });
 

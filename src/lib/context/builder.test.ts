@@ -77,6 +77,28 @@ describe("buildNarratorContext mode and active-reality boundaries", () => {
     expect(messages[1]).toMatchObject({ role: "system", cacheScope: "world" });
   });
 
+  it("injects a populated chapter brief as a dynamic binding block", async () => {
+    mockChapter({
+      brief: {
+        objective: "守住北港直到援军抵达",
+        viewpointEntityId: "entity-guard",
+        mustHide: ["潮神已经倒戈"],
+        hintOnly: ["海堤下传来空洞回声"],
+      },
+    });
+
+    const messages = await buildNarratorContext({
+      worldId: "world-1", chapterId: "chapter-1", playerInput: "巡视海堤",
+      scale: "scene", mode: "say",
+    });
+    const brief = messages.find((message) => message.content.includes("CHAPTER BRIEF"));
+
+    expect(brief).toMatchObject({ role: "system", cacheScope: "dynamic" });
+    expect(brief?.content).toContain("Objective: 守住北港直到援军抵达");
+    expect(brief?.content).toContain("Must remain hidden:\n- 潮神已经倒戈");
+    expect(brief?.content).toContain("Hint only:\n- 海堤下传来空洞回声");
+  });
+
   it("pantheon 征兆只租借注入（至多 2 条），不在构建时标记消费", async () => {
     mocks.prisma.omenQueue.findMany.mockResolvedValue([
       { id: "omen-1", text: "潮水连续三夜倒流", createdAt: new Date() },

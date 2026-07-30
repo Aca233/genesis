@@ -202,6 +202,31 @@ describe("GET /api/worlds/[id]/state projections", () => {
     })]);
   });
 
+  it("在状态读取边界把旧融合公理归一为 canonical shape", async () => {
+    mocks.worldFindUnique.mockResolvedValue({
+      ...worldFixture,
+      fusionAxiom: {
+        sourceIps: ["甲", "乙"],
+        axioms: ["旧公理"],
+        powerMapping: "旧力量对标",
+        conflictRule: "以甲为准",
+      },
+    });
+
+    const body = await (await GET(
+      new Request("http://localhost/api/worlds/world-1/state"),
+      context,
+    )).json();
+
+    expect(body.world.fusionAxiom).toEqual({
+      sourceIps: ["甲", "乙"],
+      establishedRules: ["旧公理"],
+      openQuestions: ["旧力量对标"],
+      hardLimits: ["旧版融合公理未记录明确限制"],
+      conflictRule: "以甲为准",
+    });
+  });
+
   it("creator 迷雾状态复用玩家安全投影", async () => {
     mocks.timelineFindUnique.mockResolvedValue({
       id: "timeline-1",

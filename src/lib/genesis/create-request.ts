@@ -3,6 +3,10 @@ import type { WorldMode } from "@/lib/world-mode";
 
 export const defaultGenesisMode: WorldMode = "pantheon";
 
+export function createGenesisIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
 type GenesisTaskPayloadInput = {
   mode?: WorldMode;
   decree: string;

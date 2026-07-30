@@ -10,6 +10,10 @@ import {
   AbilityVisibilitySchema,
 } from "@/lib/abilities/types";
 import { validateAbilityOwnership } from "@/lib/abilities/validator";
+import {
+  assertGenesisIntentForMode,
+  GenesisIntentContractSchema,
+} from "@/lib/genesis/intent";
 import { WorldModeSchema } from "@/lib/world-mode";
 import {
   ObserverStateSchema,
@@ -101,6 +105,7 @@ const ChapterSchema = z
     summary: TextSchema.nullish(),
     settleState: ShortStringSchema.default("open"),
     snapshot: BoundedJsonSchema.optional(),
+    brief: BoundedJsonSchema.optional(),
     messages: z.array(MessageSchema).max(MAX_COLLECTION_ITEMS).default([]),
     createdAt: z.coerce.date().optional(),
   })
@@ -417,6 +422,7 @@ const WorldSchema = z
     userId: OptionalIdSchema,
     name: ShortStringSchema.min(1),
     genesisInput: TextSchema,
+    genesisIntent: GenesisIntentContractSchema.nullish(),
     mode: WorldModeSchema.default("pantheon"),
     status: ShortStringSchema.default("draft"),
     draftDeck: BoundedJsonSchema.optional(),
@@ -1070,6 +1076,17 @@ export const POST = withAuth(async (userId, request: Request) => {
   }
   const w = parsed.data.world;
 
+  if (w.genesisIntent != null) {
+    try {
+      assertGenesisIntentForMode(w.genesisIntent, w.mode);
+    } catch {
+      return NextResponse.json(
+        { error: "genesisIntent 与世界模式不匹配" },
+        { status: 400 },
+      );
+    }
+  }
+
   const newWorldId = crypto.randomUUID();
   const archiveIds = new Map<string, string>();
   const timelineMap = new Map<string, string>();
@@ -1214,6 +1231,7 @@ export const POST = withAuth(async (userId, request: Request) => {
           summary: ch.summary ?? null,
           settleState: ch.settleState,
           snapshot: remapArchivedJson(ch.snapshot, allIdMap),
+          brief: remapArchivedJson(ch.brief, allIdMap),
           createdAt: ch.createdAt,
         });
         for (const message of ch.messages) {
@@ -1589,6 +1607,7 @@ export const POST = withAuth(async (userId, request: Request) => {
           userId,
           name: w.name,
           genesisInput: w.genesisInput,
+          genesisIntent: json(w.genesisIntent),
           mode: w.mode,
           status: w.status,
           draftDeck: json(w.draftDeck),

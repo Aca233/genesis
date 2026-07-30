@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { complete } from "./gateway";
-import type { LlmTask, SlotName } from "./types";
+import type { CompletionRequest, LlmTask, SlotName } from "./types";
 
 /**
  * 结构化输出：要求模型输出 JSON，Zod 校验失败则携错误重问（×2）。
@@ -41,6 +41,7 @@ export async function completeStructured<T>(
     task: LlmTask;
     /** 发起调用的用户(多租户 Phase A 归因;槽位解析亦按此用户)。 */
     userId: string;
+    owner?: CompletionRequest["owner"];
     system: string;
     user: string;
     schema: z.ZodType<T>;
@@ -52,8 +53,12 @@ export async function completeStructured<T>(
     transportMaxAttempts?: number;
     /** Allow one non-streaming fallback request after streaming fails. */
     allowTransportFallback?: boolean;
+    /** Require gateway continuation for truncated output. Defaults to true. */
+    failOnTruncation?: boolean;
     /** Provider prompt-cache namespace for stable global/world messages. */
     cache?: { namespace: string };
+    maxInputBytes?: number;
+    maxOutputBytes?: number;
     /** Stable world-specific context, placed after global system and before dynamic input. */
     stableContext?: string[];
   },
@@ -71,10 +76,10 @@ export async function completeStructured<T>(
     const text = await complete(slotName, {
       task: opts.task,
       userId: opts.userId,
+      owner: opts.owner,
       temperature: opts.temperature,
       maxTokens: opts.maxTokens,
-      // 结构化输出必须完整:截断的 JSON 只会在校验层莫名失败
-      failOnTruncation: true,
+      failOnTruncation: opts.failOnTruncation ?? true,
       cache: opts.cache,
       messages: [
         { role: "system", content: opts.system, cacheScope: "global" },
@@ -88,6 +93,8 @@ export async function completeStructured<T>(
     }, {
       maxAttempts: opts.transportMaxAttempts,
       allowFallback: opts.allowTransportFallback,
+      maxInputBytes: opts.maxInputBytes,
+      maxOutputBytes: opts.maxOutputBytes,
     });
 
     try {

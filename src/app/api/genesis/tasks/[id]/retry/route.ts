@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { ensureGenesisTaskRunning } from "@/lib/genesis/task-runner";
+import { wakeGenesisScheduler } from "@/lib/genesis/scheduler";
 import { withAuth } from "@/lib/auth/route";
 
 export const POST = withAuth(async (
@@ -9,21 +9,52 @@ export const POST = withAuth(async (
   { params }: { params: Promise<{ id: string }> },
 ) => {
   const { id } = await params;
-  const updated = await prisma.genesisTask.updateMany({
-    where: { id, userId, status: "failed" },
-    data: {
-      status: "queued",
-      rawOutput: "",
-      error: null,
-      leaseToken: null,
-      leaseExpiresAt: null,
-      // 手动重试给全新的瞬断自愈配额
-      attempt: 0,
-    },
+  const retried = await prisma.$transaction(async (tx) => {
+    const current = await tx.genesisTask.findFirst({
+      where: { id, userId, status: "failed" },
+      select: { aggregateVersion: true, stage: true },
+    });
+    if (!current) return false;
+    const aggregateVersion = current.aggregateVersion + 1;
+    const updated = await tx.genesisTask.updateMany({
+      where: { id, userId, status: "failed", aggregateVersion: current.aggregateVersion },
+      data: {
+        status: "queued",
+        rawOutput: "",
+        rawExpiresAt: null,
+        error: null,
+        leaseToken: null,
+        leaseExpiresAt: null,
+        attempt: 0,
+        aggregateVersion,
+      },
+    });
+    if (updated.count !== 1) return false;
+    const job = await tx.genesisJob.updateMany({
+      where: { genesisTaskId: id, nodeKey: "legacy-world-deck" },
+      data: {
+        status: "queued",
+        error: null,
+        leaseToken: null,
+        leaseExpiresAt: null,
+        completedAt: null,
+        attempt: 0,
+      },
+    });
+    if (job.count !== 1) throw new Error("创世任务缺少持久作业");
+    await tx.genesisOutbox.create({
+      data: {
+        taskId: id,
+        aggregateVersion,
+        eventType: "task_retried",
+        payloadProjection: { status: "queued", stage: current.stage },
+      },
+    });
+    return true;
   });
-  if (updated.count !== 1) {
+  if (!retried) {
     return NextResponse.json({ error: "任务当前不可重试" }, { status: 409 });
   }
-  ensureGenesisTaskRunning(id);
+  wakeGenesisScheduler();
   return NextResponse.json({ ok: true }, { status: 202 });
 });

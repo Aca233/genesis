@@ -14,6 +14,7 @@ import {
   RANK_LABELS,
   RELATION_LABELS,
   CARD_KEY_LABELS,
+  minimumMajorGodCount,
   removeCreatorMajorGod,
 } from "@/components/genesis/deck-utils";
 import { DeckCard, GroupHeader } from "@/components/genesis/DeckCard";
@@ -33,6 +34,8 @@ import {
 } from "@/components/genesis/card-editors";
 import { MajorCharacterEditor } from "@/components/genesis/MajorCharacterEditor";
 import { TemporalCalibrationCard } from "@/components/genesis/TemporalCalibrationCard";
+import { GenesisIntentSummary } from "@/components/genesis/GenesisIntentSummary";
+import { GenesisAuditWarnings } from "@/components/genesis/GenesisAuditWarnings";
 import { GenesisCeremony } from "@/components/genesis/GenesisCeremony";
 import { canEmbarkMode } from "@/components/genesis/embark-policy";
 import {
@@ -46,6 +49,8 @@ import {
 import { streamNarration } from "@/components/play/sse-client";
 import { PlayBackground } from "@/components/play/PlayBackground";
 import { IconThemeControl, type IconThemeSummary } from "@/components/icons/IconThemeControl";
+import type { GenesisIntentContract } from "@/lib/genesis/intent";
+import type { GenesisQualityReport } from "@/lib/genesis/semantic-audit";
 
 /**
  * 卡片编辑器（M1.4）+ 创世开局演出（M1.5）
@@ -72,6 +77,8 @@ export default function GenesisEditorPage({
   // ── 世界数据 ──
   const [deck, setDeck] = useState<WorldDeck | null>(null);
   const [genesisInput, setGenesisInput] = useState("");
+  const [genesisIntent, setGenesisIntent] = useState<GenesisIntentContract | null>(null);
+  const [genesisAuditReport, setGenesisAuditReport] = useState<GenesisQualityReport | null>(null);
   const [lockedPaths, setLockedPaths] = useState<string[]>([]);
   const [revision, setRevision] = useState<string | null>(null);
   const [iconTheme, setIconTheme] = useState<IconThemeSummary | null>(null);
@@ -135,6 +142,8 @@ export default function GenesisEditorPage({
         if (parsedDeck.mode !== world.mode) throw new Error("世界模式与草稿卡组不一致");
         setDeck(parsedDeck);
         setGenesisInput(world.genesisInput ?? "");
+        setGenesisIntent(world.genesisIntent);
+        setGenesisAuditReport(world.genesisAuditReport);
         setLockedPaths(world.lockedPaths ?? []);
         setRevision(parseWorldRevision(world.updatedAt));
         setIconTheme(world.iconTheme);
@@ -212,6 +221,8 @@ export default function GenesisEditorPage({
         if (rerolled.mode !== deck.mode) throw new Error("世界模式不可更改");
         setDeck(rerolled);
         setRevision(parseWorldRevision(json.updatedAt));
+        setGenesisIntent(json.genesisIntent);
+        setGenesisAuditReport(json.auditReport);
         setNotice({ ok: true, text: `✓ ${CARD_KEY_LABELS[cardKey]}已重掷（手改字段保留）` });
       } catch (err) {
         setNotice({ ok: false, text: `重掷失败:${String(err)}` });
@@ -226,8 +237,9 @@ export default function GenesisEditorPage({
   const deleteMajorGod = useCallback(
     (index: number) => {
       if (!deck) return;
-      if (deck.majorGods.length <= 4) {
-        setNotice({ ok: false, text: "主神席不得少于 4 位，不可再删" });
+      const minimum = minimumMajorGodCount(deck);
+      if (deck.majorGods.length <= minimum) {
+        setNotice({ ok: false, text: `主神席不得少于 ${minimum} 位，不可再删` });
         return;
       }
       setOpenCard(null);
@@ -417,6 +429,9 @@ export default function GenesisEditorPage({
         </div>
       )}
 
+      {genesisIntent && <GenesisIntentSummary intent={genesisIntent} />}
+      <GenesisAuditWarnings report={genesisAuditReport} />
+
       {/* ── 时间校准（只读；仅新契约卡组携带 temporalAnchor 时展示） ── */}
       {deck.temporalAnchor && (
         <TemporalCalibrationCard
@@ -445,7 +460,11 @@ export default function GenesisEditorPage({
             <DeckCard
               title="融合公理"
               subtitle={deck.fusionAxiom.sourceIps.join(" × ")}
-              lines={deck.fusionAxiom.axioms.slice(0, 3).map((a) => clip(a))}
+              lines={[
+                clip(`已确立：${deck.fusionAxiom.establishedRules[0]}`),
+                clip(`待验证：${deck.fusionAxiom.openQuestions[0]}`),
+                clip(`硬限制：${deck.fusionAxiom.hardLimits[0]}`),
+              ]}
               lockedCount={countLockedUnder(lockedPaths, "fusionAxiom")}
               rerolling={rerolling === "fusionAxiom"}
               onOpen={() => setOpenCard({ kind: "fusionAxiom" })}

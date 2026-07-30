@@ -156,8 +156,12 @@ export const CharacterStateAtAnchorSchema = z.object({
   }).strict()).describe("锚点时刻的势力成员关系；没有则为空数组"),
   currentGoals: z.array(z.string()).max(3)
     .describe("锚点时刻正在追求的目标，中文，至多 3 条"),
+  currentObstacles: z.array(z.string()).max(3).optional()
+    .describe("锚点时刻阻碍目标的具体条件，中文，至多 3 条"),
   currentSituation: z.string().min(1)
     .describe("锚点时刻的处境，中文一句话"),
+  nextOffscreenMove: z.string().min(1).optional()
+    .describe("若玩家暂不介入，该人物下一步会自行采取的具体行动，中文一句话"),
   knowledgeHints: z.array(z.string()).max(3).optional()
     .describe("锚点时刻已知晓之事的提示，中文，至多 3 条；提示性而非权威知识边界"),
 }).strict();
@@ -171,6 +175,12 @@ export const FactionStateAtAnchorSchema = z.object({
     .describe("锚点时刻实际控制的地点稳定 ref 列表；必须解析到既有地点卡"),
   currentStrength: z.string().optional()
     .describe("锚点时刻的实力概况，中文一句话"),
+  currentObjectives: z.array(z.string()).max(3).optional()
+    .describe("锚点时刻正在推进的具体目标，中文，至多 3 条"),
+  operatingConstraints: z.array(z.string()).max(3).optional()
+    .describe("限制该势力行动的资源、规则、立场或环境条件，中文，至多 3 条"),
+  nextOffscreenMove: z.string().min(1).optional()
+    .describe("若玩家暂不介入，该势力下一步会自行采取的具体行动，中文一句话"),
 }).strict();
 export type FactionStateAtAnchor = z.infer<typeof FactionStateAtAnchorSchema>;
 
@@ -281,11 +291,34 @@ export const CosmologyCardSchema = z.object({
 });
 
 export const FusionAxiomCardSchema = z.object({
-  sourceIps: z.array(z.string()).min(2).describe("融合的IP列表"),
-  axioms: z.array(z.string()).min(1).describe("缝合公理，逐条"),
-  powerMapping: z.string().describe("力量对标表"),
-  conflictRule: z.string().describe("设定冲突时以谁为准"),
-});
+  sourceIps: z.array(z.string()).min(2),
+  establishedRules: z.array(z.string()).min(1).max(8),
+  openQuestions: z.array(z.string()).min(1).max(8),
+  hardLimits: z.array(z.string()).min(1).max(8),
+  conflictRule: z.string().min(1),
+}).strict();
+
+const LegacyFusionAxiomCardSchema = z.object({
+  sourceIps: z.array(z.string()).min(2),
+  axioms: z.array(z.string()).min(1),
+  powerMapping: z.string(),
+  conflictRule: z.string(),
+}).strict();
+
+export function normalizePersistedFusionAxiom(value: unknown): unknown {
+  const current = FusionAxiomCardSchema.safeParse(value);
+  if (current.success) return current.data;
+
+  const legacy = LegacyFusionAxiomCardSchema.safeParse(value);
+  if (!legacy.success) return value;
+  return {
+    sourceIps: legacy.data.sourceIps,
+    establishedRules: legacy.data.axioms,
+    openQuestions: [legacy.data.powerMapping],
+    hardLimits: ["旧版融合公理未记录明确限制"],
+    conflictRule: legacy.data.conflictRule,
+  };
+}
 
 export const GodVoiceSchema = z.object({
   verbalTics: z.array(z.string()).describe("语癖"),
@@ -429,6 +462,23 @@ export const EpochConflictCardSchema = z.object({
   hiddenCurrents: z.array(z.string()).describe("暗流（对玩家隐藏，作为诸神议程种子）"),
 });
 
+export const OpeningChapterBriefSchema = z.object({
+  objective: z.string().trim().min(1).max(1000)
+    .describe("第一章只需完成的具体叙事目标"),
+  viewpointCharacterRef: StableRefSchema.nullable()
+    .describe("首章限知视角人物稳定 ref；采用神视角或世界视角时为 null"),
+  openingConstraint: z.string().trim().min(1).max(1000)
+    .describe("首章开场约束：从具体行动、后果或异常切入，避免百科式介绍"),
+  endingConstraint: z.string().trim().min(1).max(1000)
+    .describe("首章收束约束：只推进一个小因果节点并留下可继续的选择或问题"),
+  readerKnows: z.array(z.string().trim().min(1).max(300)).max(20),
+  viewpointKnows: z.array(z.string().trim().min(1).max(300)).max(20),
+  mustHide: z.array(z.string().trim().min(1).max(300)).max(20),
+  hintOnly: z.array(z.string().trim().min(1).max(300)).max(20),
+  forbiddenDevelopments: z.array(z.string().trim().min(1).max(300)).max(20),
+}).strict();
+export type OpeningChapterBrief = z.infer<typeof OpeningChapterBriefSchema>;
+
 export const EventConditionSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("entity_status"),
@@ -543,6 +593,8 @@ const SharedWorldDeckShape = {
     .describe("锚点关系（阶段 2，有界）：每名 active 人物 1–4 条锚点相关关系；指向非 active 实体的追念关系必须 memorial=true；所有 ref 必须解析到既有卡。旧卡组（无此键）按旧行为解析"),
   places: z.array(PlaceCardSchema),
   epochConflict: EpochConflictCardSchema,
+  openingChapterBrief: OpeningChapterBriefSchema.optional()
+    .describe("创世到正文的首章桥接约束；新创世必须生成，旧卡组可省略"),
   canonEvents: z.array(CanonFutureEventSchema).min(3).max(5).optional()
     .describe("将临之事：作者侧未来候选事件，对玩家隐藏"),
   style: StyleCardSchema,
@@ -553,13 +605,13 @@ const PantheonWorldDeckObjectSchema = z.object({
   mode: z.literal("pantheon"),
   ...SharedWorldDeckShape,
   playerGod: PlayerGodCardSchema,
-  majorGods: z.array(MajorGodCardSchema).min(4).max(10),
+  majorGods: z.array(MajorGodCardSchema).min(1).max(10),
 }).strict();
 
 const CreatorWorldDeckObjectSchema = z.object({
   mode: z.literal("creator"),
   ...SharedWorldDeckShape,
-  majorGods: z.array(CreatorMajorGodCardSchema).min(4).max(10),
+  majorGods: z.array(CreatorMajorGodCardSchema).min(1).max(10),
 }).strict();
 
 /** Compatibility-only cards used after a positively identified pre-ability draft. */
@@ -601,11 +653,13 @@ type DeckReferenceGraph = {
   factions: Array<{ ref: string }>;
   majorCharacters: Array<{
     ref: string;
+    statusAtAnchor?: string;
     abilities: Array<{ ref: string }>;
     racialOverrides: Array<{ ref: string }>;
   }>;
   places: Array<{ ref: string }>;
   canonEvents?: Array<{ ref: string }>;
+  openingChapterBrief?: { viewpointCharacterRef: string | null };
 };
 
 function addUniqueRef(
@@ -835,18 +889,50 @@ function validateRelationsAtAnchor(deck: RelationsAtAnchorDeckView, ctx: z.Refin
   });
 }
 
+function validateOpeningChapterBrief(deck: DeckReferenceGraph, ctx: z.RefinementCtx): void {
+  const viewpointRef = deck.openingChapterBrief?.viewpointCharacterRef;
+  if (viewpointRef === undefined || viewpointRef === null) return;
+  const viewpoint = deck.majorCharacters.find((character) => character.ref === viewpointRef);
+  if (viewpoint === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["openingChapterBrief", "viewpointCharacterRef"],
+      message: `首章视角人物引用 "${viewpointRef}" 未解析到主要人物卡`,
+    });
+    return;
+  }
+  if ((viewpoint.statusAtAnchor ?? "active") !== "active") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["openingChapterBrief", "viewpointCharacterRef"],
+      message: `首章视角人物 "${viewpointRef}" 在锚点时刻不是 active`,
+    });
+  }
+}
+
 /** Single superRefine entry combining reference uniqueness and the canon future axis. */
 function validateDeckIntegrity(
   deck: DeckReferenceGraph & {
     canonEvents?: CanonFutureEvent[];
-    temporalAnchor?: { anchorOrdinal: number };
+    temporalAnchor?: {
+      anchorOrdinal: number;
+      source: { basis: "original" | "single_ip" | "multi_ip" };
+    };
     relationsAtAnchor?: Array<{ sourceRef: string; targetRef: string }>;
   },
   ctx: z.RefinementCtx,
 ): void {
+  if (deck.temporalAnchor?.source.basis === "original" && deck.majorGods.length < 4) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["majorGods"],
+      message: "原创世界至少需要 4 位主神",
+    });
+  }
   validateModeAwareDeckReferenceUniqueness(deck, ctx);
   validateCanonFutureAxis(deck, ctx);
   validateRelationsAtAnchor(deck, ctx);
+  validateOpeningChapterBrief(deck, ctx);
 }
 
 /** Strict contracts for new Genesis output and rerolls. */
@@ -959,10 +1045,14 @@ export function isLegacyWorldDeck(raw: unknown): boolean {
 function normalizePersistedPantheonDeck(raw: unknown): unknown {
   if (!isLooseRecord(raw)) return raw;
   const withMode = hasOwn(raw, "mode") ? raw : { mode: "pantheon", ...raw };
-  if (!Array.isArray(withMode.places)) return withMode;
-  return {
+  const withFusion: LooseRecord = {
     ...withMode,
-    places: withMode.places.map((rawPlace, index) => {
+    fusionAxiom: normalizePersistedFusionAxiom(withMode.fusionAxiom),
+  };
+  if (!Array.isArray(withFusion.places)) return withFusion;
+  return {
+    ...withFusion,
+    places: withFusion.places.map((rawPlace, index) => {
       const place = asLooseRecord(rawPlace);
       return hasOwn(place, "ref") ? place : { ...place, ref: `place-${index + 1}` };
     }),
@@ -994,6 +1084,7 @@ export function normalizeLegacyWorldDeck(raw: unknown): LegacyWorldDeck {
   return LegacyWorldDeckSchema.parse({
     ...deck,
     mode: "pantheon",
+    fusionAxiom: normalizePersistedFusionAxiom(deck.fusionAxiom),
     playerGod: {
       ...playerGod,
       ...(hasOwn(playerGod, "ref") ? {} : { ref: "player-god-1" }),

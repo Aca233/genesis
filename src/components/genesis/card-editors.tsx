@@ -74,8 +74,9 @@ export function FusionAxiomEditor({ deck, lockedPaths, onEdit }: EditorProps) {
   return (
     <>
       <ListField label="融合的 IP" path="fusionAxiom.sourceIps" values={f.sourceIps} {...common} />
-      <ListField label="缝合公理（逐条）" path="fusionAxiom.axioms" values={f.axioms} {...common} />
-      <TextAreaField label="力量对标表" path="fusionAxiom.powerMapping" value={f.powerMapping} {...common} />
+      <ListField label="已确立规则" path="fusionAxiom.establishedRules" values={f.establishedRules} {...common} />
+      <ListField label="待验证问题" path="fusionAxiom.openQuestions" values={f.openQuestions} {...common} />
+      <ListField label="硬性限制" path="fusionAxiom.hardLimits" values={f.hardLimits} {...common} />
       <TextAreaField label="设定冲突时以谁为准" path="fusionAxiom.conflictRule" value={f.conflictRule} rows={2} {...common} />
     </>
   );
