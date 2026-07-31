@@ -22,7 +22,7 @@ vi.mock("./task-runner", () => ({ ensureGenesisTaskRunning: mocks.ensure }));
 vi.mock("./v2/primary-runner", () => ({ ensureGenesisV2PrimaryJobRunning: mocks.primaryEnsure }));
 vi.mock("./v2/shadow-runner", () => ({ ensureGenesisShadowJobRunning: mocks.shadowEnsure }));
 
-import { scanGenesisJobs } from "./scheduler";
+import { scanGenesisJobs, wakeGenesisScheduler } from "./scheduler";
 
 describe("durable genesis scheduler", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -95,5 +95,21 @@ describe("durable genesis scheduler", () => {
       aggregateVersion: 5,
       eventType: "provider_probe_queued",
     }) });
+  });
+
+  it("扫描进行中收到阶段完成通知时，当前扫描结束后立即补扫一次", async () => {
+    let releaseFirstScan!: (value: never[]) => void;
+    mocks.waitingFindMany
+      .mockImplementationOnce(() => new Promise<never[]>((resolve) => { releaseFirstScan = resolve; }))
+      .mockResolvedValue([]);
+    mocks.findMany.mockResolvedValue([]);
+
+    wakeGenesisScheduler();
+    wakeGenesisScheduler();
+    expect(mocks.waitingFindMany).toHaveBeenCalledTimes(1);
+
+    releaseFirstScan([]);
+
+    await vi.waitFor(() => expect(mocks.waitingFindMany).toHaveBeenCalledTimes(2));
   });
 });

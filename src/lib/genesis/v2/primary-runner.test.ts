@@ -264,21 +264,21 @@ describe("Genesis V2 primary runner", () => {
     expect(mocks.jobUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("蓝图节点冻结意图并原子接受中间 Artifact", async () => {
+  it("蓝图节点在一次模型调用中生成并冻结意图，然后立即唤醒下游", async () => {
     configureJob("blueprint", null);
     const blueprint = splitDeck(completeDeck()).blueprint;
-    mocks.completeStructured.mockResolvedValue(blueprint);
+    mocks.completeStructured.mockResolvedValue({ intentContract: intent, blueprint });
 
     await runGenesisV2PrimaryJob("job-blueprint");
 
-    expect(mocks.generateIntent).toHaveBeenCalledOnce();
+    expect(mocks.generateIntent).not.toHaveBeenCalled();
+    expect(mocks.completeStructured).toHaveBeenCalledOnce();
+    expect(mocks.compileBundle).toHaveBeenCalledWith(expect.objectContaining({
+      stageId: "blueprint",
+      intentContract: null,
+    }));
     expect(mocks.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        OR: expect.arrayContaining([
-          expect.objectContaining({ intentContract: expect.any(Object) }),
-        ]),
-      }),
-      data: expect.objectContaining({ intentContract: intent, stage: "laws" }),
+      data: expect.objectContaining({ intentContract: intent }),
     }));
     expect(mocks.artifactCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({ stageKey: "blueprint", status: "accepted", visibility: "primary" }),
@@ -287,6 +287,7 @@ describe("Genesis V2 primary runner", () => {
     expect(mocks.outboxCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({ eventType: "v2_stage_completed" }),
     });
+    expect(mocks.wakeScheduler).toHaveBeenCalledOnce();
   });
 
   it("人物汇合通过质量门后在同一事务封存 core、创建世界并完成任务", async () => {
@@ -313,6 +314,9 @@ describe("Genesis V2 primary runner", () => {
     await runGenesisV2PrimaryJob("job-characters");
 
     expect(mocks.validateDeck).toHaveBeenCalledWith(deck, "pantheon", null);
+    expect(mocks.enforceQuality).toHaveBeenCalledWith(expect.objectContaining({
+      auditPolicy: "risk_based",
+    }));
     expect(mocks.artifactUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ stageKey: "playable_core", visibility: "primary" }),
     }));

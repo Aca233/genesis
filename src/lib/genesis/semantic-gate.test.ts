@@ -11,6 +11,7 @@ import {
   enforceGenesisQuality,
   GenesisSemanticGateError,
   GenesisSemanticRepairResultSchema,
+  requiresGenesisSemanticAudit,
 } from "./semantic-gate";
 
 const intent: GenesisIntentContract = {
@@ -79,6 +80,36 @@ function qualityInput() {
 }
 
 describe("enforceGenesisQuality", () => {
+  it("极速策略仅让无外部约束的简单创世主世界跳过模型审计", async () => {
+    const input = {
+      ...qualityInput(),
+      deck: { ...completeCreatorDeck(), fusionAxiom: null },
+      auditPolicy: "risk_based" as const,
+    };
+    const audit = vi.fn();
+    const repair = vi.fn();
+    const validate = vi.fn();
+
+    expect(requiresGenesisSemanticAudit(input)).toBe(false);
+    expect(requiresGenesisSemanticAudit({ ...input, lorebookExcerpts: "不可违背的旧史" })).toBe(true);
+    expect(requiresGenesisSemanticAudit({
+      ...input,
+      intent: { ...input.intent, sourceBasis: "single_ip", sourceIps: ["测试原作"] },
+    })).toBe(true);
+
+    const result = await enforceGenesisQuality(input, { audit, repair, validate });
+
+    expect(result.deck).toBe(input.deck);
+    expect(result.report).toMatchObject({
+      verdict: "pass",
+      issues: [],
+      meta: { repaired: false, auditPasses: 0 },
+    });
+    expect(audit).not.toHaveBeenCalled();
+    expect(repair).not.toHaveBeenCalled();
+    expect(validate).not.toHaveBeenCalled();
+  });
+
   it("兼容模型把补丁值直接作为 JSON 值或 value 字段返回", () => {
     expect(GenesisSemanticRepairResultSchema.parse({
       operations: [

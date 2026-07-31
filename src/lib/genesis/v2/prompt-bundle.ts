@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { WorldMode } from "@/lib/world-mode";
-import { getGenesisV2StageOutputSchema } from "./stage-output";
+import {
+  GenesisV2BlueprintGenerationOutputSchema,
+  getGenesisV2StageOutputSchema,
+} from "./stage-output";
 import {
   getGenesisV2StageContract,
   type GenesisV2StageId,
@@ -211,6 +214,9 @@ export function compileGenesisV2PromptBundle(
   input: CompileGenesisV2PromptBundleInput,
 ): GenesisV2PromptBundle {
   const contract = getGenesisV2StageContract(input.stageId);
+  const outputSchema = input.stageId === "blueprint" && input.intentContract == null
+    ? GenesisV2BlueprintGenerationOutputSchema
+    : getGenesisV2StageOutputSchema(contract.id, input.mode);
   const accepted = bindAcceptedDependencies(
     input.stageId,
     contract.dependencies,
@@ -252,7 +258,7 @@ export function compileGenesisV2PromptBundle(
       allowedTargetKinds: contract.allowedTargetKinds,
       contractVersion: contract.contractVersion,
       evidenceSlice: contract.evidenceSlice,
-      outputJsonSchema: z.toJSONSchema(getGenesisV2StageOutputSchema(contract.id, input.mode)),
+      outputJsonSchema: z.toJSONSchema(outputSchema),
       outputRules: stageOutputRules(contract.id),
       outputSchemaId: contract.outputSchemaId,
       ownedFields: contract.ownedFields,

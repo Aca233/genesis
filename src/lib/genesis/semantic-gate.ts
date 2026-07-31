@@ -24,7 +24,7 @@ import {
   GENESIS_MODEL_OUTPUT_MAX_BYTES,
 } from "./limits";
 
-type GenesisQualityGateInput = {
+export type GenesisQualityGateInput = {
   deck: WorldDeck;
   mode: WorldMode;
   decree: string;
@@ -36,6 +36,7 @@ type GenesisQualityGateInput = {
   lockedPaths?: string[];
   currentDeck?: WorldDeck;
   owner?: CompletionRequest["owner"];
+  auditPolicy?: "always" | "risk_based";
   onStage?: (stage: "audit" | "semantic_repair") => Promise<void> | void;
 };
 
@@ -126,6 +127,19 @@ export const defaultGenesisQualityGateDeps: GenesisQualityGateDeps = {
   repair: (slot, request) => completeStructured(slot, request),
   validate: validateGenesisDeck,
 };
+
+export function requiresGenesisSemanticAudit(input: GenesisQualityGateInput): boolean {
+  if (input.auditPolicy !== "risk_based") return true;
+  if (input.mode !== "creator") return true;
+  if (input.intent.sourceBasis !== "original") return true;
+  if (input.lorebookExcerpts?.trim()) return true;
+  if (input.materialSnapshot?.items.length) return true;
+  if (input.materialConstraints?.trim()) return true;
+  if (input.currentDeck || input.lockedPaths?.length) return true;
+  if (input.deck.fusionAxiom !== null) return true;
+  if (input.decree.trim().length > 600) return true;
+  return false;
+}
 
 export class GenesisSemanticGateError extends Error {
   override name = "GenesisSemanticGateError";
@@ -518,6 +532,22 @@ export async function enforceGenesisQuality(
   deps: GenesisQualityGateDeps = defaultGenesisQualityGateDeps,
 ): Promise<{ deck: WorldDeck; report: GenesisQualityReport }> {
   const startedAt = Date.now();
+  if (!requiresGenesisSemanticAudit(input)) {
+    return {
+      deck: input.deck,
+      report: {
+        verdict: "pass",
+        issues: [],
+        meta: {
+          initialErrorCount: 0,
+          initialWarningCount: 0,
+          repaired: false,
+          auditPasses: 0,
+          durationMs: Math.max(0, Date.now() - startedAt),
+        },
+      },
+    };
+  }
   await input.onStage?.("audit");
   const initialReport = await deps.audit(input.deck, auditOptions(input));
 

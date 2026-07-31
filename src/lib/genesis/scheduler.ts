@@ -5,6 +5,7 @@ import { ensureGenesisShadowJobRunning } from "./v2/shadow-runner";
 
 const POLL_INTERVAL_MS = 2_000;
 let scanPromise: Promise<void> | null = null;
+let rescanRequested = false;
 
 export async function scanGenesisJobs(now = new Date()): Promise<void> {
   await prisma.$transaction(async (tx) => {
@@ -86,8 +87,16 @@ export async function scanGenesisJobs(now = new Date()): Promise<void> {
 }
 
 export function wakeGenesisScheduler(): void {
-  if (scanPromise) return;
-  scanPromise = scanGenesisJobs().catch(() => {}).finally(() => { scanPromise = null; });
+  if (scanPromise) {
+    rescanRequested = true;
+    return;
+  }
+  scanPromise = scanGenesisJobs().catch(() => {}).finally(() => {
+    scanPromise = null;
+    if (!rescanRequested) return;
+    rescanRequested = false;
+    wakeGenesisScheduler();
+  });
 }
 
 export function startGenesisScheduler(): void {

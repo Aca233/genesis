@@ -156,4 +156,17 @@ describe("Genesis V2 Prompt Bundle compiler", () => {
     expect(bundle.blocks.stageWave).toContain("anchorOrdinal");
     expect(bundle.blocks.stageWave).toContain("never flatten anchor fields");
   });
+
+  it("首轮蓝图缺少冻结意图时要求同一响应返回 intentContract 与 blueprint", () => {
+    const bundle = compileGenesisV2PromptBundle({
+      ...commonInput,
+      stageId: "blueprint",
+      intentContract: null,
+      acceptedDependencies: [],
+      dynamic: { ...commonInput.dynamic, nodeKey: "task-1:blueprint" },
+    });
+
+    expect(bundle.blocks.stageWave).toContain("intentContract");
+    expect(bundle.blocks.stageWave).toContain("blueprint");
+  });
 });

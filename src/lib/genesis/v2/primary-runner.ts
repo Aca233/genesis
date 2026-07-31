@@ -14,8 +14,11 @@ import { materialConstraintsPrompt } from "@/lib/materials/prompt";
 import { GenesisMaterialSnapshotSchema } from "@/lib/materials/types";
 import { WorldModeSchema } from "@/lib/world-mode";
 import { validateGenesisDeck } from "../generate";
-import { generateGenesisIntent, GenesisIntentGenerationError } from "../intent-generator";
-import { parseGenesisIntent, type GenesisIntentContract } from "../intent";
+import {
+  assertGenesisIntentForMode,
+  parseGenesisIntent,
+  type GenesisIntentContract,
+} from "../intent";
 import { countGenesisSemanticIssues, recordGenesisQualityEvent } from "../quality-observability";
 import { GenesisSemanticAuditError } from "../semantic-audit";
 import {
@@ -32,6 +35,7 @@ import { compileGenesisV2PromptBundle } from "./prompt-bundle";
 import type { DeterministicPreflightResult } from "./preflight";
 import {
   assembleGenesisV2WorldDeck,
+  GenesisV2BlueprintGenerationOutputSchema,
   getGenesisV2StageOutputSchema,
   sanitizeGenesisV2CharactersTemporalOutput,
   type GenesisV2StageOutputs,
@@ -165,7 +169,7 @@ export async function claimGenesisV2PrimaryJob(jobId: string, now = new Date()):
 }
 
 async function resolveIntent(job: PrimaryJob): Promise<{
-  intent: GenesisIntentContract;
+  intent: GenesisIntentContract | null;
   entries: ReturnType<typeof parseStWorldbook>;
   excerpts: string | undefined;
 }> {
@@ -176,43 +180,7 @@ async function resolveIntent(job: PrimaryJob): Promise<{
   if (stageIdFromNodeKey(job.nodeKey) !== "blueprint") {
     throw new Error("Genesis V2 缺少冻结意图契约");
   }
-  const mode = WorldModeSchema.parse(job.task.mode);
-  const intent = await generateGenesisIntent({
-    mode,
-    decree: job.task.decree,
-    userId: job.task.userId,
-    lorebookExcerpts: excerpts,
-    owner: {
-      kind: "genesis_v2_job",
-      id: job.id,
-      genesisTaskId: job.genesisTaskId,
-      genesisJobId: job.id,
-      leaseEpoch: job.leaseEpoch,
-      leaseExpiresAt: job.leaseExpiresAt.toISOString(),
-      budgetScope: "primary",
-    },
-  });
-  const updated = await prisma.genesisTask.updateMany({
-    where: {
-      id: job.genesisTaskId,
-      engineVersion: "dag-v2",
-      OR: [
-        { intentContract: { equals: Prisma.DbNull } },
-        { intentContract: { equals: Prisma.JsonNull } },
-      ],
-    },
-    data: { intentContract: intent as unknown as Prisma.InputJsonValue, stage: "laws" },
-  });
-  if (updated.count !== 1) {
-    const current = await prisma.genesisTask.findUnique({
-      where: { id: job.genesisTaskId },
-      select: { intentContract: true },
-    });
-    const persisted = parseGenesisIntent(current?.intentContract);
-    if (!persisted) throw new Error("Genesis V2 意图冻结竞争失败");
-    return { intent: persisted, entries, excerpts };
-  }
-  return { intent, entries, excerpts };
+  return { intent: null, entries, excerpts };
 }
 
 export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
@@ -285,20 +253,32 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
       leaseExpiresAt: job.leaseExpiresAt.toISOString(),
       budgetScope: "primary" as const,
     };
-    const generatedContent = await completeStructured("backstage", {
+    const generatingIntent = stageId === "blueprint" && intent === null;
+    const stageBudget = preflight.budgetPlan.stages
+      .find((budget) => budget.stage === stageId)?.maxOutputTokens;
+    const generated = await completeStructured("backstage", {
       task: "genesis",
       userId: job.task.userId,
       owner,
       system: bundle.blocks.globalCommon,
       stableContext: [bundle.blocks.globalWave, bundle.blocks.worldCommon, bundle.blocks.stageWave, bundle.blocks.worldStage],
       user: bundle.blocks.dynamicTail,
-      schema: getGenesisV2StageOutputSchema(stageId, mode),
+      schema: generatingIntent
+        ? GenesisV2BlueprintGenerationOutputSchema
+        : getGenesisV2StageOutputSchema(stageId, mode),
       maxAttempts: 2,
       transportMaxAttempts: 2,
       allowTransportFallback: true,
-      maxTokens: preflight.budgetPlan.stages.find((budget) => budget.stage === stageId)?.maxOutputTokens,
+      maxTokens: generatingIntent ? Math.max(stageBudget ?? 0, 6_000) : stageBudget,
       cache: { namespace: bundle.routingNamespace },
     }) as Record<string, unknown>;
+    const generatedBlueprint = generatingIntent
+      ? GenesisV2BlueprintGenerationOutputSchema.parse(generated)
+      : null;
+    const effectiveIntent = generatedBlueprint?.intentContract ?? intent;
+    if (!effectiveIntent) throw new Error("Genesis V2 蓝图未返回冻结意图契约");
+    if (generatedBlueprint) assertGenesisIntentForMode(effectiveIntent, mode);
+    const generatedContent = generatedBlueprint?.blueprint ?? generated;
     const dependencyContent = new Map(dependencies.map((dependency) => [dependency.stageKey, dependency.content]));
     const content = stageId === "characters"
       ? sanitizeGenesisV2CharactersTemporalOutput(
@@ -344,11 +324,12 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
       deck: checkedDeck,
       mode,
       decree: job.task.decree,
-      intent,
+      intent: effectiveIntent,
       userId: job.task.userId,
       lorebookExcerpts: excerpts,
       materialSnapshot,
       materialConstraints: materialConstraintsPrompt(materialSnapshot, mode),
+      auditPolicy: "risk_based",
       owner,
       onStage: async (stage) => {
         await prisma.genesisTask.updateMany({
@@ -436,7 +417,7 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
             userId: job.task.userId,
             name: quality.deck.worldName,
             genesisInput: job.task.decree,
-            genesisIntent: intent as unknown as Prisma.InputJsonValue,
+            genesisIntent: effectiveIntent as unknown as Prisma.InputJsonValue,
             mode,
             status: "draft",
             draftDeck: quality.deck as unknown as Prisma.InputJsonValue,
@@ -490,7 +471,13 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
             aggregateVersion: activeTask.aggregateVersion,
             status: { in: ["running", "repairing"] },
           },
-          data: { aggregateVersion, error: null },
+          data: {
+            aggregateVersion,
+            error: null,
+            ...(generatingIntent
+              ? { intentContract: effectiveIntent as unknown as Prisma.InputJsonValue }
+              : {}),
+          },
         });
         if (advanced.count !== 1) throw new Error("Genesis V2 阶段提交竞争失败");
         await tx.genesisOutbox.create({
@@ -518,6 +505,10 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
       });
       if (completedJob.count !== 1) throw new Error("Genesis V2 主节点租约已失效");
     }, { isolationLevel: "Serializable" });
+    if (!quality) {
+      const { wakeGenesisScheduler } = await import("../scheduler");
+      wakeGenesisScheduler();
+    }
   } catch (error) {
     if (error instanceof GenesisSemanticGateError) {
       recordGenesisQualityEvent({
@@ -527,8 +518,7 @@ export async function runGenesisV2PrimaryJob(jobId: string): Promise<void> {
         issueCounts: countGenesisSemanticIssues(error.report.issues),
       });
     }
-    const terminalQualityFailure = error instanceof GenesisSemanticGateError
-      || error instanceof GenesisIntentGenerationError;
+    const terminalQualityFailure = error instanceof GenesisSemanticGateError;
     const transportFailure = classifyTransportFailure(error);
     const waitingForProvider = !terminalQualityFailure && (
       error instanceof LlmCircuitOpenError

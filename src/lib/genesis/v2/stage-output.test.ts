@@ -6,6 +6,7 @@ import {
 import type { WorldDeck } from "@/lib/cards/schemas";
 import {
   assembleGenesisV2WorldDeck,
+  GenesisV2BlueprintGenerationOutputSchema,
   getGenesisV2StageOutputSchema,
   sanitizeGenesisV2CharactersTemporalOutput,
   type GenesisV2StageOutputs,
@@ -57,6 +58,31 @@ function splitDeck(deck: WorldDeck): GenesisV2StageOutputs {
 }
 
 describe("Genesis V2 stage output contracts", () => {
+  it("蓝图首轮可在同一个结构化响应中返回冻结意图与蓝图", () => {
+    const blueprint = splitDeck(completeCreatorDeck()).blueprint;
+
+    expect(GenesisV2BlueprintGenerationOutputSchema.parse({
+      intentContract: {
+        sourceBasis: "original",
+        sourceIps: [],
+        explicitPremise: ["群星正在熄灭"],
+        narrativeCenter: { identity: "余烬守望者", role: "凡人主角", startState: "守在最后一座灯塔" },
+        playerRole: {
+          type: "external_creator",
+          narrativeFunction: "external_author",
+          mustNotReplaceProtagonist: false,
+        },
+        forbiddenExpansions: [],
+        factsAtAnchor: [],
+        futureOnly: [],
+        fusionBoundaries: [],
+        uncertaintyPolicy: "omit_or_generalize",
+        corePressures: ["恒星火种即将耗尽"],
+      },
+      blueprint,
+    })).toMatchObject({ blueprint });
+  });
+
   it.each([
     ["pantheon", completeDeck()],
     ["creator", completeCreatorDeck()],

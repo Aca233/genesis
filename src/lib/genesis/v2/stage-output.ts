@@ -22,6 +22,7 @@ import {
   type WorldDeck,
 } from "@/lib/cards/schemas";
 import type { WorldMode } from "@/lib/world-mode";
+import { GenesisIntentContractSchema } from "../intent";
 import type { GenesisV2StageId } from "./stage-registry";
 
 const WorldModeLiteralSchema = z.enum(["pantheon", "creator"]);
@@ -42,6 +43,11 @@ export const GenesisV2BlueprintOutputSchema = z.object({
   theme: ThemeCardSchema,
   canonBrief: z.string().min(1),
   slotBriefs: z.record(z.string(), SlotBriefSchema),
+}).strict();
+
+export const GenesisV2BlueprintGenerationOutputSchema = z.object({
+  intentContract: GenesisIntentContractSchema,
+  blueprint: GenesisV2BlueprintOutputSchema,
 }).strict();
 
 const SharedPantheonDomainShape = {
