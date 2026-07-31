@@ -234,6 +234,38 @@ describe("complete transport attempts", () => {
     expect(mocks.complete).not.toHaveBeenCalled();
   });
 
+  it("业务 deadline 会中止正在读取的完整响应传输", async () => {
+    const controller = new AbortController();
+    let transportStarted!: () => void;
+    const started = new Promise<void>((resolve) => { transportStarted = resolve; });
+    mocks.stream.mockImplementation(async function* (
+      _slot: unknown,
+      _request: unknown,
+      _apiKey: unknown,
+      options: { signal?: AbortSignal },
+    ) {
+      transportStarted();
+      await new Promise<never>((_resolve, reject) => {
+        options.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true });
+      });
+    });
+
+    const pending = complete("backstage", {
+      task: "settlement",
+      userId: "test-user",
+      messages: [{ role: "user", content: "settle" }],
+    }, {
+      maxAttempts: 1,
+      allowFallback: false,
+      signal: controller.signal,
+    });
+    await started;
+    controller.abort(new Error("世界整理模型响应超时，请从当前步骤重试"));
+
+    await expect(pending).rejects.toThrow("世界整理模型响应超时");
+    expect(mocks.stream).toHaveBeenCalledTimes(1);
+  });
+
   it("终局未知的断流失败关闭端点且不启动第二个物理请求", async () => {
     mocks.stream.mockImplementationOnce(async function* () {
       throw new Error("terminated");

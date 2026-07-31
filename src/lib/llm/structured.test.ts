@@ -23,6 +23,7 @@ describe("completeStructured attempts", () => {
   });
   it("将单次传输限制透传到模型网关", async () => {
     mocks.complete.mockResolvedValue('{"ok":true}');
+    const controller = new AbortController();
 
     await completeStructured("backstage", {
       task: "settlement",
@@ -33,6 +34,7 @@ describe("completeStructured attempts", () => {
       maxAttempts: 1,
       transportMaxAttempts: 1,
       allowTransportFallback: false,
+      signal: controller.signal,
     });
 
     expect(mocks.complete).toHaveBeenCalledTimes(1);
@@ -40,7 +42,7 @@ describe("completeStructured attempts", () => {
       "backstage",
       // 归因:userId 转发进网关请求
       expect.objectContaining({ task: "settlement", userId: "test-user" }),
-      { maxAttempts: 1, allowFallback: false },
+      { maxAttempts: 1, allowFallback: false, signal: controller.signal },
     );
   });
 

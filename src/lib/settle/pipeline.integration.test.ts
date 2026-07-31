@@ -11,11 +11,11 @@ const responses = vi.hoisted(() => ({
   canonEventUpdates: [] as unknown[],
   divineCostAudit: undefined as undefined | unknown[],
   modelDelayMs: 0,
-  beforeModelResponse: undefined as undefined | (() => void | Promise<void>),
+  beforeModelResponse: undefined as undefined | ((request: { signal?: AbortSignal }) => void | Promise<void>),
 }));
 vi.mock("@/lib/llm/structured", () => ({
-  completeStructured: vi.fn(async (_slot: string, request: { task: string; user: string }) => {
-    await responses.beforeModelResponse?.();
+  completeStructured: vi.fn(async (_slot: string, request: { task: string; user: string; signal?: AbortSignal }) => {
+    await responses.beforeModelResponse?.(request);
     if (responses.modelDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, responses.modelDelayMs));
     if (request.task !== "settlement") throw new Error(`unexpected ${request.task}`);
     return {
@@ -54,6 +54,35 @@ async function fixture() {
 }
 
 async function settle(id: string) { for await (const _progress of settleChapter(id)) void _progress; }
+
+it("模型阶段超过硬时限后中止并恢复为可重试检查点", async () => {
+  const data = await fixture();
+  const token = crypto.randomUUID();
+  const { claimWorldOperation } = await import("@/lib/reality/operation-lock");
+  await expect(claimWorldOperation(prisma, data.world.id, "settlement", token)).resolves.toEqual({ acquired: true });
+  responses.beforeModelResponse = async (request) => {
+    await new Promise<never>((_resolve, reject) => {
+      request.signal?.addEventListener("abort", () => reject(request.signal?.reason), { once: true });
+    });
+  };
+
+  try {
+    await expect((async () => {
+      for await (const _progress of settleChapter(data.chapter.id, {
+        worldId: data.world.id,
+        token,
+        claimed: true,
+        heartbeatMs: 60_000,
+        modelTimeoutMs: 10,
+      })) void _progress;
+    })()).rejects.toThrow("世界整理模型响应超时");
+    expect((await prisma.chapter.findUniqueOrThrow({ where: { id: data.chapter.id } })).settleState)
+      .toBe("open");
+  } finally {
+    responses.beforeModelResponse = undefined;
+    await prisma.world.delete({ where: { id: data.world.id } });
+  }
+});
 
 describe("章末 pipeline 习得族群技艺", () => {
   it("保存章节、正文消息和尺度，重跑 dedupe 不重复习得", async () => {

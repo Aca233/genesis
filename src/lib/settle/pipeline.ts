@@ -66,6 +66,7 @@ const STEP_ORDER: SettleStep[] = [
 
 const MODEL_LEASE_MS = 15 * 60 * 1000;
 const MODEL_WAIT_MS = 250;
+const MODEL_TIMEOUT_MS = 8 * 60 * 1000;
 const MODEL_STATE_PREFIX = "settling:model:";
 const ENTITY_CONTEXT_MAX_SECTIONS = 8;
 const ENTITY_CONTEXT_MAX_TITLE_LENGTH = 80;
@@ -165,6 +166,8 @@ export type SettlementOperationLease = {
   userId?: string;
   /** Test-only override; production uses OPERATION_LEASE_RENEW_MS. */
   heartbeatMs?: number;
+  /** Test-only override; production caps the model stage below the route deadline. */
+  modelTimeoutMs?: number;
 };
 
 type SettlementLeaseGuard = {
@@ -265,6 +268,7 @@ export async function* settleChapter(
       token,
       leaseGuard.assertOwned,
       lease?.userId ?? chapter.timeline.world.userId,
+      lease?.modelTimeoutMs ?? MODEL_TIMEOUT_MS,
     );
   } finally {
     leaseGuard?.stop();
@@ -281,6 +285,7 @@ async function* settleChapterWithLease(
   token: string,
   assertLeaseOwned: () => Promise<void>,
   userId: string,
+  modelTimeoutMs: number,
 ): AsyncGenerator<SettleProgress> {
   const chapter = await prisma.chapter.findUnique({
     where: { id: chapterId },
@@ -347,19 +352,28 @@ async function* settleChapterWithLease(
           parsedReality.success ? parsedReality.data : undefined,
           temporalFailFast ? settlementTimeLabel : null,
         );
-        settlement = await completeStructured("backstage", {
-          task: "settlement",
-          userId,
-          system: settlementSystem(mode),
-          user: settlementUserPrompt(context),
-          schema: chapterSettlementSchema(mode),
-          maxTokens: 16000,
-          maxAttempts: 1,
-          transportMaxAttempts: 1,
-          allowTransportFallback: false,
-          // v4：输出 schema 新增 chronicle.eraDigest，防旧缓存响应缺该字段形状。
-          cache: { namespace: `settlement:v4:${mode}` },
-        });
+        const modelController = new AbortController();
+        const modelTimeout = setTimeout(() => {
+          modelController.abort(new Error("世界整理模型响应超时，请从当前步骤重试"));
+        }, modelTimeoutMs);
+        try {
+          settlement = await completeStructured("backstage", {
+            task: "settlement",
+            userId,
+            system: settlementSystem(mode),
+            user: settlementUserPrompt(context),
+            schema: chapterSettlementSchema(mode),
+            maxTokens: 16000,
+            maxAttempts: 1,
+            transportMaxAttempts: 1,
+            allowTransportFallback: false,
+            signal: modelController.signal,
+            // v4：输出 schema 新增 chronicle.eraDigest，防旧缓存响应缺该字段形状。
+            cache: { namespace: `settlement:v4:${mode}` },
+          });
+        } finally {
+          clearTimeout(modelTimeout);
+        }
         await assertLeaseOwned();
         await assertTimelineStillActive(world.id, timeline.id);
         const creatorRelationTargets = mode === "creator"

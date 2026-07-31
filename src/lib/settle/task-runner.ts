@@ -8,8 +8,23 @@ export type SettlementTaskRun = (
 
 const activeTasks = new Map<string, Promise<void>>();
 const listeners = new Map<string, Set<Listener>>();
+const terminalEvents = new Map<string, { event: TaskProgressEvent; expiresAt: number }>();
+const TERMINAL_REPLAY_MS = 60_000;
+
+function pruneTerminalEvents(now = Date.now()): void {
+  for (const [taskId, terminal] of terminalEvents) {
+    if (terminal.expiresAt <= now) terminalEvents.delete(taskId);
+  }
+}
 
 function emitSettlement(taskId: string, event: TaskProgressEvent): void {
+  if (event.type === "done" || event.type === "failed") {
+    pruneTerminalEvents();
+    terminalEvents.set(taskId, {
+      event,
+      expiresAt: Date.now() + TERMINAL_REPLAY_MS,
+    });
+  }
   for (const listener of listeners.get(taskId) ?? []) {
     try {
       listener(event);
@@ -35,6 +50,8 @@ export function ensureSettlementRunning(
 ): Promise<void> {
   const existing = activeTasks.get(taskId);
   if (existing) return existing;
+  pruneTerminalEvents();
+  terminalEvents.delete(taskId);
   const task = Promise.resolve()
     .then(() => run((event) => emitSettlement(taskId, event)))
     .finally(() => {
@@ -55,15 +72,28 @@ export function createSettlementTaskSSE(
   let unsubscribe: () => void = () => undefined;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
+      let closed = false;
       for (const event of initialEvents) controller.enqueue(encodeTaskEvent(event));
       unsubscribe = subscribeSettlement(taskId, (event) => {
         try {
           controller.enqueue(encodeTaskEvent(event));
-          if (event.type === "done" || event.type === "failed") controller.close();
+          if (event.type === "done" || event.type === "failed") {
+            closed = true;
+            controller.close();
+          }
         } catch {
           unsubscribe();
         }
       });
+      pruneTerminalEvents();
+      const terminal = terminalEvents.get(taskId);
+      if (!closed && terminal) {
+        terminalEvents.delete(taskId);
+        controller.enqueue(encodeTaskEvent(terminal.event));
+        closed = true;
+        controller.close();
+        unsubscribe();
+      }
     },
     cancel() {
       unsubscribe();

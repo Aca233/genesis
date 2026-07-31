@@ -422,6 +422,7 @@ export default function PlayPage({
           },
           onError: async (msg) => {
             // say 的玩家消息可能已落库 → 对齐
+            setStreamingText(null);
             await syncMessages(body.chapterId);
             setGenError(msg);
           },

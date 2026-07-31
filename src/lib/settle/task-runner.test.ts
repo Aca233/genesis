@@ -50,4 +50,24 @@ describe("settlement task runner", () => {
     expect(first).toContain("\"stage\":\"checkpoint_read\"");
     await reader.cancel();
   });
+
+  it("重连订阅会回放刚刚错过的终态并关闭 SSE", async () => {
+    await ensureSettlementRunning("segment-terminal", async (emit) => {
+      emit({
+        type: "failed",
+        taskId: "segment-terminal",
+        stage: "pantheon",
+        message: "世界整理中断，请从当前步骤重试",
+        retryable: true,
+      });
+    });
+
+    const response = createSettlementTaskSSE("segment-terminal");
+    const reader = response.body!.getReader();
+    const first = await reader.read();
+    const second = await reader.read();
+
+    expect(new TextDecoder().decode(first.value)).toContain('"type":"failed"');
+    expect(second.done).toBe(true);
+  });
 });

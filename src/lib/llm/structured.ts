@@ -69,6 +69,8 @@ export async function completeStructured<T>(
     cache?: { namespace: string };
     maxInputBytes?: number;
     maxOutputBytes?: number;
+    /** Abort the active transport when the owning business stage reaches its deadline. */
+    signal?: AbortSignal;
     /** Stable world-specific context, placed after global system and before dynamic input. */
     stableContext?: string[];
   },
@@ -105,6 +107,7 @@ export async function completeStructured<T>(
       allowFallback: opts.allowTransportFallback,
       maxInputBytes: opts.maxInputBytes,
       maxOutputBytes: opts.maxOutputBytes,
+      signal: opts.signal,
     });
 
     try {

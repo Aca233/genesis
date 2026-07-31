@@ -37,6 +37,7 @@ export type CompleteOptions = {
   allowFallback?: boolean;
   maxInputBytes?: number;
   maxOutputBytes?: number;
+  signal?: AbortSignal;
 };
 
 type StreamOptions = {
@@ -317,10 +318,14 @@ async function collectStream(
   cachePlanned: boolean,
   maxOutputBytes?: number,
   outputOffsetBytes = 0,
+  signal?: AbortSignal,
 ): Promise<CollectedStream> {
   const acquired = await acquirePhysicalPermit(logger, "stream", slot, req);
   const startedAt = Date.now();
   const controller = new AbortController();
+  const abortTransport = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abortTransport();
+  else signal?.addEventListener("abort", abortTransport, { once: true });
   let text = "";
   let usage: NormalizedUsage | undefined;
   let cacheRequested = false;
@@ -397,6 +402,8 @@ async function collectStream(
       stableErrorCode: failure.stableErrorCode,
     });
     throw error;
+  } finally {
+    signal?.removeEventListener("abort", abortTransport);
   }
 }
 
@@ -409,12 +416,13 @@ async function collectCompletion(
   cachePlanned: boolean,
   maxOutputBytes?: number,
   outputOffsetBytes = 0,
+  signal?: AbortSignal,
 ): Promise<CompletedCall> {
   const acquired = await acquirePhysicalPermit(logger, "complete", slot, req);
   const startedAt = Date.now();
   let providerTerminal = false;
   try {
-    const result = await adapter.complete(slot, req, apiKey);
+    const result = await adapter.complete(slot, req, apiKey, { signal });
     const observedBytes = outputOffsetBytes + utf8Bytes(result.text);
     if (maxOutputBytes !== undefined && observedBytes > maxOutputBytes) {
       throw new PayloadLimitError(
@@ -572,7 +580,7 @@ export async function complete(
   /** 需要完整输出时,对截断结果做续写接力;超过轮数上限才判失败。 */
   const stitchStreamed = async (): Promise<string> => {
     let result = await collectStream(
-      adapter, slot, req, apiKey, logRound, plan.enabled, options?.maxOutputBytes,
+      adapter, slot, req, apiKey, logRound, plan.enabled, options?.maxOutputBytes, 0, options?.signal,
     );
     if (!req.failOnTruncation) return result.text;
     let text = result.text;
@@ -587,6 +595,7 @@ export async function complete(
         plan.enabled,
         options?.maxOutputBytes,
         utf8Bytes(text),
+        options?.signal,
       );
       text += trimOverlap(text, result.text);
     }
@@ -595,7 +604,7 @@ export async function complete(
 
   const stitchCompleted = async (): Promise<string> => {
     let result = await collectCompletion(
-      adapter, slot, req, apiKey, logRound, plan.enabled, options?.maxOutputBytes,
+      adapter, slot, req, apiKey, logRound, plan.enabled, options?.maxOutputBytes, 0, options?.signal,
     );
     if (!req.failOnTruncation) return result.text;
     let text = result.text;
@@ -610,6 +619,7 @@ export async function complete(
         plan.enabled,
         options?.maxOutputBytes,
         utf8Bytes(text),
+        options?.signal,
       );
       text += trimOverlap(text, result.text);
     }
@@ -620,6 +630,7 @@ export async function complete(
   const allowFallback = options?.allowFallback ?? true;
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (options?.signal?.aborted) throw options.signal.reason;
     try {
       return await stitchStreamed();
     } catch (error) {
@@ -630,6 +641,7 @@ export async function complete(
   }
 
   if (lastError instanceof PayloadLimitError) throw lastError;
+  if (options?.signal?.aborted) throw options.signal.reason;
 
   if (allowFallback && canFallback(lastError)) {
     try {
