@@ -95,13 +95,14 @@ function createRunnerHarness(overrides: {
   });
   const jobUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const worldCreate = vi.fn().mockResolvedValue({ id: "world-1" });
+  const outboxCreate = vi.fn().mockResolvedValue({});
   const tx = {
     genesisTask: {
       findFirst: vi.fn().mockResolvedValue({ id: "task-1", aggregateVersion: 7 }),
       updateMany: taskUpdateMany,
     },
     genesisJob: { updateMany: jobUpdateMany },
-    genesisOutbox: { create: vi.fn().mockResolvedValue({}) },
+    genesisOutbox: { create: outboxCreate },
     world: { create: worldCreate },
   };
   const db = {
@@ -153,6 +154,7 @@ function createRunnerHarness(overrides: {
     generateDeck,
     generateIntent,
     order,
+    outboxCreate,
     qualityGate,
     recordQualityEvent,
     repairedDeck,
@@ -274,8 +276,14 @@ describe("genesis task runner", () => {
 
     expect(harness.generateIntent).not.toHaveBeenCalled();
     expect(harness.qualityGate).not.toHaveBeenCalled();
-    expect(harness.buildRequest).toHaveBeenCalledWith(expect.not.objectContaining({
-      intentContract: expect.anything(),
+    expect(harness.buildRequest).not.toHaveBeenCalled();
+    expect(harness.generateDeck).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "pantheon",
+      checkpoint: undefined,
+      completeStage: expect.any(Function),
+      onCheckpoint: expect.any(Function),
+      onCheckpointRecovery: expect.any(Function),
+      onStage: expect.any(Function),
     }));
     expect(harness.worldCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -294,6 +302,57 @@ describe("genesis task runner", () => {
     expect(harness.generateIntent).not.toHaveBeenCalled();
     expect(harness.qualityGate).not.toHaveBeenCalled();
     expect(harness.generateDeck).toHaveBeenCalledTimes(1);
+    expect(harness.worldCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("损坏 checkpoint 恢复时同步回退持久化进度，不沿用旧 completedKeys", async () => {
+    const harness = createRunnerHarness();
+    Object.assign(harness.claimedTask, {
+      stage: "conflict",
+      completedKeys: ["worldName", "majorGods", "majorCharacters", "theme"],
+      rawOutput: "{broken-checkpoint",
+    });
+    const recoveredCheckpoint = JSON.stringify({
+      format: "legacy-staged-v1",
+      mode: "pantheon",
+      outputs: {},
+    });
+    harness.generateDeck.mockImplementation(async (options: {
+      onCheckpointRecovery: (input: {
+        nextStage: "laws";
+        completedKeys: [];
+        checkpoint: string;
+        reason: string;
+      }) => Promise<void>;
+    }) => {
+      await options.onCheckpointRecovery({
+        nextStage: "laws",
+        completedKeys: [],
+        checkpoint: recoveredCheckpoint,
+        reason: "checkpoint JSON 已损坏",
+      });
+      return completeDeck();
+    });
+
+    await runGenesisTask("task-1", harness.deps as never);
+
+    expect(harness.taskUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "running",
+        stage: "laws",
+        completedKeys: [],
+        rawOutput: recoveredCheckpoint,
+      }),
+    }));
+    expect(harness.outboxCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        eventType: "checkpoint_recovered",
+        payloadProjection: expect.objectContaining({
+          stage: "laws",
+          reason: "checkpoint JSON 已损坏",
+        }),
+      }),
+    }));
     expect(harness.worldCreate).toHaveBeenCalledTimes(1);
   });
 

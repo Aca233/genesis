@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { GenesisTask, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { isTransientLlmError, stream } from "@/lib/llm/gateway";
+import { isTransientLlmError } from "@/lib/llm/gateway";
 import { LlmCapacityError, LlmCircuitOpenError } from "@/lib/llm/permits";
 import { classifyTransportFailure } from "@/lib/llm/transport";
 import { completeStructured } from "@/lib/llm/structured";
@@ -11,9 +11,19 @@ import {
   PantheonWorldDeckSchema,
   type WorldDeck,
 } from "@/lib/cards/schemas";
-import { genesisRepairPrompt, genesisSystem, genesisUserPrompt } from "@/lib/prompts/genesis";
+import {
+  genesisRepairPrompt,
+  genesisStageContext,
+  genesisStageSystem,
+  genesisStageUserPrompt,
+  genesisSystem,
+  genesisUserPrompt,
+} from "@/lib/prompts/genesis";
 import { lorebookExcerpts, parseStWorldbook } from "@/lib/lorebook/st-import";
-import { generateGenesisDeck } from "./generate";
+import {
+  generateLegacyStagedDeck,
+  type LegacyGenesisStageId,
+} from "./staged-generation";
 import {
   GenesisSemanticAuditError,
   parseGenesisQualityReport,
@@ -25,7 +35,7 @@ import { enforceGenesisQuality, GenesisSemanticGateError } from "./semantic-gate
 import { recordGenesisQualityEvent } from "./quality-observability";
 import { GenesisMaterialSnapshotSchema, type GenesisMaterialSnapshot } from "@/lib/materials/types";
 import { materialConstraintsPrompt } from "@/lib/materials/prompt";
-import { deriveStreamingStage, furthestStage, mergeCompletedKeys } from "./stages";
+import { furthestStage, mergeCompletedKeys } from "./stages";
 import type { GenesisStageId, GenesisTaskStatus } from "./stages";
 import type { GenesisTopLevelKey } from "./json-progress";
 import { buildWorldIconTheme } from "@/lib/icons/theme";
@@ -35,14 +45,20 @@ import {
   GENESIS_MODEL_OUTPUT_MAX_BYTES,
   GENESIS_RAW_MAX_BYTES,
   GENESIS_RAW_TTL_MS,
-  takeUtf8Prefix,
+  PayloadLimitError,
+  utf8Bytes,
 } from "./limits";
 
 const LEASE_MS = 60 * 1000;
 /** 瞬时网络故障允许的最大总尝试数（attempt 在租约认领时自增）。 */
 const MAX_TRANSIENT_ATTEMPTS = 3;
-const CHECKPOINT_MS = 1_000;
-/** Keep each upstream generation round below common relay timeouts; gateway continuation stitches the full deck. */
+const LEGACY_STAGE_MAX_TOKENS: Record<LegacyGenesisStageId, number> = {
+  laws: 8_000,
+  gods: 18_000,
+  peoples: 18_000,
+  characters: 20_000,
+  conflict: 10_000,
+};
 const GENESIS_ROUND_MAX_TOKENS = 4096;
 
 export type GenesisTaskDto = {
@@ -295,7 +311,7 @@ type GenesisTaskRunnerDeps = {
   generateIntent: typeof generateGenesisIntent;
   buildRequest: typeof buildGenesisRequest;
   buildRepairRequest: typeof buildGenesisRepairRequest;
-  generateDeck: typeof generateGenesisDeck;
+  generateDeck: typeof generateLegacyStagedDeck;
   qualityGate: typeof enforceGenesisQuality;
   recordQualityEvent: typeof recordGenesisQualityEvent;
   persistWorld: typeof persistWorld;
@@ -308,7 +324,7 @@ const defaultGenesisTaskRunnerDeps: GenesisTaskRunnerDeps = {
   generateIntent: generateGenesisIntent,
   buildRequest: buildGenesisRequest,
   buildRepairRequest: buildGenesisRepairRequest,
-  generateDeck: generateGenesisDeck,
+  generateDeck: generateLegacyStagedDeck,
   qualityGate: enforceGenesisQuality,
   recordQualityEvent: recordGenesisQualityEvent,
   persistWorld,
@@ -354,23 +370,24 @@ export async function runGenesisTask(
   if (!task?.leaseToken) return;
 
   const leaseToken = task.leaseToken;
-  const legacyJob = await deps.db.genesisJob.findUniqueOrThrow({
-    where: { genesisTaskId_nodeKey: { genesisTaskId: taskId, nodeKey: "legacy-world-deck" } },
-    select: { id: true, leaseEpoch: true, leaseExpiresAt: true },
-  });
-  const llmOwner = {
-    kind: "genesis_job",
-    id: legacyJob.id,
-    genesisTaskId: taskId,
-    genesisJobId: legacyJob.id,
-    leaseEpoch: legacyJob.leaseEpoch,
-    leaseExpiresAt: legacyJob.leaseExpiresAt?.toISOString(),
-    budgetScope: "primary" as const,
+  const currentLlmOwner = async () => {
+    const currentJob = await deps.db.genesisJob.findUniqueOrThrow({
+      where: { genesisTaskId_nodeKey: { genesisTaskId: taskId, nodeKey: "legacy-world-deck" } },
+      select: { id: true, leaseEpoch: true, leaseExpiresAt: true },
+    });
+    return {
+      kind: "genesis_job" as const,
+      id: currentJob.id,
+      genesisTaskId: taskId,
+      genesisJobId: currentJob.id,
+      leaseEpoch: currentJob.leaseEpoch,
+      leaseExpiresAt: currentJob.leaseExpiresAt?.toISOString(),
+      budgetScope: "primary" as const,
+    };
   };
   let persistedKeys = mergeCompletedKeys([], task.completedKeys as GenesisTopLevelKey[]);
   let persistedStage = task.stage as GenesisStageId;
-  let latestRaw = "";
-  let lastCheckpoint = 0;
+  let latestRaw = task.rawOutput;
 
   let parsedEntries: ReturnType<typeof parseStWorldbook> = [];
   let excerpts: string | undefined;
@@ -378,6 +395,7 @@ export async function runGenesisTask(
   const updateOwnedTask = async (
     data: Prisma.GenesisTaskUpdateManyMutationInput,
     eventType?: string,
+    eventDetails?: Record<string, string>,
   ) => {
     if (eventType) {
       await deps.db.$transaction(async (tx) => {
@@ -410,6 +428,7 @@ export async function runGenesisTask(
             payloadProjection: {
               status: data.status ?? "running",
               stage: data.stage ?? persistedStage,
+              ...eventDetails,
             },
           },
         });
@@ -435,13 +454,6 @@ export async function runGenesisTask(
       : GenesisMaterialSnapshotSchema.parse(task.materialSelection);
     const mode = WorldModeSchema.parse(task.mode);
     const materialText = materialConstraintsPrompt(materialSnapshot, mode);
-    const genesisRequest = deps.buildRequest({
-      mode,
-      decree: task.decree,
-      intentContract: undefined,
-      lorebookExcerpts: excerpts,
-      materialConstraints: materialText,
-    });
     if (task.stage === "oracle") {
       persistedStage = "laws";
       await updateOwnedTask({ stage: persistedStage }, "stage_changed");
@@ -449,69 +461,76 @@ export async function runGenesisTask(
 
     const deck = await deps.generateDeck({
       mode,
-      decree: task.decree,
-      lorebookExcerpts: excerpts,
-      materialSnapshot,
-      maxOutputBytes: GENESIS_MODEL_OUTPUT_MAX_BYTES,
-      streamCompletion: async function* () {
-        for await (const chunk of stream("narrative", {
+      materialSnapshot: materialSnapshot ?? null,
+      checkpoint: task.rawOutput,
+      completeStage: async (input) => {
+        const owner = await currentLlmOwner();
+        return completeStructured("narrative", {
           task: "genesis",
           userId: task.userId,
-          owner: llmOwner,
-          maxTokens: genesisRequest.maxTokens,
+          owner,
+          system: genesisStageSystem({
+            mode,
+            stageId: input.stageId,
+            schema: input.schema,
+          }),
+          stableContext: [genesisStageContext(input.acceptedOutputs)],
+          user: genesisStageUserPrompt({
+            mode,
+            stageId: input.stageId,
+            decree: task.decree,
+            lorebookExcerpts: excerpts,
+            materialConstraints: materialText,
+            previousOutput: input.previousOutput,
+            validationError: input.validationError,
+          }),
+          schema: input.schema,
+          maxAttempts: 2,
+          transportMaxAttempts: 2,
+          allowTransportFallback: true,
+          maxTokens: LEGACY_STAGE_MAX_TOKENS[input.stageId],
           failOnTruncation: true,
-          cache: { namespace: `genesis:v1:${mode}` },
-          messages: [
-            { role: "system", content: genesisRequest.system, cacheScope: "global" },
-            { role: "user", content: genesisRequest.user, cacheScope: "dynamic" },
-          ],
-        }, {
+          cache: { namespace: `genesis:v1-staged:${mode}:${input.stageId}` },
           maxInputBytes: GENESIS_MODEL_INPUT_MAX_BYTES,
           maxOutputBytes: GENESIS_MODEL_OUTPUT_MAX_BYTES,
-        })) {
-          if (chunk.type === "text") yield chunk.text;
-        }
-      },
-      repairCompletion: (input) => {
-        const sharedRepairRequest = {
-          userId: task.userId,
-          owner: llmOwner,
-          decree: task.decree,
-          intentContract: undefined,
-          lorebookExcerpts: excerpts,
-          invalidOutput: input.invalidOutput,
-          validationError: input.validationError,
-          materialConstraints: materialText,
-        };
-        return input.mode === "pantheon"
-          ? completeStructured("narrative", deps.buildRepairRequest({
-            ...sharedRepairRequest,
-            mode: input.mode,
-          }))
-          : completeStructured("narrative", deps.buildRepairRequest({
-            ...sharedRepairRequest,
-            mode: input.mode,
-          }));
-      },
-      onChunk: async (rawOutput) => {
-        latestRaw = takeUtf8Prefix(rawOutput, GENESIS_RAW_MAX_BYTES);
-        const now = Date.now();
-        if (now - lastCheckpoint < CHECKPOINT_MS) return;
-        lastCheckpoint = now;
-        await updateOwnedTask({
-          rawOutput: latestRaw,
-          rawExpiresAt: new Date(now + GENESIS_RAW_TTL_MS),
-          leaseExpiresAt: new Date(now + LEASE_MS),
         });
       },
-      onProgress: async (completedKeys, rawOutput) => {
-        latestRaw = takeUtf8Prefix(rawOutput, GENESIS_RAW_MAX_BYTES);
-        const nextKeys = mergeCompletedKeys(persistedKeys, completedKeys);
-        const nextStage = furthestStage(persistedStage, deriveStreamingStage(nextKeys, mode));
-        const visibleChanged = nextStage !== persistedStage
-          || nextKeys.length !== persistedKeys.length;
-        persistedKeys = nextKeys;
+      onCheckpointRecovery: async ({ nextStage, completedKeys, checkpoint, reason }) => {
+        const checkpointBytes = utf8Bytes(checkpoint);
+        if (checkpointBytes > GENESIS_RAW_MAX_BYTES) {
+          throw new PayloadLimitError(
+            "OUTPUT_LIMIT_EXCEEDED",
+            checkpointBytes,
+            GENESIS_RAW_MAX_BYTES,
+            "",
+          );
+        }
+        persistedKeys = completedKeys;
         persistedStage = nextStage;
+        latestRaw = checkpoint;
+        await updateOwnedTask({
+          status: "running",
+          completedKeys: persistedKeys,
+          stage: persistedStage,
+          rawOutput: latestRaw,
+          rawExpiresAt: new Date(Date.now() + GENESIS_RAW_TTL_MS),
+          leaseExpiresAt: new Date(Date.now() + LEASE_MS),
+        }, "checkpoint_recovered", { reason });
+      },
+      onCheckpoint: async ({ completedKeys, checkpoint }) => {
+        const checkpointBytes = utf8Bytes(checkpoint);
+        if (checkpointBytes > GENESIS_RAW_MAX_BYTES) {
+          throw new PayloadLimitError(
+            "OUTPUT_LIMIT_EXCEEDED",
+            checkpointBytes,
+            GENESIS_RAW_MAX_BYTES,
+            latestRaw ?? "",
+          );
+        }
+        latestRaw = checkpoint;
+        const nextKeys = mergeCompletedKeys(persistedKeys, completedKeys);
+        const visibleChanged = nextKeys.length !== persistedKeys.length;
+        persistedKeys = nextKeys;
         await updateOwnedTask({
           completedKeys: persistedKeys,
           stage: persistedStage,
@@ -519,7 +538,6 @@ export async function runGenesisTask(
           rawExpiresAt: new Date(Date.now() + GENESIS_RAW_TTL_MS),
           leaseExpiresAt: new Date(Date.now() + LEASE_MS),
         }, visibleChanged ? "progress_changed" : undefined);
-        lastCheckpoint = Date.now();
       },
       onStage: async (stage) => {
         const nextStage = furthestStage(persistedStage, stage);

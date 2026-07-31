@@ -4,6 +4,7 @@ import {
   PantheonWorldDeckSchema,
 } from "@/lib/cards/schemas";
 import type { GenesisIntentContract } from "@/lib/genesis/intent";
+import type { LegacyGenesisStageId } from "@/lib/genesis/staged-generation";
 import type { WorldMode } from "@/lib/world-mode";
 
 /** Genesis prompts are generated from the exact schema selected by frozen mode. */
@@ -65,6 +66,64 @@ export function genesisUserPrompt(opts: {
     : "";
   const materialText = opts.materialConstraints ? `\n\n${opts.materialConstraints}` : "";
   return `Frozen world mode: mode="${opts.mode}".\nPrimordial decree from the player:\n"""\n${opts.decree}\n"""${lore}${materialText}\n\nGenerate the complete world deck JSON now.`;
+}
+
+const LEGACY_STAGE_RULES: Record<LegacyGenesisStageId, string> = {
+  laws: "Establish only the world identity, temporal anchor, cosmology, and fusion axiom. Do not generate gods, peoples, characters, or conflicts yet.",
+  gods: "Generate only the divine domain. Reuse the accepted foundation exactly. Every divine stable ref and god-to-god relation target must resolve inside this section.",
+  peoples: "Generate races, factions, and places only. Reuse accepted god refs exactly. Faction keyCharacterRefs may reserve stable character refs; the later character stage must realize every reserved ref.",
+  characters: "Generate the major characters and anchor relations only. Reuse every accepted race, faction, place, and god ref exactly. Realize every stable ref reserved by faction keyCharacterRefs.",
+  conflict: "Generate only the era conflict, opening brief, optional canon future events, style, and theme. Treat all accepted cards as immutable facts and synthesize them into one playable dramatic direction.",
+};
+
+export function genesisStageSystem(opts: {
+  mode: WorldMode;
+  stageId: LegacyGenesisStageId;
+  schema: z.ZodType;
+}): string {
+  return `You are the Genesis worldbuilder. This is the July-24 creative contract, executed as a bounded sequential stage rather than one giant response.
+
+${SHARED_RULES}
+
+${MODE_RULES[opts.mode]}
+
+CURRENT STAGE: ${opts.stageId}
+${LEGACY_STAGE_RULES[opts.stageId]}
+
+Return ONLY one JSON object matching this stage schema. No commentary, no markdown fence, and no fields belonging to another stage. The first property must be mode="${opts.mode}". All user-facing strings must be Chinese.
+
+${JSON.stringify(z.toJSONSchema(opts.schema), null, 2)}`;
+}
+
+export function genesisStageContext(outputs: Readonly<Record<string, unknown>>): string {
+  const entries = Object.entries(outputs);
+  if (entries.length === 0) return "No prior stage has been accepted yet.";
+  return `ACCEPTED PRIOR STAGES — immutable world facts and stable refs:\n${JSON.stringify(outputs)}`;
+}
+
+export function genesisStageUserPrompt(opts: {
+  mode: WorldMode;
+  stageId: LegacyGenesisStageId;
+  decree: string;
+  lorebookExcerpts?: string;
+  materialConstraints?: string;
+  previousOutput?: unknown;
+  validationError?: string;
+}): string {
+  const lore = opts.lorebookExcerpts
+    ? `\n\nAuthoritative lorebook excerpts (override your own knowledge on conflict):\n${opts.lorebookExcerpts}`
+    : "";
+  const materials = opts.materialConstraints ? `\n\n${opts.materialConstraints}` : "";
+  const repair = opts.validationError
+    ? `\n\nThis stage must be regenerated because the assembled world failed validation:\n${opts.validationError}\n\nPrevious stage output:\n${JSON.stringify(opts.previousOutput)}`
+    : "";
+  return `Frozen world mode: mode="${opts.mode}".
+Primordial decree from the player:
+"""
+${opts.decree}
+"""${lore}${materials}${repair}
+
+Generate ONLY the "${opts.stageId}" stage JSON now.`;
 }
 
 export function genesisRepairPrompt(opts: {

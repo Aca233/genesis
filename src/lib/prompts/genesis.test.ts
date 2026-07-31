@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   genesisRepairPrompt,
+  genesisStageContext,
+  genesisStageSystem,
+  genesisStageUserPrompt,
   genesisSystem,
   genesisUserPrompt,
   rerollReferenceRepairPrompt,
   rerollUserPrompt,
 } from "./genesis";
+import { legacyGenesisStageSchema } from "@/lib/genesis/staged-generation";
 
 describe("genesis mode prompts", () => {
   it("pantheon 保留 7 月 24 日的玩家神规则", () => {
@@ -106,5 +110,37 @@ describe("genesis mode prompts", () => {
       expect(prompt).not.toContain("FROZEN GENESIS INTENT CONTRACT");
       expect(prompt).not.toContain("预序列化契约");
     }
+  });
+
+  it("分段提示词只要求当前段，并保留 7 月 24 日创作合同", () => {
+    const system = genesisStageSystem({
+      mode: "pantheon",
+      stageId: "gods",
+      schema: legacyGenesisStageSchema("gods", "pantheon"),
+    });
+    const user = genesisStageUserPrompt({
+      mode: "pantheon",
+      stageId: "gods",
+      decree: "以旧日诸神创造世界",
+      lorebookExcerpts: "世界书约束",
+      materialConstraints: "素材锁定约束",
+    });
+
+    expect(system).toContain("July-24 creative contract");
+    expect(system).toContain("CURRENT STAGE: gods");
+    expect(system).toContain("Guilliman");
+    expect(system).toContain("no fields belonging to another stage");
+    expect(user).toContain(`Generate ONLY the "gods" stage JSON`);
+    expect(user).toContain("世界书约束");
+    expect(user).toContain("素材锁定约束");
+    expect(user).not.toContain("Generate the complete world deck JSON now");
+  });
+
+  it("后续段只把已经通过的前序段作为稳定上下文", () => {
+    expect(genesisStageContext({})).toContain("No prior stage");
+    const context = genesisStageContext({ laws: { mode: "creator", worldName: "灰海" } });
+    expect(context).toContain("ACCEPTED PRIOR STAGES");
+    expect(context).toContain("灰海");
+    expect(context).toContain("immutable world facts and stable refs");
   });
 });
