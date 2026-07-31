@@ -38,7 +38,7 @@ describe("POST /api/genesis/tasks", () => {
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         decree: "创造星海",
-        mode: "pantheon",
+        mode: "creator",
         completedKeys: [],
         budgetMaxCalls: 320,
         budgetMaxInput: 30_000_000,
@@ -122,7 +122,7 @@ describe("POST /api/genesis/tasks", () => {
 
     const response = await POST(new Request("http://localhost/api/genesis/tasks", {
       method: "POST",
-      body: JSON.stringify({ decree: "创造受潮汐支配的星海" }),
+      body: JSON.stringify({ decree: "创造受潮汐支配的星海", mode: "pantheon" }),
     }));
 
     expect(response.status).toBe(202);
@@ -151,7 +151,7 @@ describe("POST /api/genesis/tasks", () => {
 
     const response = await POST(new Request("http://localhost/api/genesis/tasks", {
       method: "POST",
-      body: JSON.stringify({ decree: "创造受潮汐支配的星海" }),
+      body: JSON.stringify({ decree: "创造受潮汐支配的星海", mode: "pantheon" }),
     }));
 
     expect(response.status).toBe(202);

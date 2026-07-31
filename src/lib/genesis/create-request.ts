@@ -1,7 +1,7 @@
 import type { MaterialSelectionItem } from "@/lib/materials/types";
 import type { WorldMode } from "@/lib/world-mode";
 
-export const defaultGenesisMode: WorldMode = "pantheon";
+export const defaultGenesisMode: WorldMode = "creator";
 
 export function createGenesisIdempotencyKey(): string {
   return crypto.randomUUID();

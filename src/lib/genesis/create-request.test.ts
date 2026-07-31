@@ -3,14 +3,14 @@ import { buildGenesisTaskPayload, createGenesisIdempotencyKey, defaultGenesisMod
 import { WORLD_MODE_PRESENTATION, worldModeLabel } from "@/lib/world-mode";
 
 describe("genesis creation UI contract", () => {
-  it("默认选择诸神共世并构造 pantheon 请求", () => {
-    expect(defaultGenesisMode).toBe("pantheon");
-    expect(buildGenesisTaskPayload({ decree: "  我是星海之神  " })).toEqual({
-      mode: "pantheon",
-      decree: "我是星海之神",
+  it("默认选择创世主并构造 creator 请求", () => {
+    expect(defaultGenesisMode).toBe("creator");
+    expect(buildGenesisTaskPayload({ decree: "  创造自行运转的星海  " })).toEqual({
+      mode: "creator",
+      decree: "创造自行运转的星海",
       materialSelections: [],
     });
-    expect(WORLD_MODE_PRESENTATION[defaultGenesisMode].subtitle).toContain("你是谁");
+    expect(WORLD_MODE_PRESENTATION[defaultGenesisMode].subtitle).toContain("自行运转");
   });
 
   it("切换创世主后请求与世界外文案保持 creator", () => {

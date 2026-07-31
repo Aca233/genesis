@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const WORLD_MODES = ["pantheon", "creator"] as const;
+export const WORLD_MODES = ["creator", "pantheon"] as const;
 export const WorldModeSchema = z.enum(WORLD_MODES);
 export type WorldMode = z.infer<typeof WorldModeSchema>;
 

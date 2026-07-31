@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { WORLD_MODE_PRESENTATION, WorldModeSchema, assertModeTransition, worldModeLabel } from "./world-mode";
+import { WORLD_MODES, WORLD_MODE_PRESENTATION, WorldModeSchema, assertModeTransition, worldModeLabel } from "./world-mode";
 
 describe("world mode", () => {
+  it("prioritizes creator first in creation UI order", () => {
+    expect(WORLD_MODES).toEqual(["creator", "pantheon"]);
+  });
+
   it("accepts only pantheon and creator", () => {
     expect(WorldModeSchema.parse("pantheon")).toBe("pantheon");
     expect(WorldModeSchema.parse("creator")).toBe("creator");

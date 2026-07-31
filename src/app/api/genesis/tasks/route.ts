@@ -9,6 +9,7 @@ import { buildGenesisMaterialSnapshot, snapshotJson } from "@/lib/materials/task
 import { WorldModeSchema } from "@/lib/world-mode";
 import { withAuth } from "@/lib/auth/route";
 import { GENESIS_PRIMARY_BUDGET } from "@/lib/genesis/budget";
+import { defaultGenesisMode } from "@/lib/genesis/create-request";
 import {
   GENESIS_CREATE_MAX_BYTES,
   PayloadLimitError,
@@ -24,7 +25,7 @@ import { runDeterministicPreflight } from "@/lib/genesis/v2/preflight";
 import { GENESIS_V2_STAGE_REGISTRY } from "@/lib/genesis/v2/stage-registry";
 
 const CreateGenesisTaskSchema = z.object({
-  mode: WorldModeSchema.default("pantheon"),
+  mode: WorldModeSchema.default(defaultGenesisMode),
   decree: z.string().trim().min(2, "神谕太短").max(2000, "神谕过长"),
   lorebook: z.unknown().optional(),
   lorebookName: z.string().max(255).optional(),
