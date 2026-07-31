@@ -298,6 +298,17 @@ describe("July 24 narrator writing profile", () => {
       expect(directive).not.toContain("Target 800-1500 Chinese characters");
     }
   });
+
+  it("开场正文以具体剧情节点收束，不追加命运总结或询问玩家如何行动", () => {
+    for (const mode of ["pantheon", "creator"] as const) {
+      const directive = openingDirective(mode);
+      expect(directive).toContain("concrete");
+      expect(directive).toContain("only in META suggestions");
+      expect(directive).toContain("Never append an abstract fate/causality summary");
+      expect(directive).toContain("final prose sentence must be declarative, never interrogative");
+      expect(directive).not.toContain("作为");
+    }
+  });
 });
 
 describe("creator unified narration contract", () => {
