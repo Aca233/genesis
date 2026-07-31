@@ -118,6 +118,14 @@ describe("POST /api/chapters/[id]/settle", () => {
     const run = mocks.ensureSettlementRunning.mock.calls[0][1];
     const emit = vi.fn();
     await run(emit);
+    expect(mocks.prisma.chapter.update).toHaveBeenCalledWith({
+      where: { id: "chapter-1" },
+      data: {
+        settleError: null,
+        settleRetryable: true,
+        settleUpdatedAt: expect.any(Date),
+      },
+    });
     expect(mocks.settleChapter).toHaveBeenCalledWith("chapter-1", {
       worldId: "world-1",
       token: "chapter-1",

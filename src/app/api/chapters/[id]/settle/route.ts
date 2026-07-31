@@ -79,6 +79,14 @@ export const POST = withAuth(async (
   } as const;
   const run = async (emit: (event: TaskProgressEvent) => void) => {
     try {
+      await prisma.chapter.update({
+        where: { id },
+        data: {
+          settleError: null,
+          settleRetryable: true,
+          settleUpdatedAt: new Date(),
+        },
+      });
       emit(progressEvent(id, "settlement", "checkpoint_read", "completed"));
       try {
         for await (const p of settleChapter(id, {
